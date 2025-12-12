@@ -47,9 +47,65 @@ def cleanup_branches():
         console.print("[cyan]Running git cleanup...[/cyan]")
         subprocess.run(["git", "fetch", "-p"], check=False)
 
-        # Run the branch deletion command using shell
-        cleanup_cmd = 'git branch -vv | grep -v "\\[origin/" | grep -v "^\\*" | awk "{print $1}" | xargs -r git branch -D'
-        subprocess.run(cleanup_cmd, shell=True, check=False)
+        # Get list of branches to delete:
+        # 1. Branches with no remote tracking (no [origin/...] in output) - requires confirmation
+        # 2. Branches where the remote has been deleted (contains ": gone]") - auto-delete
+        result_vv = subprocess.run(
+            ["git", "branch", "-vv"], capture_output=True, text=True, check=False
+        )
+        
+        # Handle empty or failed output
+        if not result_vv.stdout:
+            console.print("[yellow]Warning: Could not get branch information[/yellow]")
+            return
+        
+        branches_to_delete = []
+        branches_no_remote = []
+        for line in result_vv.stdout.strip().split("\n"):
+            if not line.strip():
+                continue
+            # Skip the current branch (marked with *)
+            if line.startswith("*"):
+                continue
+            
+            # Extract branch name (first field, after stripping *)
+            parts = line.strip().split()
+            if not parts:
+                continue
+            branch_name = parts[0].lstrip("*").strip()
+            
+            # Check if branch has no remote tracking or remote is gone
+            has_no_remote = "[origin/" not in line
+            remote_is_gone = ": gone]" in line
+            
+            if remote_is_gone:
+                # Auto-delete branches with deleted remotes
+                branches_to_delete.append(branch_name)
+            elif has_no_remote:
+                # Ask for confirmation for branches with no remote
+                branches_no_remote.append(branch_name)
+        
+        # Prompt for confirmation on branches with no remote tracking
+        if branches_no_remote:
+            console.print("\n[yellow]The following branches have no remote tracking:[/yellow]")
+            for branch in branches_no_remote:
+                console.print(f"  • [cyan]{branch}[/cyan]")
+            console.print()
+            try:
+                response = input("Are you sure you want to delete these branches? (y/N): ").strip().lower()
+                if response == 'y' or response == 'yes':
+                    branches_to_delete.extend(branches_no_remote)
+                else:
+                    console.print("[dim]Skipped deletion of branches without remote tracking.[/dim]\n")
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]Skipped deletion of branches without remote tracking.[/dim]\n")
+                return
+        
+        # Delete the identified branches
+        for branch in branches_to_delete:
+            result = subprocess.run(["git", "branch", "-D", branch], capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                console.print(f"[yellow]Warning: Failed to delete branch '{branch}': {result.stderr.strip()}[/yellow]")
 
         # Get all branches after cleanup
         result_after = subprocess.run(
