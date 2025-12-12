@@ -21,9 +21,11 @@ OPTIONS:
 
 DESCRIPTION:
     Creates symbolic links from your home directory (~) to the dotfiles repository.
+    Also optionally creates a scheduled task to run 'git pull' at login.
 
 REQUIREMENTS:
     - Administrator privileges (for creating symlinks on Windows)
+    - Administrator privileges (for creating scheduled task)
     - PowerShell 7+ recommended, but works with Windows PowerShell 5.1+
 
 EXAMPLE:
@@ -36,6 +38,9 @@ EXAMPLE:
 FILES LINKED:
     - .gitconfig
     - gitconfig_helper.py
+
+SCHEDULED TASKS:
+    - GitConfig Pull at Login (optional, runs Update-GitConfig.ps1 at user login)
 "@
     exit 0
 }
@@ -96,6 +101,78 @@ function New-Symlink {
     }
 }
 
+# Function to create scheduled task for git pull at login
+function Register-LoginTask {
+    param(
+        [string]$RepoRoot,
+        [bool]$Force
+    )
+
+    $taskName = "GitConfig Pull at Login"
+    $scriptPath = Join-Path $repoRoot "scripts\Update-GitConfig.ps1"
+
+    # Check if script exists
+    if (-not (Test-Path $scriptPath)) {
+        Write-Host "⚠ Warning: Update-GitConfig.ps1 not found at $scriptPath" -ForegroundColor Yellow
+        Write-Host "  Skipping scheduled task creation." -ForegroundColor Yellow
+        return $false
+    }
+
+    # Check if task already exists
+    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+
+    if ($existingTask) {
+        if (-not $Force) {
+            $response = Read-Host "Scheduled task '$taskName' already exists. Replace? (y/n)"
+            if ($response -ne "y") {
+                Write-Host "Skipped scheduled task" -ForegroundColor Yellow
+                return $false
+            }
+        }
+        try {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false | Out-Null
+            Write-Host "Removed existing scheduled task: $taskName" -ForegroundColor Yellow
+        }
+        catch {
+            Write-Host "✗ Failed to remove existing scheduled task" -ForegroundColor Red
+            return $false
+        }
+    }
+
+    try {
+        # Create task action
+        $action = New-ScheduledTaskAction `
+            -Execute "PowerShell.exe" `
+            -Argument "-NoProfile -WindowStyle Hidden -File `"$scriptPath`""
+
+        # Create task trigger (at login)
+        $trigger = New-ScheduledTaskTrigger -AtLogOn
+
+        # Create task settings
+        $settings = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable
+
+        # Register the task
+        Register-ScheduledTask `
+            -TaskName $taskName `
+            -Action $action `
+            -Trigger $trigger `
+            -Settings $settings `
+            -Description "Automatically pull latest changes from gitconfig repository at user login" `
+            -Force | Out-Null
+
+        Write-Host "✓ Created scheduled task: $taskName" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Host "✗ Failed to create scheduled task" -ForegroundColor Red
+        Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
 # Create symlinks
 $successCount = 0
 foreach ($file in $filesToLink) {
@@ -117,7 +194,25 @@ Write-Host "Setup Complete!" -ForegroundColor Cyan
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host "Successfully linked $successCount file(s)" -ForegroundColor Green
 Write-Host ""
-Write-Host "Your .gitconfig and .gitconfig_helper.py are now symlinked from the repository." -ForegroundColor Cyan
+
+# Offer to create scheduled task
+Write-Host "Would you like to set up automatic 'git pull' at login?" -ForegroundColor Cyan
+$taskResponse = Read-Host "Create 'GitConfig Pull at Login' scheduled task? (y/n)"
+if ($taskResponse -eq "y") {
+    Write-Host ""
+    if (-not $isAdmin) {
+        Write-Host "[ERROR] Creating a scheduled task requires administrator privileges." -ForegroundColor Red
+        Write-Host "Please run this script as administrator to enable this feature." -ForegroundColor Red
+    }
+    else {
+        if (Register-LoginTask -RepoRoot $repoRoot -Force $Force) {
+            Write-Host "✓ Scheduled task created successfully!" -ForegroundColor Green
+        }
+    }
+    Write-Host ""
+}
+
+Write-Host "Your .gitconfig and gitconfig_helper.py are now symlinked from the repository." -ForegroundColor Cyan
 Write-Host "Any changes pushed to the repository will be reflected in your home directory." -ForegroundColor Cyan
 Write-Host ""
 

@@ -1,3 +1,6 @@
+# Machine-specific local configuration (not version controlled)
+.gitconfig.local
+
 # Daily pull logs
 pull-daily.log
 

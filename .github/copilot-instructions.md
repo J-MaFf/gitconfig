@@ -29,21 +29,55 @@ This repository contains Git configuration files and helper scripts for managing
   - Creates symbolic links from home directory to repo files
   - Supports `-Force` flag to overwrite without prompting
   - Requires admin privileges for symlink creation
+  - Prompts to create 'GitConfig Pull at Login' scheduled task
   - Called during initial setup only
 
-- **`pull-daily.ps1`** - Automated daily git pull script
+- **`Initialize-LocalConfig.ps1`** - PowerShell script to set up machine-specific configuration
 
-  - Runs via Windows Task Scheduler (default: 8:00 AM daily)
+  - Creates `~/.gitconfig.local` with safe directories and local paths
+  - Customized per machine (not version controlled)
+  - Supports `-Force` flag to overwrite without prompting
+  - Called during initial setup on each new machine
+
+- **`Update-GitConfig.ps1`** - Automated git pull script
+
+  - Runs 'git pull' in the repository
+  - Scheduled to run via Windows Task Scheduler at user login
   - Logs all operations to `pull-daily.log`
   - Keeps the repository synchronized with remote changes
 
-- **`.gitignore`** - Excludes local logs and temporary files
+- **`.gitconfig`** - Main git configuration (version controlled)
 
+  - User information, aliases, and common settings
+  - Includes `~/.gitconfig.local` for machine-specific paths
+  - Portable across machines via git include pattern
+
+- **`.gitconfig.local`** - Machine-specific configuration (NOT version controlled)
+
+  - Safe directories configured per machine
+  - Created by `Initialize-LocalConfig.ps1`
+  - Excluded in `.gitignore`
+
+- **`.gitignore`** - Excludes local and temporary files
+
+  - `.gitconfig.local` - Machine-specific configuration
   - `pull-daily.log` - Daily pull task output
 
 - **`README.md`** - Project documentation
 
 ## Development Guidelines
+
+### Portability Requirements
+
+**All scripts and configurations must be portable across different computers and user accounts.**
+
+- **Never hardcode usernames or absolute paths** (e.g., `C:\Users\jmaffiola`)
+- **Use environment variables** instead:
+  - `$env:USERPROFILE` - User's home directory (e.g., `C:\Users\username`)
+  - `$env:HOMEDRIVE` - Drive letter (e.g., `C:`)
+- **Use relative paths** when possible within the repository
+- **Test scripts on multiple user accounts** before committing
+- **Document any machine-specific setup** required
 
 ### When Modifying Files
 
@@ -111,7 +145,7 @@ Current custom aliases:
 
 - User: Joey Maffiola (7maffiolajoey@gmail.com)
 - Repository: https://github.com/J-MaFf/gitconfig
-- Local Path: C:\Users\jmaffiola\Documents\Scripts\gitconfig
+- Local Path: `$env:USERPROFILE\Documents\Scripts\gitconfig` (portable across all machines)
 
 ## Testing Recommendations
 

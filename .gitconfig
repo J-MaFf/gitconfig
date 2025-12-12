@@ -1,3 +1,7 @@
+# Include machine-specific configuration (local paths, safe directories, etc.)
+[include]
+	path = ~/.gitconfig.local
+
 [user]
 	name = Joey Maffiola
 	email = 7maffiolajoey@gmail.com
@@ -8,7 +12,7 @@
 [gpg]
 	format = ssh
 [gpg "ssh"]
-	program = C:\\Users\\jmaffiola\\AppData\\Local\\Microsoft\\WindowsApps\\op-ssh-sign.exe
+	program = C:\\Users\\7maff\\AppData\\Local\\Microsoft\\WindowsApps\\op-ssh-sign.exe
 [commit]
 	gpgsign = true
 [alias]
@@ -19,12 +23,6 @@
     cleanup = !python ${USERPROFILE}/Documents/Scripts/gitconfig/gitconfig_helper.py cleanup $@
     # Delete local branches that are not present on the remote
 
-[safe]
-    directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setup
-    directory = C:/Users/jmaffiola/Documents/Scripts/winget-app-setup
-    directory = C:/Users/jmaffiola/Documents/Scripts/winget-install
-	directory = %(prefix)///10.210.3.10/dept/IT/Programs/Office/OfficeConfigs
-	directory = %(prefix)///KFWS9BDC01/DEPT/IT/Programs/Office/OfficeConfigs
 [init]
 	defaultBranch = main
 [core]
