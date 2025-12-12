@@ -54,6 +54,11 @@ def cleanup_branches():
             ["git", "branch", "-vv"], capture_output=True, text=True, check=False
         )
         
+        # Handle empty or failed output
+        if not result_vv.stdout:
+            console.print("[yellow]Warning: Could not get branch information[/yellow]")
+            return
+        
         branches_to_delete = []
         for line in result_vv.stdout.strip().split("\n"):
             if not line.strip():
@@ -77,7 +82,9 @@ def cleanup_branches():
         
         # Delete the identified branches
         for branch in branches_to_delete:
-            subprocess.run(["git", "branch", "-D", branch], capture_output=True, check=False)
+            result = subprocess.run(["git", "branch", "-D", branch], capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                console.print(f"[yellow]Warning: Failed to delete branch '{branch}': {result.stderr.strip()}[/yellow]")
 
         # Get all branches after cleanup
         result_after = subprocess.run(
