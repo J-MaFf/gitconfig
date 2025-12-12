@@ -19,12 +19,12 @@ except ImportError:
     from rich.table import Table
 
 
-def cleanup_branches(auto_delete=False):
+def cleanup_branches(force=False):
     """Run git cleanup and display deleted branches in a table.
-    
+
     Args:
-        auto_delete: If True, automatically delete all branches with no remote.
-                    If False, prompt for confirmation.
+        force: If True, delete both branches with deleted remotes AND local-only branches.
+               If False, only delete branches where the remote has been deleted (merged branches).
     """
     console = Console()
 
@@ -84,36 +84,11 @@ def cleanup_branches(auto_delete=False):
             remote_is_gone = ": gone]" in line
 
             if remote_is_gone:
-                # Auto-delete branches with deleted remotes
+                # Auto-delete branches with deleted remotes (merged branches)
                 branches_to_delete.append(branch_name)
-            elif has_no_remote:
-                # Ask for confirmation for branches with no remote
-                branches_no_remote.append(branch_name)
-
-        # Prompt for confirmation on branches with no remote tracking
-        if branches_no_remote:
-            console.print("\n[yellow]The following branches have no remote tracking:[/yellow]")
-            for branch in branches_no_remote:
-                console.print(f"  • [cyan]{branch}[/cyan]")
-            console.print()
-            
-            if auto_delete:
-                # Auto-delete without prompting
-                console.print("[dim]Auto-deleting branches with no remote tracking (--auto flag)[/dim]\n")
-                branches_to_delete.extend(branches_no_remote)
-            else:
-                # Prompt for confirmation
-                try:
-                    response = input("Are you sure you want to delete these branches? (y/N): ").strip().lower()
-                    if response == 'y' or response == 'yes':
-                        branches_to_delete.extend(branches_no_remote)
-                    else:
-                        console.print("[dim]Skipped deletion of branches without remote tracking.[/dim]\n")
-                except (EOFError, KeyboardInterrupt):
-                    console.print("[yellow]⚠ No input available (running in non-interactive mode)[/yellow]")
-                    console.print("[yellow]Branches with no remote tracking require manual confirmation.[/yellow]")
-                    console.print("[yellow]Use: python gitconfig_helper.py cleanup --auto (to auto-delete)[/yellow]")
-                    console.print("[yellow]Or: python gitconfig_helper.py cleanup (to manually confirm in interactive terminal)[/yellow]\n")
+            elif has_no_remote and force:
+                # Only delete local-only branches if --force is specified
+                branches_to_delete.append(branch_name)
 
         # Delete the identified branches
         for branch in branches_to_delete:
@@ -162,7 +137,7 @@ def get_git_aliases():
     alias_descriptions = {
         "alias": "List all git aliases in a formatted table",
         "branches": "Download all remote branches and create local tracking branches",
-        "cleanup": "Delete local branches with no remote tracking or that no longer exist on remote",
+        "cleanup": "Delete branches with deleted remotes (merged). Use --force to also delete local-only branches",
     }
 
     try:
@@ -233,9 +208,9 @@ if __name__ == "__main__":
         if function_name == "print_aliases":
             print_aliases()
         elif function_name == "cleanup":
-            # Check for --auto flag
-            auto_delete = "--auto" in sys.argv or "-a" in sys.argv
-            cleanup_branches(auto_delete=auto_delete)
+            # Check for --force flag
+            force = "--force" in sys.argv or "-f" in sys.argv
+            cleanup_branches(force=force)
         else:
             print(f"Function {function_name} not found.")
     else:
