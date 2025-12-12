@@ -35,7 +35,7 @@ EXAMPLE:
 
 FILES LINKED:
     - .gitconfig
-    - .gitconfig_helper.py
+    - gitconfig_helper.py
 "@
     exit 0
 }
@@ -61,7 +61,7 @@ Write-Host ""
 # Define files to symlink
 $filesToLink = @(
     ".gitconfig",
-    ".gitconfig_helper.py"
+    "gitconfig_helper.py"
 )
 
 # Function to create symlink
