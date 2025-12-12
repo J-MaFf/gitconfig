@@ -1,17 +1,21 @@
 # Copilot Instructions for gitconfig Repository
 
 ## Repository Overview
+
 This repository contains Git configuration files and helper scripts for managing Git aliases and branch maintenance. It's designed to be symlinked from the home directory for easy access and version control.
 
 ## Project Structure
 
 ### Core Files
+
 - **`.gitconfig`** - Main Git configuration file with custom aliases and settings
+
   - SSH signing key configuration (op-ssh-sign)
   - Custom git aliases for common workflows
   - Safe directory configurations for network repositories
 
 - **`gitconfig_helper.py`** - Python utility script for Git operations
+
   - Requires: `rich` library for formatted console output
   - Functions:
     - `print_aliases()` - Display all git aliases in a formatted table
@@ -21,17 +25,20 @@ This repository contains Git configuration files and helper scripts for managing
   - Called via git aliases in `.gitconfig`
 
 - **`Initialize-Symlinks.ps1`** - PowerShell script to set up symlinks
+
   - Creates symbolic links from home directory to repo files
   - Supports `-Force` flag to overwrite without prompting
   - Requires admin privileges for symlink creation
   - Called during initial setup only
 
 - **`pull-daily.ps1`** - Automated daily git pull script
+
   - Runs via Windows Task Scheduler (default: 8:00 AM daily)
   - Logs all operations to `pull-daily.log`
   - Keeps the repository synchronized with remote changes
 
 - **`.gitignore`** - Excludes local logs and temporary files
+
   - `pull-daily.log` - Daily pull task output
 
 - **`README.md`** - Project documentation
@@ -41,12 +48,14 @@ This repository contains Git configuration files and helper scripts for managing
 ### When Modifying Files
 
 #### `.gitconfig` Changes
+
 - Use proper INI syntax
 - Keep aliases short and meaningful
 - Document complex shell commands with comments
 - Test aliases with: `git alias`
 
 #### `gitconfig_helper.py` Changes
+
 - Maintain Python 3.6+ compatibility
 - Keep dependencies minimal (only `rich` currently)
 - Auto-install missing dependencies gracefully
@@ -54,6 +63,7 @@ This repository contains Git configuration files and helper scripts for managing
 - Add error handling for git command failures
 
 #### PowerShell Scripts
+
 - Target PowerShell 5.1+ (Windows PowerShell) and 7+
 - Use proper error handling and exit codes
 - Add logging functionality
@@ -61,14 +71,18 @@ This repository contains Git configuration files and helper scripts for managing
 - Test with and without admin privileges
 
 ### Python Aliases
+
 When adding new Python-based git aliases:
+
 1. Add the function to `gitconfig_helper.py`
 2. Add a corresponding git alias in `.gitconfig`
 3. Use the pattern: `!python ${USERPROFILE}/Documents/Scripts/gitconfig/gitconfig_helper.py function_name $@`
    - Note: Use `$@` to pass command-line arguments/flags to the Python script
 
 ### Git Aliases Reference
+
 Current custom aliases:
+
 - `git alias` - List all aliases in a formatted table
 - `git branches` - Download all remote branches and create local tracking branches
 - `git cleanup` - Delete branches with deleted remotes (merged branches)
@@ -77,11 +91,13 @@ Current custom aliases:
 ## Workflow
 
 1. **Initial Setup**
+
    - Clone the repository
    - Run `Initialize-Symlinks.ps1` to create symlinks
    - Verify with `git alias` command
 
 2. **Daily Updates**
+
    - `pull-daily.ps1` runs automatically at 8:00 AM
    - Changes are automatically pulled from remote
 
@@ -92,17 +108,20 @@ Current custom aliases:
    - Changes automatically reflect in symlinked files
 
 ## Environment Notes
+
 - User: Joey Maffiola (7maffiolajoey@gmail.com)
 - Repository: https://github.com/J-MaFf/gitconfig
 - Local Path: C:\Users\jmaffiola\Documents\Scripts\gitconfig
 
 ## Testing Recommendations
+
 - Test git aliases after modifications: `git alias`
 - Test cleanup functionality in a test branch
 - Verify symlinks point to correct files
 - Check `pull-daily.log` for scheduled task execution
 
 ## Known Limitations
+
 - Windows-only (PowerShell scripts)
 - Requires administrator privileges for symlink creation
 - Python scripts depend on `rich` library
