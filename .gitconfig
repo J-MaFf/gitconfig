@@ -22,6 +22,8 @@
     branches = !git fetch && git for-each-ref --format=%(refname:short) refs/remotes/origin/ | grep -v -e ^origin/HEAD$ -e ^origin$ | while read ref; do git branch --track ${ref#origin/} $ref 2>/dev/null; done
     cleanup = !python ${USERPROFILE}/Documents/Scripts/gitconfig/gitconfig_helper.py cleanup $@
     # Delete local branches that are not present on the remote
+    # Manage machine-specific git configuration
+    localconfig = !git config --file ~/.gitconfig.local
 
 [init]
 	defaultBranch = main
