@@ -1,6 +1,6 @@
 # Dotfiles Symlink Setup Script
 # This script creates symbolic links from the home directory to the dotfiles repository
-# Usage: .\setup-symlinks.ps1
+# Usage: .\Initialize-Symlinks.ps1
 # Note: Requires admin privileges to create symlinks on Windows
 
 param(
@@ -13,7 +13,7 @@ if ($Help) {
 Dotfiles Symlink Setup Script
 
 USAGE:
-    .\setup-symlinks.ps1 [OPTIONS]
+    .\Initialize-Symlinks.ps1 [OPTIONS]
 
 OPTIONS:
     -Force      Overwrite existing files without prompting
@@ -28,10 +28,10 @@ REQUIREMENTS:
 
 EXAMPLE:
     # Interactive mode (prompts before overwriting)
-    .\setup-symlinks.ps1
+    .\Initialize-Symlinks.ps1
 
     # Force mode (overwrites without prompting)
-    .\setup-symlinks.ps1 -Force
+    .\Initialize-Symlinks.ps1 -Force
 
 FILES LINKED:
     - .gitconfig
@@ -48,8 +48,8 @@ if (-not $isAdmin) {
     Write-Host ""
 }
 
-# Get the repository root (script's directory)
-$repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Get the repository root (parent of scripts directory)
+$repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $homeDir = $env:USERPROFILE
 
 Write-Host "Dotfiles Setup" -ForegroundColor Cyan
@@ -119,3 +119,19 @@ Write-Host "Successfully linked $successCount file(s)" -ForegroundColor Green
 Write-Host ""
 Write-Host "Your .gitconfig and .gitconfig_helper.py are now symlinked from the repository." -ForegroundColor Cyan
 Write-Host "Any changes pushed to the repository will be reflected in your home directory." -ForegroundColor Cyan
+Write-Host ""
+
+# Test the symlink by running 'git alias'
+Write-Host "Testing symlink setup..." -ForegroundColor Cyan
+try {
+    $testOutput = git alias 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✓ Symlinks verified! Git aliases are working." -ForegroundColor Green
+    }
+    else {
+        Write-Host "⚠ Warning: git alias command failed. Verify symlinks manually with: git alias" -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host "⚠ Warning: Could not test symlinks. Verify manually with: git alias" -ForegroundColor Yellow
+}
