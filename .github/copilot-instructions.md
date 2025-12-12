@@ -15,7 +15,9 @@ This repository contains Git configuration files and helper scripts for managing
   - Requires: `rich` library for formatted console output
   - Functions:
     - `print_aliases()` - Display all git aliases in a formatted table
-    - `cleanup_branches()` - Delete local branches with no remote tracking
+    - `cleanup_branches(force=False)` - Delete branches based on remote tracking status
+      - Default: Deletes only branches with deleted remotes (merged branches)
+      - With `--force`: Also deletes local-only branches (never had a remote)
   - Called via git aliases in `.gitconfig`
 
 - **`Initialize-Symlinks.ps1`** - PowerShell script to set up symlinks
@@ -62,13 +64,15 @@ This repository contains Git configuration files and helper scripts for managing
 When adding new Python-based git aliases:
 1. Add the function to `gitconfig_helper.py`
 2. Add a corresponding git alias in `.gitconfig`
-3. Use the pattern: `!python ${USERPROFILE}/Documents/Scripts/python_functions/gitconfig_helper.py function_name`
+3. Use the pattern: `!python ${USERPROFILE}/Documents/Scripts/gitconfig/gitconfig_helper.py function_name $@`
+   - Note: Use `$@` to pass command-line arguments/flags to the Python script
 
 ### Git Aliases Reference
 Current custom aliases:
-- `git alias` - List all aliases
-- `git branches` - Download and track all remote branches
-- `git cleanup` - Remove obsolete local branches
+- `git alias` - List all aliases in a formatted table
+- `git branches` - Download all remote branches and create local tracking branches
+- `git cleanup` - Delete branches with deleted remotes (merged branches)
+  - `git cleanup --force` (or `-f`) - Also delete local-only branches that never had a remote
 
 ## Workflow
 
