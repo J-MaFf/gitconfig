@@ -48,8 +48,8 @@ def cleanup_branches():
         subprocess.run(["git", "fetch", "-p"], check=False)
 
         # Get list of branches to delete:
-        # 1. Branches with no remote tracking (no [origin/...] in output)
-        # 2. Branches where the remote has been deleted (contains ": gone]")
+        # 1. Branches with no remote tracking (no [origin/...] in output) - requires confirmation
+        # 2. Branches where the remote has been deleted (contains ": gone]") - auto-delete
         result_vv = subprocess.run(
             ["git", "branch", "-vv"], capture_output=True, text=True, check=False
         )
@@ -60,6 +60,7 @@ def cleanup_branches():
             return
         
         branches_to_delete = []
+        branches_no_remote = []
         for line in result_vv.stdout.strip().split("\n"):
             if not line.strip():
                 continue
@@ -77,8 +78,24 @@ def cleanup_branches():
             has_no_remote = "[origin/" not in line
             remote_is_gone = ": gone]" in line
             
-            if has_no_remote or remote_is_gone:
+            if remote_is_gone:
+                # Auto-delete branches with deleted remotes
                 branches_to_delete.append(branch_name)
+            elif has_no_remote:
+                # Ask for confirmation for branches with no remote
+                branches_no_remote.append(branch_name)
+        
+        # Prompt for confirmation on branches with no remote tracking
+        if branches_no_remote:
+            console.print("\n[yellow]The following branches have no remote tracking:[/yellow]")
+            for branch in branches_no_remote:
+                console.print(f"  • [cyan]{branch}[/cyan]")
+            console.print()
+            response = input("Are you sure you want to delete these branches? (y/N): ").strip().lower()
+            if response == 'y' or response == 'yes':
+                branches_to_delete.extend(branches_no_remote)
+            else:
+                console.print("[dim]Skipped deletion of branches without remote tracking.[/dim]\n")
         
         # Delete the identified branches
         for branch in branches_to_delete:
