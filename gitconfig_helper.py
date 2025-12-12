@@ -47,9 +47,37 @@ def cleanup_branches():
         console.print("[cyan]Running git cleanup...[/cyan]")
         subprocess.run(["git", "fetch", "-p"], check=False)
 
-        # Run the branch deletion command using shell
-        cleanup_cmd = 'git branch -vv | grep -v "\\[origin/" | grep -v "^\\*" | awk "{print $1}" | xargs -r git branch -D'
-        subprocess.run(cleanup_cmd, shell=True, check=False)
+        # Get list of branches to delete:
+        # 1. Branches with no remote tracking (no [origin/...] in output)
+        # 2. Branches where the remote has been deleted (contains ": gone]")
+        result_vv = subprocess.run(
+            ["git", "branch", "-vv"], capture_output=True, text=True, check=False
+        )
+        
+        branches_to_delete = []
+        for line in result_vv.stdout.strip().split("\n"):
+            if not line.strip():
+                continue
+            # Skip the current branch (marked with *)
+            if line.startswith("*"):
+                continue
+            
+            # Extract branch name (first field, after stripping *)
+            parts = line.strip().split()
+            if not parts:
+                continue
+            branch_name = parts[0].lstrip("*").strip()
+            
+            # Check if branch has no remote tracking or remote is gone
+            has_no_remote = "[origin/" not in line
+            remote_is_gone = ": gone]" in line
+            
+            if has_no_remote or remote_is_gone:
+                branches_to_delete.append(branch_name)
+        
+        # Delete the identified branches
+        for branch in branches_to_delete:
+            subprocess.run(["git", "branch", "-D", branch], capture_output=True, check=False)
 
         # Get all branches after cleanup
         result_after = subprocess.run(
