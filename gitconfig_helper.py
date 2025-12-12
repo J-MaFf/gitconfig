@@ -91,11 +91,15 @@ def cleanup_branches():
             for branch in branches_no_remote:
                 console.print(f"  • [cyan]{branch}[/cyan]")
             console.print()
-            response = input("Are you sure you want to delete these branches? (y/N): ").strip().lower()
-            if response == 'y' or response == 'yes':
-                branches_to_delete.extend(branches_no_remote)
-            else:
-                console.print("[dim]Skipped deletion of branches without remote tracking.[/dim]\n")
+            try:
+                response = input("Are you sure you want to delete these branches? (y/N): ").strip().lower()
+                if response == 'y' or response == 'yes':
+                    branches_to_delete.extend(branches_no_remote)
+                else:
+                    console.print("[dim]Skipped deletion of branches without remote tracking.[/dim]\n")
+            except (EOFError, KeyboardInterrupt):
+                console.print("\n[dim]Skipped deletion of branches without remote tracking.[/dim]\n")
+                return
         
         # Delete the identified branches
         for branch in branches_to_delete:
