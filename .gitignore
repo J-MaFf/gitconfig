@@ -1,2 +1,5 @@
 # Daily pull logs
 pull-daily.log
+
+# Note: knowledge-graph.jsonl is intentionally NOT ignored
+# It will be tracked in Git for backup and sync purposes (Memory MCP server knowledge graph)
