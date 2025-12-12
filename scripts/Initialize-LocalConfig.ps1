@@ -80,12 +80,11 @@ try {
 
     # Create or overwrite the local config file
     Set-Content -Path $localConfigPath -Value $configContent -Force
-    Write-Host "✓ Created .gitconfig.local" -ForegroundColor Green
+    Write-Host "[OK] Created .gitconfig.local" -ForegroundColor Green
     Write-Host ""
     Write-Host "Local configuration includes:" -ForegroundColor Cyan
     Write-Host "  - SSH signing program path (op-ssh-sign.exe)" -ForegroundColor Gray
     Write-Host "  - Network safe directories (10.210.3.10, KFWS9BDC01)" -ForegroundColor Gray
-    Write-Host "  - Local development directories" -ForegroundColor Gray
     Write-Host "  - Local development directories" -ForegroundColor Gray
     Write-Host ""
     Write-Host "To customize safe directories:" -ForegroundColor Cyan
@@ -98,15 +97,15 @@ try {
     Write-Host "Verifying git configuration..." -ForegroundColor Cyan
     $gitTest = & git config --local --list 2>&1
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "✓ Git configuration verified!" -ForegroundColor Green
+        Write-Host "[OK] Git configuration verified!" -ForegroundColor Green
     }
     else {
-        Write-Host "⚠ Warning: Git may have issues reading the configuration" -ForegroundColor Yellow
+        Write-Host "[WARN] Git may have issues reading the configuration" -ForegroundColor Yellow
         Write-Host "  Run: git config --list to diagnose" -ForegroundColor Yellow
     }
 }
 catch {
-    Write-Host "✗ Error creating .gitconfig.local" -ForegroundColor Red
-    Write-Host "  Exception: $_" -ForegroundColor Red
+    Write-Host "[FAIL] Error creating .gitconfig.local" -ForegroundColor Red
+    Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }

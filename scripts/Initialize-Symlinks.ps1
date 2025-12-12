@@ -91,11 +91,11 @@ function New-Symlink {
 
     try {
         New-Item -ItemType SymbolicLink -Path $LinkPath -Target $TargetPath -Force | Out-Null
-        Write-Host "✓ Created symlink: $LinkPath -> $TargetPath" -ForegroundColor Green
+        Write-Host "[OK] Created symlink: $LinkPath -> $TargetPath" -ForegroundColor Greeneen
         return $true
     }
     catch {
-        Write-Host "✗ Failed to create symlink for $LinkPath" -ForegroundColor Red
+        Write-Host "[FAIL] Failed to create symlink for $LinkPath" -ForegroundColor Redr Red
         Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
         return $false
     }
@@ -113,7 +113,7 @@ function Register-LoginTask {
 
     # Check if script exists
     if (-not (Test-Path $scriptPath)) {
-        Write-Host "⚠ Warning: Update-GitConfig.ps1 not found at $scriptPath" -ForegroundColor Yellow
+        Write-Host "[WARN] Update-GitConfig.ps1 not found at $scriptPath" -ForegroundColor Yellow
         Write-Host "  Skipping scheduled task creation." -ForegroundColor Yellow
         return $false
     }
@@ -134,7 +134,7 @@ function Register-LoginTask {
             Write-Host "Removed existing scheduled task: $taskName" -ForegroundColor Yellow
         }
         catch {
-            Write-Host "✗ Failed to remove existing scheduled task" -ForegroundColor Red
+            Write-Host "[FAIL] Failed to remove existing scheduled task" -ForegroundColor Redr Red
             return $false
         }
     }
@@ -163,11 +163,11 @@ function Register-LoginTask {
             -Description "Automatically pull latest changes from gitconfig repository at user login" `
             -Force | Out-Null
 
-        Write-Host "✓ Created scheduled task: $taskName" -ForegroundColor Green
+        Write-Host "[OK] Created scheduled task: $taskName" -ForegroundColor Greeneen
         return $true
     }
     catch {
-        Write-Host "✗ Failed to create scheduled task" -ForegroundColor Red
+        Write-Host "[FAIL] Failed to create scheduled task" -ForegroundColor Redr Red
         Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
         return $false
     }
@@ -180,7 +180,7 @@ foreach ($file in $filesToLink) {
     $linkPath = Join-Path $homeDir $file
 
     if (-not (Test-Path $targetPath)) {
-        Write-Host "✗ Source file not found: $targetPath" -ForegroundColor Red
+        Write-Host "[FAIL] Source file not found: $targetPath" -ForegroundColor Redr Red
         continue
     }
 
@@ -206,7 +206,7 @@ if ($taskResponse -eq "y") {
     }
     else {
         if (Register-LoginTask -RepoRoot $repoRoot -Force $Force) {
-            Write-Host "✓ Scheduled task created successfully!" -ForegroundColor Green
+            Write-Host "[OK] Scheduled task created successfully!" -ForegroundColor Greeneen
         }
     }
     Write-Host ""
@@ -219,14 +219,15 @@ Write-Host ""
 # Test the symlink by running 'git alias'
 Write-Host "Testing symlink setup..." -ForegroundColor Cyan
 try {
-    $testOutput = git alias 2>&1 | Out-Null
+    $testOutput = git alias 2>&1
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "✓ Symlinks verified! Git aliases are working." -ForegroundColor Green
+        Write-Host "[OK] Symlinks verified! Git aliases are working." -ForegroundColor Greeneen
     }
     else {
-        Write-Host "⚠ Warning: git alias command failed. Verify symlinks manually with: git alias" -ForegroundColor Yellow
+        Write-Host "[WARN] git alias command failed. Verify symlinks manually with: git alias" -ForegroundColor Yellow
     }
 }
 catch {
-    Write-Host "⚠ Warning: Could not test symlinks. Verify manually with: git alias" -ForegroundColor Yellow
+    Write-Host "[WARN] Could not test symlinks. Verify manually with: git alias" -ForegroundColor Yellow
 }
+
