@@ -63,6 +63,10 @@ try {
 # Machine-Specific Git Configuration
 # This file is automatically included by .gitconfig and should NOT be committed
 
+[gpg "ssh"]
+	# Machine-specific SSH signing program path
+	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe
+
 [safe]
 	# Network locations (make sure these paths exist on this machine)
 	directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setup
@@ -79,7 +83,9 @@ try {
     Write-Host "✓ Created .gitconfig.local" -ForegroundColor Green
     Write-Host ""
     Write-Host "Local configuration includes:" -ForegroundColor Cyan
+    Write-Host "  - SSH signing program path (op-ssh-sign.exe)" -ForegroundColor Gray
     Write-Host "  - Network safe directories (10.210.3.10, KFWS9BDC01)" -ForegroundColor Gray
+    Write-Host "  - Local development directories" -ForegroundColor Gray
     Write-Host "  - Local development directories" -ForegroundColor Gray
     Write-Host ""
     Write-Host "To customize safe directories:" -ForegroundColor Cyan

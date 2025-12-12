@@ -11,8 +11,6 @@
     autoSetupRemote = true
 [gpg]
 	format = ssh
-[gpg "ssh"]
-	program = C:\\Users\\7maff\\AppData\\Local\\Microsoft\\WindowsApps\\op-ssh-sign.exe
 [commit]
 	gpgsign = true
 [alias]
