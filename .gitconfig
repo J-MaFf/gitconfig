@@ -1,0 +1,31 @@
+[user]
+	name = Test User
+	email = test@example.com
+    signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGjNJEhPFIZHo3t9aIb8Q2P4sY2AVV37/4eJoeDdREgB
+
+[push]
+    autoSetupRemote = true
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	program = ~/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe
+[commit]
+	gpgsign = true
+[alias]
+    # List all aliases
+    alias = !python ${USERPROFILE}/Documents/Scripts/python_functions/gitconfig_helper.py print_aliases
+    # Download all remote branches creating local counterparts
+    branches = !git fetch && git for-each-ref --format=%(refname:short) refs/remotes/origin/ | grep -v -e ^origin/HEAD$ -e ^origin$ | while read ref; do git branch --track ${ref#origin/} $ref 2>/dev/null; done
+	cleanup = !python ${USERPROFILE}/Documents/Scripts/python_functions/gitconfig_helper.py cleanup
+    # Delete local branches that are not present on the remote
+
+[safe]
+    directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setup
+    directory = C:/Users/jmaffiola/Documents/Scripts/winget-app-setup
+    directory = C:/Users/jmaffiola/Documents/Scripts/winget-install
+	directory = %(prefix)///10.210.3.10/dept/IT/Programs/Office/OfficeConfigs
+	directory = %(prefix)///KFWS9BDC01/DEPT/IT/Programs/Office/OfficeConfigs
+[init]
+	defaultBranch = main
+[core]
+	editor = code --wait
