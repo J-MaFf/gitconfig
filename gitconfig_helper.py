@@ -53,12 +53,12 @@ def cleanup_branches():
         result_vv = subprocess.run(
             ["git", "branch", "-vv"], capture_output=True, text=True, check=False
         )
-        
+
         # Handle empty or failed output
         if not result_vv.stdout:
             console.print("[yellow]Warning: Could not get branch information[/yellow]")
             return
-        
+
         branches_to_delete = []
         branches_no_remote = []
         for line in result_vv.stdout.strip().split("\n"):
@@ -67,24 +67,24 @@ def cleanup_branches():
             # Skip the current branch (marked with *)
             if line.startswith("*"):
                 continue
-            
+
             # Extract branch name (first field, after stripping *)
             parts = line.strip().split()
             if not parts:
                 continue
             branch_name = parts[0].lstrip("*").strip()
-            
+
             # Check if branch has no remote tracking or remote is gone
             has_no_remote = "[origin/" not in line
             remote_is_gone = ": gone]" in line
-            
+
             if remote_is_gone:
                 # Auto-delete branches with deleted remotes
                 branches_to_delete.append(branch_name)
             elif has_no_remote:
                 # Ask for confirmation for branches with no remote
                 branches_no_remote.append(branch_name)
-        
+
         # Prompt for confirmation on branches with no remote tracking
         if branches_no_remote:
             console.print("\n[yellow]The following branches have no remote tracking:[/yellow]")
@@ -98,9 +98,10 @@ def cleanup_branches():
                 else:
                     console.print("[dim]Skipped deletion of branches without remote tracking.[/dim]\n")
             except (EOFError, KeyboardInterrupt):
-                console.print("\n[dim]Skipped deletion of branches without remote tracking.[/dim]\n")
-                return
-        
+                console.print("[yellow]⚠ No input available (running in non-interactive mode)[/yellow]")
+                console.print("[yellow]Branches with no remote tracking require manual confirmation.[/yellow]")
+                console.print("[yellow]Run 'git cleanup' in an interactive terminal, or delete manually with: git branch -D <branch-name>[/yellow]\n")
+
         # Delete the identified branches
         for branch in branches_to_delete:
             result = subprocess.run(["git", "branch", "-D", branch], capture_output=True, text=True, check=False)

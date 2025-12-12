@@ -13,10 +13,10 @@
 	gpgsign = true
 [alias]
     # List all aliases
-    alias = !python ${USERPROFILE}/Documents/Scripts/python_functions/gitconfig_helper.py print_aliases
+    alias = !python ${USERPROFILE}/Documents/Scripts/gitconfig/gitconfig_helper.py print_aliases
     # Download all remote branches creating local counterparts
     branches = !git fetch && git for-each-ref --format=%(refname:short) refs/remotes/origin/ | grep -v -e ^origin/HEAD$ -e ^origin$ | while read ref; do git branch --track ${ref#origin/} $ref 2>/dev/null; done
-	cleanup = !python ${USERPROFILE}/Documents/Scripts/python_functions/gitconfig_helper.py cleanup
+	cleanup = !python ${USERPROFILE}/Documents/Scripts/gitconfig/gitconfig_helper.py cleanup
     # Delete local branches that are not present on the remote
 
 [safe]
