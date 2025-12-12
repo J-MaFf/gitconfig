@@ -38,6 +38,23 @@ def cleanup_branches(force=False):
             console.print("[red]Error: Not in a git repository[/red]")
             return
 
+        # Get current branch
+        result_current = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, check=True
+        )
+        current_branch = result_current.stdout.strip()
+        switched_branch = False
+
+        # Switch to main if not already on it
+        if current_branch != "main":
+            console.print(f"[cyan]Switching from '{current_branch}' to 'main'...[/cyan]")
+            result = subprocess.run(["git", "checkout", "main"], capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                console.print(f"[red]Error: Failed to switch to main branch[/red]")
+                console.print(f"[red]{result.stderr.strip()}[/red]")
+                return
+            switched_branch = True
+
         # Get all branches before cleanup
         result_before = subprocess.run(
             ["git", "branch", "-vv"], capture_output=True, text=True, check=True
@@ -109,6 +126,20 @@ def cleanup_branches(force=False):
         # Find deleted branches
         deleted_branches = sorted(branches_before - branches_after)
 
+        # Switch back to original branch if we switched
+        if switched_branch:
+            # Check if the original branch was deleted during cleanup
+            if current_branch in deleted_branches:
+                console.print(f"[yellow]Note: Your original branch '{current_branch}' was deleted during cleanup.[/yellow]")
+                console.print(f"[cyan]Staying on 'main'.[/cyan]\n")
+            else:
+                console.print(f"[cyan]Switching back to '{current_branch}'...[/cyan]")
+                result = subprocess.run(["git", "checkout", current_branch], capture_output=True, text=True, check=False)
+                if result.returncode != 0:
+                    console.print(f"[yellow]Warning: Failed to switch back to '{current_branch}'[/yellow]")
+                    console.print(f"[yellow]{result.stderr.strip()}[/yellow]\n")
+
+        # Print summary of deleted branches
         if deleted_branches:
             table = Table(
                 title="Deleted Branches", show_lines=True, header_style="bold green"
