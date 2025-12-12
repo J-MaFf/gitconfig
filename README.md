@@ -6,7 +6,11 @@ Personal Git configuration and utilities for cross-machine synchronization.
 
 - **`.gitconfig`** - Git configuration with custom aliases and SSH signing setup
 - **`.gitconfig_helper.py`** - Python utility for managing git aliases and branch cleanup
-- **`Initialize-Symlinks.ps1`** - PowerShell script for setting up symlinks on Windows
+- **`scripts/`** - PowerShell automation scripts
+  - **`Initialize-Symlinks.ps1`** - Setup script for creating symlinks on Windows
+  - **`pull-daily.ps1`** - Automated daily git pull script
+- **`docs/`** - Documentation and knowledge graph
+  - **`knowledge-graph.jsonl`** - Entity and relation data for project documentation
 
 ## Features
 
@@ -37,14 +41,14 @@ Personal Git configuration and utilities for cross-machine synchronization.
 1. Clone this repository:
 
    ```powershell
-   git clone https://github.com/J-MaFf/dotfiles.git ~/.dotfiles
+   git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
    ```
 
-2. Run the setup script with administrator privileges:
+2. Run the setup script from the scripts directory with administrator privileges:
 
    ```powershell
-   cd ~/.dotfiles
-   .\setup-symlinks.ps1
+   cd ~/Documents/Scripts/gitconfig
+   .\scripts\Initialize-Symlinks.ps1
    ```
 
 3. Install the Python dependency:
@@ -58,11 +62,11 @@ Personal Git configuration and utilities for cross-machine synchronization.
 If you prefer to set up symlinks manually:
 
 ```powershell
-$repo = "$env:USERPROFILE\.dotfiles"
+$repo = "$env:USERPROFILE\Documents\Scripts\gitconfig"
 $home = $env:USERPROFILE
 
 New-Item -ItemType SymbolicLink -Path "$home\.gitconfig" -Target "$repo\.gitconfig" -Force
-New-Item -ItemType SymbolicLink -Path "$home\.gitconfig_helper.py" -Target "$repo\.gitconfig_helper.py" -Force
+New-Item -ItemType SymbolicLink -Path "$home\.gitconfig_helper.py" -Target "$repo\gitconfig_helper.py" -Force
 ```
 
 ## Usage
@@ -71,13 +75,13 @@ New-Item -ItemType SymbolicLink -Path "$home\.gitconfig_helper.py" -Target "$rep
 
 ```powershell
 # Interactive mode (prompts before overwriting)
-.\Initialize-Symlinks.ps1
+.\scripts\Initialize-Symlinks.ps1
 
 # Force mode (overwrites without prompting)
-.\Initialize-Symlinks.ps1 -Force
+.\scripts\Initialize-Symlinks.ps1 -Force
 
 # Display help
-.\Initialize-Symlinks.ps1 -Help
+.\scripts\Initialize-Symlinks.ps1 -Help
 ```
 
 ### Using Git Aliases
