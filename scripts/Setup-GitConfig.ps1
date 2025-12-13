@@ -41,7 +41,7 @@ if (-not $isAdmin) {
 
     $scriptPath = $MyInvocation.MyCommand.Path
     $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", "`"$scriptPath`"")
-    
+
     if ($Force) { $scriptArgs += "-Force" }
     if ($NoTask) { $scriptArgs += "-NoTask" }
 
@@ -83,13 +83,13 @@ $linkErrors = 0
 foreach ($item in $filesToLink) {
     $sourceFile = Join-Path $repoRoot $item.File
     $linkPath = Join-Path $homeDir $item.File
-    
+
     if (-not (Test-Path $sourceFile)) {
         Write-Host "[ERROR] Source not found: $sourceFile" -ForegroundColor Red
         $linkErrors++
         continue
     }
-    
+
     if (Test-Path $linkPath) {
         if (-not $Force) {
             $response = Read-Host "$($item.File) exists. Overwrite? (y/n)"
@@ -100,7 +100,7 @@ foreach ($item in $filesToLink) {
         }
         Remove-Item $linkPath -Force | Out-Null
     }
-    
+
     try {
         New-Item -ItemType SymbolicLink -Path $linkPath -Target $sourceFile -Force | Out-Null
         Write-Host "[OK] Linked $($item.File)" -ForegroundColor Green
@@ -130,14 +130,14 @@ else {
         $configContent = @"
 # Machine-Specific Git Configuration
 [gpg "ssh"]
-	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe
+	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exee
 
 [safe]
-	directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setup
-	directory = %(prefix)///10.210.3.10/dept/IT/Programs/Office/OfficeConfigs
-	directory = %(prefix)///KFWS9BDC01/DEPT/IT/Programs/Office/OfficeConfigs
-	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-app-setup
-	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-install
+	directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setupp
+	directory = %(prefix)///10.210.3.10/dept/IT/Programs/Office/OfficeConfigss
+	directory = %(prefix)///KFWS9BDC01/DEPT/IT/Programs/Office/OfficeConfigss
+	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-app-setupp
+	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-installl
 "@
         Set-Content -Path $localConfigPath -Value $configContent -Force
         Write-Host "[OK] Created .gitconfig.local" -ForegroundColor Green
@@ -156,13 +156,13 @@ if (-not $NoTask) {
 
     $taskName = "GitConfig Pull at Login"
     $scriptPath = Join-Path $scriptsDir "Update-GitConfig.ps1"
-    
+
     if (-not (Test-Path $scriptPath)) {
         Write-Host "[WARN] Update-GitConfig.ps1 not found" -ForegroundColor Yellow
     }
     else {
         $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-        
+
         if ($existingTask -and -not $Force) {
             $response = Read-Host "Task exists. Replace? (y/n)"
             if ($response -ne "y") {
