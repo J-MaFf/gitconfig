@@ -40,7 +40,7 @@ if (-not $isAdmin) {
 
     $scriptPath = $MyInvocation.MyCommand.Path
     $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", "`"$scriptPath`"")
-    
+
     if ($Force) { $scriptArgs += "-Force" }
 
     Write-Host "Relaunching with administrator privileges..." -ForegroundColor Cyan
@@ -144,11 +144,85 @@ else {
 
 Write-Host ""
 
-# STEP 4: Summary
+# STEP 4: Verify Cleanup Success
+Write-Host "[STEP 4] Verifying cleanup..." -ForegroundColor Cyan
+Write-Host "-----" -ForegroundColor Cyan
+
+$verifyErrors = 0
+
+# Check symlinks were removed
+foreach ($file in $filesToRemove) {
+    $path = Join-Path $homeDir $file
+    if (Test-Path $path) {
+        Write-Host "[FAIL] $file still exists!" -ForegroundColor Red
+        $verifyErrors++
+    }
+    else {
+        Write-Host "[OK] $file removed" -ForegroundColor Green
+    }
+}
+
+# Check .gitconfig.local was removed
+if (Test-Path $localConfigPath) {
+    Write-Host "[FAIL] .gitconfig.local still exists!" -ForegroundColor Red
+    $verifyErrors++
+}
+else {
+    Write-Host "[OK] .gitconfig.local removed" -ForegroundColor Green
+}
+
+# Check scheduled task was removed
+$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($task) {
+    Write-Host "[FAIL] Scheduled task still exists!" -ForegroundColor Red
+    $verifyErrors++
+}
+else {
+    Write-Host "[OK] Scheduled task removed" -ForegroundColor Green
+}
+
+# Check git still works
+try {
+    $gitVersion = & git --version 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[OK] Git still functional" -ForegroundColor Green
+    }
+    else {
+        Write-Host "[WARN] Git may be unavailable" -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host "[WARN] Could not verify git" -ForegroundColor Yellow
+}
+
+# Check custom aliases are not available
+try {
+    $aliases = & git alias 2>&1
+    if ($aliases -match "fatal|error|not found|unknown command") {
+        Write-Host "[OK] Custom aliases not available" -ForegroundColor Green
+    }
+    else {
+        Write-Host "[WARN] Custom aliases may still be active" -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host "[OK] Custom aliases not available" -ForegroundColor Green
+}
+
+Write-Host ""
+
+# STEP 5: Summary
 Write-Host "[SUMMARY]" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host "Removed: $removed items" -ForegroundColor Green
-Write-Host ""
-Write-Host "Git config files still in repository are untouched." -ForegroundColor Cyan
-Write-Host "You can now test the setup process from scratch." -ForegroundColor Cyan
+
+if ($verifyErrors -eq 0) {
+    Write-Host "Cleanup SUCCESSFUL!" -ForegroundColor Green
+    Write-Host "All gitconfig-related files and tasks removed." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Ready to test fresh setup:" -ForegroundColor Cyan
+    Write-Host "  .\Setup-GitConfig.ps1 -Force" -ForegroundColor Cyan
+}
+else {
+    Write-Host "Cleanup INCOMPLETE - $verifyErrors items still present" -ForegroundColor Red
+}
 Write-Host ""
