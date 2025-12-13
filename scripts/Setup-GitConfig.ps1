@@ -145,7 +145,7 @@ else {
 	format = ssh
 
 [gpg "ssh"]
-	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe
+	program = $homeDir\AppData\Local\Microsoft\WindowsApps\op-ssh-sign.exe
 
 [commit]
 	gpgsign = true
