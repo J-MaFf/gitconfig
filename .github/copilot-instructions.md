@@ -24,20 +24,25 @@ This repository contains Git configuration files and helper scripts for managing
       - With `--force`: Also deletes local-only branches (never had a remote)
   - Called via git aliases in `.gitconfig`
 
-- **`Initialize-Symlinks.ps1`** - PowerShell script to set up symlinks
+- **`Setup-GitConfig.ps1`** - Unified setup wrapper script
 
+  - Orchestrates complete portable git configuration setup
   - Creates symbolic links from home directory to repo files
-  - Supports `-Force` flag to overwrite without prompting
-  - Requires admin privileges for symlink creation
-  - Prompts to create 'GitConfig Pull at Login' scheduled task
-  - Called during initial setup only
+  - Generates machine-specific `.gitconfig.local` with SSH signing and safe directories
+  - Creates Windows scheduled task for auto-sync at login
+  - Backs up existing files to `Existing.<filename>.bak` before overwriting
+  - Automatically elevates to admin when needed
+  - Supports `-Force` flag to skip prompts, `-NoTask` to skip task creation, `-Help` for usage
+  - Single command setup: `.\Setup-GitConfig.ps1 -Force`
 
-- **`Initialize-LocalConfig.ps1`** - PowerShell script to set up machine-specific configuration
+- **`Cleanup-GitConfig.ps1`** - Cleanup and reset utility
 
-  - Creates `~/.gitconfig.local` with safe directories and local paths
-  - Customized per machine (not version controlled)
-  - Supports `-Force` flag to overwrite without prompting
-  - Called during initial setup on each new machine
+  - Removes all gitconfig-related setup for testing/uninstalling
+  - Backs up symlinks and config to `Existing.<filename>.bak`
+  - Unregisters scheduled task
+  - Self-verifies successful cleanup
+  - Automatically elevates to admin when needed
+  - Supports `-Force` flag to skip prompts, `-Help` for usage
 
 - **`Update-GitConfig.ps1`** - Automated git pull script
 
@@ -127,15 +132,21 @@ Current custom aliases:
 1. **Initial Setup**
 
    - Clone the repository
-   - Run `Initialize-Symlinks.ps1` to create symlinks
+   - Run `Setup-GitConfig.ps1 -Force` to complete all setup steps
    - Verify with `git alias` command
 
-2. **Daily Updates**
+2. **Testing/Resetting**
 
-   - `pull-daily.ps1` runs automatically at 8:00 AM
+   - Run `Cleanup-GitConfig.ps1 -Force` to remove all setup
+   - Files are backed up to `Existing.<filename>.bak` for recovery
+   - Can re-run `Setup-GitConfig.ps1 -Force` to test fresh setup
+
+3. **Daily Updates**
+
+   - `Update-GitConfig.ps1` runs automatically at user login
    - Changes are automatically pulled from remote
 
-3. **Making Changes**
+4. **Making Changes**
    - Edit files in the repository
    - Commit with descriptive messages
    - Push to GitHub
