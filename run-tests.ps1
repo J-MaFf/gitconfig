@@ -48,10 +48,21 @@ catch {
     exit 1
 }
 
-# Check for admin privileges
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-    Write-Warning "Some tests require administrator privileges. Consider running as admin."
+# Check for admin privileges (Windows only)
+$platformIsWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : $true
+if ($platformIsWindows) {
+    try {
+        $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if (-not $isAdmin) {
+            Write-Warning "Some tests require administrator privileges. Consider running as admin."
+        }
+    }
+    catch {
+        Write-Warning "Unable to determine administrator status."
+    }
+}
+else {
+    Write-Host "Running on non-Windows platform. Windows-specific tests will be skipped." -ForegroundColor Yellow
 }
 
 # Build Pester configuration
