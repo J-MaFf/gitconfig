@@ -82,12 +82,17 @@ foreach ($file in $filesToRemove) {
     $path = Join-Path $homeDir $file
     if (Test-Path $path) {
         try {
-            Remove-Item $path -Force
-            Write-Host "[OK] Removed $file" -ForegroundColor Green
+            $backupName = "Existing.$file.bak"
+            $backupPath = Join-Path $homeDir $backupName
+            if (Test-Path $backupPath) {
+                Remove-Item $backupPath -Force | Out-Null
+            }
+            Rename-Item -Path $path -NewName $backupName -Force | Out-Null
+            Write-Host "[OK] Backed up $file to $backupName" -ForegroundColor Green
             $removed++
         }
         catch {
-            Write-Host "[FAIL] Could not remove $file" -ForegroundColor Red
+            Write-Host "[FAIL] Could not backup $file" -ForegroundColor Red
             Write-Host "  Error: $_" -ForegroundColor Red
         }
     }
@@ -105,12 +110,17 @@ Write-Host "-----" -ForegroundColor Cyan
 $localConfigPath = "$homeDir\.gitconfig.local"
 if (Test-Path $localConfigPath) {
     try {
-        Remove-Item $localConfigPath -Force
-        Write-Host "[OK] Removed .gitconfig.local" -ForegroundColor Green
+        $backupName = "Existing.gitconfig.local.bak"
+        $backupPath = Join-Path $homeDir $backupName
+        if (Test-Path $backupPath) {
+            Remove-Item $backupPath -Force | Out-Null
+        }
+        Rename-Item -Path $localConfigPath -NewName $backupName -Force | Out-Null
+        Write-Host "[OK] Backed up .gitconfig.local to $backupName" -ForegroundColor Green
         $removed++
     }
     catch {
-        Write-Host "[FAIL] Could not remove .gitconfig.local" -ForegroundColor Red
+        Write-Host "[FAIL] Could not backup .gitconfig.local" -ForegroundColor Red
         Write-Host "  Error: $_" -ForegroundColor Red
     }
 }

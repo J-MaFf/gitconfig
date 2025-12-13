@@ -142,14 +142,14 @@ else {
         $configContent = @"
 # Machine-Specific Git Configuration
 [gpg "ssh"]
-	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exee
+	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe
 
 [safe]
-	directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setupp
-	directory = %(prefix)///10.210.3.10/dept/IT/Programs/Office/OfficeConfigss
-	directory = %(prefix)///KFWS9BDC01/DEPT/IT/Programs/Office/OfficeConfigss
-	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-app-setupp
-	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-installl
+	directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setup
+	directory = %(prefix)///10.210.3.10/dept/IT/Programs/Office/OfficeConfigs
+	directory = %(prefix)///KFWS9BDC01/DEPT/IT/Programs/Office/OfficeConfigs
+	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-app-setup
+	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-install
 "@
         Set-Content -Path $localConfigPath -Value $configContent -Force
         Write-Host "[OK] Created .gitconfig.local" -ForegroundColor Green
