@@ -98,13 +98,14 @@ foreach ($item in $filesToLink) {
                 continue
             }
         }
-        $backupPath = "$linkPath.bak"
+        $backupName = "Existing.$($item.File).bak"
+        $backupPath = Join-Path $homeDir $backupName
         try {
             if (Test-Path $backupPath) {
                 Remove-Item $backupPath -Force | Out-Null
             }
-            Rename-Item -Path $linkPath -NewName "$($item.File).bak" -Force | Out-Null
-            Write-Host "Backed up existing $($item.File) to $($item.File).bak" -ForegroundColor Yellow
+            Rename-Item -Path $linkPath -NewName $backupName -Force | Out-Null
+            Write-Host "Backed up existing $($item.File) to $backupName" -ForegroundColor Yellow
         }
         catch {
             Write-Host "[WARN] Could not backup existing $($item.File), removing instead" -ForegroundColor Yellow
