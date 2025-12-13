@@ -150,6 +150,9 @@ else {
 [commit]
 	gpgsign = true
 
+[user]
+	signingKey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGjNJEhPFIZHo3t9aIb8Q2P4sY2AVV37/4eJoeDdREgB
+
 [safe]
 	directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setup
 	directory = %(prefix)///10.210.3.10/dept/IT/Programs/Office/OfficeConfigs
