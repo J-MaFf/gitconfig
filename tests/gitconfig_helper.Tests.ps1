@@ -18,9 +18,10 @@ Describe "gitconfig_helper.py" {
         }
 
         It "Script can be imported without errors" {
+            $repoRootForward = $repoRoot -replace '\\', '/'
             $pythonCode = @"
 import sys
-sys.path.insert(0, '$repoRoot')
+sys.path.insert(0, '$repoRootForward')
 import gitconfig_helper
 "@
             $result = & python -c $pythonCode 2>&1
