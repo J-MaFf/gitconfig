@@ -141,8 +141,14 @@ else {
     try {
         $configContent = @"
 # Machine-Specific Git Configuration
+[gpg]
+	format = ssh
+
 [gpg "ssh"]
 	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe
+
+[commit]
+	gpgsign = true
 
 [safe]
 	directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setup
