@@ -196,17 +196,13 @@ catch {
 }
 
 # Check custom aliases are not available
-try {
-    $aliases = & git alias 2>&1
-    if ($aliases -match "fatal|error|not found|unknown command") {
-        Write-Host "[OK] Custom aliases not available" -ForegroundColor Green
-    }
-    else {
-        Write-Host "[WARN] Custom aliases may still be active" -ForegroundColor Yellow
-    }
+# (custom aliases are defined in .gitconfig, so if it's removed, aliases won't work)
+$gitconfigPath = Join-Path $homeDir ".gitconfig"
+if (-not (Test-Path $gitconfigPath)) {
+    Write-Host "[OK] Custom aliases not available (.gitconfig removed)" -ForegroundColor Green
 }
-catch {
-    Write-Host "[OK] Custom aliases not available" -ForegroundColor Green
+else {
+    Write-Host "[WARN] .gitconfig still exists - custom aliases may be available" -ForegroundColor Yellow
 }
 
 Write-Host ""
