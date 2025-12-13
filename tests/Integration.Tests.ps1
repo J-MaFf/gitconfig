@@ -125,4 +125,20 @@ Describe "Git Aliases" {
         $result = & git config --get alias.cleanup
         $result | Should -Not -BeNullOrEmpty
     }
+
+    It "git branches alias should exist" {
+        $result = & git config --get alias.branches
+        $result | Should -Not -BeNullOrEmpty
+    }
+
+    It "git branches alias should have properly quoted format string" {
+        $result = & git config --get alias.branches
+        $result | Should -Match "--format='%\(refname:short\)'"
+    }
+
+    It "git branches alias should contain complete command with semicolons" {
+        $result = & git config --get alias.branches
+        $result | Should -Match "while read ref; do"
+        $result | Should -Match "2>/dev/null; done"
+    }
 }
