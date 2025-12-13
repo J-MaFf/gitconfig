@@ -153,4 +153,21 @@ Describe "Git Aliases" {
             Set-ItResult -Skipped -Because "Setup has not been run (cleanup alias not configured)"
         }
     }
+
+    It "git branches alias should exist" {
+        $result = & git config --get alias.branches
+        $result | Should -Not -BeNullOrEmpty
+    }
+
+    It "git branches alias should have properly quoted format string" {
+        $result = & git config --get alias.branches
+        # Verify the format string is quoted to prevent shell interpretation
+        $result | Should -Match "--format='%\([^)]+\)'"
+    }
+
+    It "git branches alias should contain complete command with semicolons" {
+        $result = & git config --get alias.branches
+        $result | Should -Match "while read ref; do"
+        $result | Should -Match "2>/dev/null; done"
+    }
 }
