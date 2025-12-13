@@ -92,6 +92,15 @@ This repository contains Git configuration files and helper scripts for managing
 - Keep aliases short and meaningful
 - Document complex shell commands with comments
 - Test aliases with: `git alias`
+- **IMPORTANT: Git config does NOT support backslashes in file paths** - Always use forward slashes (/) in paths, even on Windows. Git will reject INI lines with backslash-separated paths as invalid syntax.
+
+#### `.gitconfig.local` Generation
+
+- Machine-specific SSH signing configuration (1Password op-ssh-sign)
+- Must use forward slashes in all paths (Git config requirement)
+- Includes gpg.format=ssh, gpg.ssh.program, user.signingKey, and commit.gpgsign
+- Pattern: `$homeDir -replace '\\', '/'` to convert Windows paths to forward slashes
+- Example: `C:/Users/username/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe`
 
 #### `gitconfig_helper.py` Changes
 
@@ -108,6 +117,7 @@ This repository contains Git configuration files and helper scripts for managing
 - Add logging functionality
 - Include help text with `-Help` parameter
 - Test with and without admin privileges
+- **IMPORTANT: Fix script generation issues by modifying the script template, never by manually editing generated files** - If a generated file (like .gitconfig.local) has incorrect content, the script that generates it must be fixed so it produces the correct output
 
 ### Python Aliases
 

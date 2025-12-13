@@ -62,11 +62,24 @@ if (-not $isAdmin) {
 $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $homeDir = $env:USERPROFILE
 $scriptsDir = Join-Path $repoRoot "scripts"
+$cleanupScript = Join-Path $scriptsDir "Cleanup-GitConfig.ps1"
 
 Write-Host "GitConfig Setup" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host "Repository: $repoRoot" -ForegroundColor Green
 Write-Host "Home Directory: $homeDir" -ForegroundColor Green
+Write-Host ""
+
+# STEP 0: Clean up any existing installation first
+Write-Host "[STEP 0] Cleaning up previous installation..." -ForegroundColor Cyan
+Write-Host "-----" -ForegroundColor Cyan
+try {
+    & $cleanupScript -Force -ErrorAction Stop | Out-Null
+    Write-Host "[OK] Previous installation cleaned up" -ForegroundColor Green
+}
+catch {
+    Write-Host "[WARN] No previous installation found or cleanup failed (this is OK)" -ForegroundColor Yellow
+}
 Write-Host ""
 
 # Define files to symlink
@@ -145,7 +158,7 @@ else {
 	format = ssh
 
 [gpg "ssh"]
-	program = $homeDir\AppData\Local\Microsoft\WindowsApps\op-ssh-sign.exe
+	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe
 
 [commit]
 	gpgsign = true
