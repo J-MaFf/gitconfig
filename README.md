@@ -51,7 +51,15 @@ Personal Git configuration and utilities for cross-machine synchronization.
    .\scripts\Initialize-Symlinks.ps1
    ```
 
-3. Install the Python dependency:
+3. Initialize machine-specific configuration:
+
+   ```powershell
+   .\scripts\Initialize-LocalConfig.ps1
+   ```
+
+   This creates `~/.gitconfig.local` with safe directories and paths specific to your machine.
+
+4. Install the Python dependency:
 
    ```powershell
    python -m pip install rich
@@ -74,14 +82,15 @@ New-Item -ItemType SymbolicLink -Path "$home\.gitconfig_helper.py" -Target "$rep
 ### Setup Script Options
 
 ```powershell
-# Interactive mode (prompts before overwriting)
+# Initialize symlinks (requires admin privileges)
 .\scripts\Initialize-Symlinks.ps1
 
-# Force mode (overwrites without prompting)
-.\scripts\Initialize-Symlinks.ps1 -Force
+# Initialize local machine-specific configuration
+.\scripts\Initialize-LocalConfig.ps1
 
-# Display help
+# Display help for any script
 .\scripts\Initialize-Symlinks.ps1 -Help
+.\scripts\Initialize-LocalConfig.ps1 -Help
 ```
 
 ### Using Git Aliases
@@ -96,14 +105,32 @@ git cleanup        # Clean up local branches
 
 ## Machine-Agnostic Setup
 
-The configuration uses environment variables to work across machines:
+The configuration uses a two-file approach for cross-machine portability:
 
-- `${USERPROFILE}` - Home directory path (Windows)
-- Paths are relative to the home directory
+### Shared Configuration (`.gitconfig`)
+- User information, aliases, and common settings
+- Tracked in Git for consistency across machines
 
-This means you can clone the repository to different machines and symlink without modification.
+### Machine-Specific Configuration (`.gitconfig.local`)
+- Safe directories and local paths
+- Created by `Initialize-LocalConfig.ps1`
+- NOT tracked in Git (excluded in `.gitignore`)
+- Each machine has its own version
+
+This allows you to clone the repository to different machines and have each one automatically configure itself for local paths without modification.
 
 ## Configuration Details
+
+### Git Include Pattern
+
+The `.gitconfig` includes `~/.gitconfig.local` for machine-specific settings:
+
+```gitconfig
+[include]
+    path = ~/.gitconfig.local
+```
+
+This is a Git best practice for handling environment-specific configurations.
 
 ### SSH Signing
 

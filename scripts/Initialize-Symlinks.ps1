@@ -21,9 +21,11 @@ OPTIONS:
 
 DESCRIPTION:
     Creates symbolic links from your home directory (~) to the dotfiles repository.
+    Also optionally creates a scheduled task to run 'git pull' at login.
 
 REQUIREMENTS:
     - Administrator privileges (for creating symlinks on Windows)
+    - Administrator privileges (for creating scheduled task)
     - PowerShell 7+ recommended, but works with Windows PowerShell 5.1+
 
 EXAMPLE:
@@ -36,6 +38,9 @@ EXAMPLE:
 FILES LINKED:
     - .gitconfig
     - gitconfig_helper.py
+
+SCHEDULED TASKS:
+    - GitConfig Pull at Login (optional, runs Update-GitConfig.ps1 at user login)
 "@
     exit 0
 }
@@ -86,11 +91,83 @@ function New-Symlink {
 
     try {
         New-Item -ItemType SymbolicLink -Path $LinkPath -Target $TargetPath -Force | Out-Null
-        Write-Host "✓ Created symlink: $LinkPath -> $TargetPath" -ForegroundColor Green
+        Write-Host "[OK] Created symlink: $LinkPath -> $TargetPath" -ForegroundColor Greeneen
         return $true
     }
     catch {
-        Write-Host "✗ Failed to create symlink for $LinkPath" -ForegroundColor Red
+        Write-Host "[FAIL] Failed to create symlink for $LinkPath" -ForegroundColor Redr Red
+        Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+# Function to create scheduled task for git pull at login
+function Register-LoginTask {
+    param(
+        [string]$RepoRoot,
+        [bool]$Force
+    )
+
+    $taskName = "GitConfig Pull at Login"
+    $scriptPath = Join-Path $repoRoot "scripts\Update-GitConfig.ps1"
+
+    # Check if script exists
+    if (-not (Test-Path $scriptPath)) {
+        Write-Host "[WARN] Update-GitConfig.ps1 not found at $scriptPath" -ForegroundColor Yellow
+        Write-Host "  Skipping scheduled task creation." -ForegroundColor Yellow
+        return $false
+    }
+
+    # Check if task already exists
+    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+
+    if ($existingTask) {
+        if (-not $Force) {
+            $response = Read-Host "Scheduled task '$taskName' already exists. Replace? (y/n)"
+            if ($response -ne "y") {
+                Write-Host "Skipped scheduled task" -ForegroundColor Yellow
+                return $false
+            }
+        }
+        try {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false | Out-Null
+            Write-Host "Removed existing scheduled task: $taskName" -ForegroundColor Yellow
+        }
+        catch {
+            Write-Host "[FAIL] Failed to remove existing scheduled task" -ForegroundColor Redr Red
+            return $false
+        }
+    }
+
+    try {
+        # Create task action
+        $action = New-ScheduledTaskAction `
+            -Execute "PowerShell.exe" `
+            -Argument "-NoProfile -WindowStyle Hidden -File `"$scriptPath`""
+
+        # Create task trigger (at login)
+        $trigger = New-ScheduledTaskTrigger -AtLogOn
+
+        # Create task settings
+        $settings = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable
+
+        # Register the task
+        Register-ScheduledTask `
+            -TaskName $taskName `
+            -Action $action `
+            -Trigger $trigger `
+            -Settings $settings `
+            -Description "Automatically pull latest changes from gitconfig repository at user login" `
+            -Force | Out-Null
+
+        Write-Host "[OK] Created scheduled task: $taskName" -ForegroundColor Greeneen
+        return $true
+    }
+    catch {
+        Write-Host "[FAIL] Failed to create scheduled task" -ForegroundColor Redr Red
         Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
         return $false
     }
@@ -103,7 +180,7 @@ foreach ($file in $filesToLink) {
     $linkPath = Join-Path $homeDir $file
 
     if (-not (Test-Path $targetPath)) {
-        Write-Host "✗ Source file not found: $targetPath" -ForegroundColor Red
+        Write-Host "[FAIL] Source file not found: $targetPath" -ForegroundColor Redr Red
         continue
     }
 
@@ -117,21 +194,40 @@ Write-Host "Setup Complete!" -ForegroundColor Cyan
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host "Successfully linked $successCount file(s)" -ForegroundColor Green
 Write-Host ""
-Write-Host "Your .gitconfig and .gitconfig_helper.py are now symlinked from the repository." -ForegroundColor Cyan
+
+# Offer to create scheduled task
+Write-Host "Would you like to set up automatic 'git pull' at login?" -ForegroundColor Cyan
+$taskResponse = Read-Host "Create 'GitConfig Pull at Login' scheduled task? (y/n)"
+if ($taskResponse -eq "y") {
+    Write-Host ""
+    if (-not $isAdmin) {
+        Write-Host "[ERROR] Creating a scheduled task requires administrator privileges." -ForegroundColor Red
+        Write-Host "Please run this script as administrator to enable this feature." -ForegroundColor Red
+    }
+    else {
+        if (Register-LoginTask -RepoRoot $repoRoot -Force $Force) {
+            Write-Host "[OK] Scheduled task created successfully!" -ForegroundColor Greeneen
+        }
+    }
+    Write-Host ""
+}
+
+Write-Host "Your .gitconfig and gitconfig_helper.py are now symlinked from the repository." -ForegroundColor Cyan
 Write-Host "Any changes pushed to the repository will be reflected in your home directory." -ForegroundColor Cyan
 Write-Host ""
 
 # Test the symlink by running 'git alias'
 Write-Host "Testing symlink setup..." -ForegroundColor Cyan
 try {
-    $testOutput = git alias 2>&1 | Out-Null
+    $testOutput = git alias 2>&1
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "✓ Symlinks verified! Git aliases are working." -ForegroundColor Green
+        Write-Host "[OK] Symlinks verified! Git aliases are working." -ForegroundColor Greeneen
     }
     else {
-        Write-Host "⚠ Warning: git alias command failed. Verify symlinks manually with: git alias" -ForegroundColor Yellow
+        Write-Host "[WARN] git alias command failed. Verify symlinks manually with: git alias" -ForegroundColor Yellow
     }
 }
 catch {
-    Write-Host "⚠ Warning: Could not test symlinks. Verify manually with: git alias" -ForegroundColor Yellow
+    Write-Host "[WARN] Could not test symlinks. Verify manually with: git alias" -ForegroundColor Yellow
 }
+

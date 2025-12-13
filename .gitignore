@@ -1,5 +1,12 @@
+# Machine-specific local configuration (not version controlled)
+.gitconfig.local
+
 # Daily pull logs
 pull-daily.log
+
+# Python cache
+__pycache__/
+*.pyc
 
 # Note: knowledge-graph.jsonl is intentionally NOT ignored
 # It will be tracked in Git for backup and sync purposes (Memory MCP server knowledge graph)

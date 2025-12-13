@@ -1,3 +1,7 @@
+# Include machine-specific configuration (local paths, safe directories, etc.)
+[include]
+	path = ~/.gitconfig.local
+
 [user]
 	name = Joey Maffiola
 	email = 7maffiolajoey@gmail.com
@@ -5,26 +9,16 @@
 
 [push]
     autoSetupRemote = true
-[gpg]
-	format = ssh
-[gpg "ssh"]
-	program = C:\\Users\\jmaffiola\\AppData\\Local\\Microsoft\\WindowsApps\\op-ssh-sign.exe
-[commit]
-	gpgsign = true
 [alias]
     # List all aliases
     alias = !python ${USERPROFILE}/Documents/Scripts/gitconfig/gitconfig_helper.py print_aliases
     # Download all remote branches creating local counterparts
-    branches = !git fetch && git for-each-ref --format=%(refname:short) refs/remotes/origin/ | grep -v -e ^origin/HEAD$ -e ^origin$ | while read ref; do git branch --track ${ref#origin/} $ref 2>/dev/null; done
+    branches = "!git fetch && git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -v -e ^origin/HEAD$ -e ^origin$ | while read ref; do git branch --track ${ref#origin/} $ref 2>/dev/null; done"
     cleanup = !python ${USERPROFILE}/Documents/Scripts/gitconfig/gitconfig_helper.py cleanup $@
     # Delete local branches that are not present on the remote
+    # Manage machine-specific git configuration
+    localconfig = !git config --file ~/.gitconfig.local
 
-[safe]
-    directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setup
-    directory = C:/Users/jmaffiola/Documents/Scripts/winget-app-setup
-    directory = C:/Users/jmaffiola/Documents/Scripts/winget-install
-	directory = %(prefix)///10.210.3.10/dept/IT/Programs/Office/OfficeConfigs
-	directory = %(prefix)///KFWS9BDC01/DEPT/IT/Programs/Office/OfficeConfigs
 [init]
 	defaultBranch = main
 [core]

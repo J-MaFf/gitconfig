@@ -24,26 +24,65 @@ This repository contains Git configuration files and helper scripts for managing
       - With `--force`: Also deletes local-only branches (never had a remote)
   - Called via git aliases in `.gitconfig`
 
-- **`Initialize-Symlinks.ps1`** - PowerShell script to set up symlinks
+- **`Setup-GitConfig.ps1`** - Unified setup wrapper script
 
+  - Orchestrates complete portable git configuration setup
   - Creates symbolic links from home directory to repo files
-  - Supports `-Force` flag to overwrite without prompting
-  - Requires admin privileges for symlink creation
-  - Called during initial setup only
+  - Generates machine-specific `.gitconfig.local` with SSH signing and safe directories
+  - Creates Windows scheduled task for auto-sync at login
+  - Backs up existing files to `Existing.<filename>.bak` before overwriting
+  - Automatically elevates to admin when needed
+  - Supports `-Force` flag to skip prompts, `-NoTask` to skip task creation, `-Help` for usage
+  - Single command setup: `.\Setup-GitConfig.ps1 -Force`
 
-- **`pull-daily.ps1`** - Automated daily git pull script
+- **`Cleanup-GitConfig.ps1`** - Cleanup and reset utility
 
-  - Runs via Windows Task Scheduler (default: 8:00 AM daily)
+  - Removes all gitconfig-related setup for testing/uninstalling
+  - Backs up symlinks and config to `Existing.<filename>.bak`
+  - Unregisters scheduled task
+  - Self-verifies successful cleanup
+  - Automatically elevates to admin when needed
+  - Supports `-Force` flag to skip prompts, `-Help` for usage
+
+- **`Update-GitConfig.ps1`** - Automated git pull script
+
+  - Runs 'git pull' in the repository
+  - Scheduled to run via Windows Task Scheduler at user login
   - Logs all operations to `pull-daily.log`
   - Keeps the repository synchronized with remote changes
 
-- **`.gitignore`** - Excludes local logs and temporary files
+- **`.gitconfig`** - Main git configuration (version controlled)
 
+  - User information, aliases, and common settings
+  - Includes `~/.gitconfig.local` for machine-specific paths
+  - Portable across machines via git include pattern
+
+- **`.gitconfig.local`** - Machine-specific configuration (NOT version controlled)
+
+  - Safe directories configured per machine
+  - Created by `Initialize-LocalConfig.ps1`
+  - Excluded in `.gitignore`
+
+- **`.gitignore`** - Excludes local and temporary files
+
+  - `.gitconfig.local` - Machine-specific configuration
   - `pull-daily.log` - Daily pull task output
 
 - **`README.md`** - Project documentation
 
 ## Development Guidelines
+
+### Portability Requirements
+
+**All scripts and configurations must be portable across different computers and user accounts.**
+
+- **Never hardcode usernames or absolute paths** (e.g., `C:\Users\jmaffiola`)
+- **Use environment variables** instead:
+  - `$env:USERPROFILE` - User's home directory (e.g., `C:\Users\username`)
+  - `$env:HOMEDRIVE` - Drive letter (e.g., `C:`)
+- **Use relative paths** when possible within the repository
+- **Test scripts on multiple user accounts** before committing
+- **Document any machine-specific setup** required
 
 ### When Modifying Files
 
@@ -53,6 +92,15 @@ This repository contains Git configuration files and helper scripts for managing
 - Keep aliases short and meaningful
 - Document complex shell commands with comments
 - Test aliases with: `git alias`
+- **IMPORTANT: Git config does NOT support backslashes in file paths** - Always use forward slashes (/) in paths, even on Windows. Git will reject INI lines with backslash-separated paths as invalid syntax.
+
+#### `.gitconfig.local` Generation
+
+- Machine-specific SSH signing configuration (1Password op-ssh-sign)
+- Must use forward slashes in all paths (Git config requirement)
+- Includes gpg.format=ssh, gpg.ssh.program, user.signingKey, and commit.gpgsign
+- Pattern: `$homeDir -replace '\\', '/'` to convert Windows paths to forward slashes
+- Example: `C:/Users/username/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe`
 
 #### `gitconfig_helper.py` Changes
 
@@ -69,6 +117,7 @@ This repository contains Git configuration files and helper scripts for managing
 - Add logging functionality
 - Include help text with `-Help` parameter
 - Test with and without admin privileges
+- **IMPORTANT: Fix script generation issues by modifying the script template, never by manually editing generated files** - If a generated file (like .gitconfig.local) has incorrect content, the script that generates it must be fixed so it produces the correct output
 
 ### Python Aliases
 
@@ -93,15 +142,21 @@ Current custom aliases:
 1. **Initial Setup**
 
    - Clone the repository
-   - Run `Initialize-Symlinks.ps1` to create symlinks
+   - Run `Setup-GitConfig.ps1 -Force` to complete all setup steps
    - Verify with `git alias` command
 
-2. **Daily Updates**
+2. **Testing/Resetting**
 
-   - `pull-daily.ps1` runs automatically at 8:00 AM
+   - Run `Cleanup-GitConfig.ps1 -Force` to remove all setup
+   - Files are backed up to `Existing.<filename>.bak` for recovery
+   - Can re-run `Setup-GitConfig.ps1 -Force` to test fresh setup
+
+3. **Daily Updates**
+
+   - `Update-GitConfig.ps1` runs automatically at user login
    - Changes are automatically pulled from remote
 
-3. **Making Changes**
+4. **Making Changes**
    - Edit files in the repository
    - Commit with descriptive messages
    - Push to GitHub
@@ -111,7 +166,7 @@ Current custom aliases:
 
 - User: Joey Maffiola (7maffiolajoey@gmail.com)
 - Repository: https://github.com/J-MaFf/gitconfig
-- Local Path: C:\Users\jmaffiola\Documents\Scripts\gitconfig
+- Local Path: `$env:USERPROFILE\Documents\Scripts\gitconfig` (portable across all machines)
 
 ## Testing Recommendations
 

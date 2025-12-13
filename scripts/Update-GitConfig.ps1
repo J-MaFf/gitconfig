@@ -1,9 +1,9 @@
-# Daily Git Pull Script
+# Git Repository Auto-Update Script
 # This script runs 'git pull' in the gitconfig repository
-# Scheduled to run daily in the morning via Windows Task Scheduler
+# Scheduled to run at user login via Windows Task Scheduler
 
 param(
-    [string]$RepoPath = "C:\Users\jmaffiola\Documents\Scripts\gitconfig"
+    [string]$RepoPath = "$env:USERPROFILE\Documents\Scripts\gitconfig"
 )
 
 # Log file location
