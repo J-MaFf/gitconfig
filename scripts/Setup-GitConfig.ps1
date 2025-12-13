@@ -98,7 +98,18 @@ foreach ($item in $filesToLink) {
                 continue
             }
         }
-        Remove-Item $linkPath -Force | Out-Null
+        $backupPath = "$linkPath.bak"
+        try {
+            if (Test-Path $backupPath) {
+                Remove-Item $backupPath -Force | Out-Null
+            }
+            Rename-Item -Path $linkPath -NewName "$($item.File).bak" -Force | Out-Null
+            Write-Host "Backed up existing $($item.File) to $($item.File).bak" -ForegroundColor Yellow
+        }
+        catch {
+            Write-Host "[WARN] Could not backup existing $($item.File), removing instead" -ForegroundColor Yellow
+            Remove-Item $linkPath -Force | Out-Null
+        }
     }
 
     try {
