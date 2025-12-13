@@ -153,7 +153,8 @@ Describe "Setup-GitConfig.ps1" {
             $task = Get-ScheduledTask -TaskName "Update-GitConfig" -ErrorAction SilentlyContinue
             if ($task) {
                 $task | Should -Not -BeNullOrEmpty
-            } else {
+            }
+            else {
                 # Task may not exist if setup was run with -NoTask
                 Set-ItResult -Skipped -Because "Setup was run with -NoTask (scheduled task creation skipped)"
             }
@@ -164,7 +165,8 @@ Describe "Setup-GitConfig.ps1" {
             if ($task) {
                 $triggers = $task.Triggers
                 $triggers | Should -Not -BeNullOrEmpty
-            } else {
+            }
+            else {
                 Set-ItResult -Skipped -Because "Setup was run with -NoTask (scheduled task creation skipped)"
             }
         }
