@@ -115,26 +115,22 @@ import gitconfig_helper
 
         It "Should handle force parameter" {
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match "force.*=" -or `
-                $scriptContent | Should -Match "force\s*\)"
+            ($scriptContent -match "force.*=" -or $scriptContent -match "force\s*\)") | Should -Be $true
         }
 
         It "Should check for git repository" {
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match "git.*rev-parse" -or `
-                $scriptContent | Should -Match "git-dir"
+            ($scriptContent -match "git.*rev-parse" -or $scriptContent -match "git-dir") | Should -Be $true
         }
 
         It "Should delete branches with deleted remotes" {
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match "gone" -or `
-                $scriptContent | Should -Match "remote.*deleted"
+            ($scriptContent -match "gone" -or $scriptContent -match "remote.*deleted") | Should -Be $true
         }
 
         It "Should support both --force and -f flags" {
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match "--force" -and `
-                $scriptContent | Should -Match '"-f"'
+            ($scriptContent -match "--force" -and $scriptContent -match '"-f"') | Should -Be $true
         }
     }
 
@@ -143,8 +139,7 @@ import gitconfig_helper
             $result = & python $helperScript nonexistent_function 2>&1
             # Should display error message
             $output = $result -join "`n"
-            $output | Should -Match "not found" -or `
-                $output | Should -Match "Error"
+            ($output -match "not found" -or $output -match "Error") | Should -Be $true
         }
 
         It "Should handle no function name provided" {
@@ -156,9 +151,7 @@ import gitconfig_helper
 
         It "Should handle rich library auto-installation" {
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match "ImportError" -or `
-                $scriptContent | Should -Match "try:" -and `
-                $scriptContent | Should -Match "except"
+            (($scriptContent -match "ImportError") -or ($scriptContent -match "try:" -and $scriptContent -match "except")) | Should -Be $true
         }
     }
 
@@ -174,28 +167,24 @@ import gitconfig_helper
         It "Should work with Python ${USERPROFILE} variable" {
             $scriptContent = Get-Content $helperScript -Raw
             # Verify script uses proper Python path handling
-            $scriptContent | Should -Match "import" -and `
-                $scriptContent | Should -Match "subprocess"
+            ($scriptContent -match "import" -and $scriptContent -match "subprocess") | Should -Be $true
         }
     }
 
     Context "Rich Library Integration" {
         It "Should use Rich for formatted output" {
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match "from rich" -or `
-                $scriptContent | Should -Match "import.*rich"
+            ($scriptContent -match "from rich" -or $scriptContent -match "import.*rich") | Should -Be $true
         }
 
         It "Should use Rich Table for displaying data" {
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match "Table" -or `
-                $scriptContent | Should -Match "table"
+            ($scriptContent -match "Table" -or $scriptContent -match "table") | Should -Be $true
         }
 
         It "Should have styled console output" {
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match "Console" -or `
-                $scriptContent | Should -Match "\[.*\]"
+            ($scriptContent -match "Console" -or $scriptContent -match "\[.*\]") | Should -Be $true
         }
     }
 }
