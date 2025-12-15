@@ -6,6 +6,44 @@ This repository contains Git configuration files and helper scripts for managing
 
 ## Project Structure
 
+```
+gitconfig/
+├── README.md                           # Main project documentation
+├── .gitconfig                          # Main Git configuration (version controlled)
+├── .gitignore                          # Git ignore patterns
+├── gitconfig_helper.py                 # Python utility for Git operations
+├── knowledge-graph.jsonl               # Memory MCP server knowledge graph
+│
+├── .github/
+│   └── copilot-instructions.md        # Development guidelines and instructions
+│
+├── .vscode/
+│   ├── mcp.json                       # VS Code MCP server configuration
+│   └── settings.json                  # VS Code workspace settings
+│
+├── config/
+│   └── pester.config.ps1              # Pester test configuration
+│
+├── docs/
+│   ├── CHANGELOG.md                   # Version history and changes
+│   └── BRANCH_PROTECTION.md           # Branch protection rules documentation
+│
+├── scripts/
+│   ├── Setup-GitConfig.ps1            # Unified setup wrapper script
+│   ├── Initialize-Symlinks.ps1        # Create symbolic links
+│   ├── Initialize-LocalConfig.ps1     # Generate machine-specific config
+│   ├── Register-LoginTask.ps1         # Create scheduled task
+│   ├── Update-GitConfig.ps1           # Automated synchronization at login
+│   └── Cleanup-GitConfig.ps1          # Uninstall and reset utility
+│
+└── tests/
+    ├── run-tests.ps1                  # Test runner script
+    ├── Setup-GitConfig.Tests.ps1      # Setup script tests
+    ├── Cleanup-GitConfig.Tests.ps1    # Cleanup script tests
+    ├── gitconfig_helper.Tests.ps1     # Python helper tests
+    └── Integration.Tests.ps1          # Integration tests
+```
+
 ### Core Files
 
 - **`.gitconfig`** - Main Git configuration file with custom aliases and settings
@@ -13,6 +51,7 @@ This repository contains Git configuration files and helper scripts for managing
   - SSH signing key configuration (op-ssh-sign)
   - Custom git aliases for common workflows
   - Safe directory configurations for network repositories
+  - Includes `~/.gitconfig.local` for machine-specific paths
 
 - **`gitconfig_helper.py`** - Python utility script for Git operations
 
@@ -23,6 +62,13 @@ This repository contains Git configuration files and helper scripts for managing
       - Default: Deletes only branches with deleted remotes (merged branches)
       - With `--force`: Also deletes local-only branches (never had a remote)
   - Called via git aliases in `.gitconfig`
+
+- **`knowledge-graph.jsonl`** - Memory MCP server knowledge graph
+  - JSONL format (one JSON object per line)
+  - Documents project entities, observations, and relationships
+  - Tracked in Git for backup and synchronization across machines
+
+### Scripts (scripts/ folder)
 
 - **`Setup-GitConfig.ps1`** - Unified setup wrapper script
 
@@ -35,38 +81,86 @@ This repository contains Git configuration files and helper scripts for managing
   - Supports `-Force` flag to skip prompts, `-NoTask` to skip task creation, `-Help` for usage
   - Single command setup: `.\Setup-GitConfig.ps1 -Force`
 
-- **`Cleanup-GitConfig.ps1`** - Cleanup and reset utility
+- **`Initialize-Symlinks.ps1`** - Create symbolic links from home directory to repo files
 
+  - Creates symlinks for `.gitconfig` and `gitconfig_helper.py`
+  - Requires administrator privileges for symlink creation on Windows
+  - Supports `-Force` flag to overwrite existing files without prompting
+  - Supports `-Help` parameter for documentation
+
+- **`Initialize-LocalConfig.ps1`** - Generate machine-specific configuration
+
+  - Creates `~/.gitconfig.local` with SSH signing and safe directories
+  - Generates configuration specific to each machine
+  - Uses environment variables for portability
+
+- **`Register-LoginTask.ps1`** - Create Windows scheduled task for auto-sync
+
+  - Creates scheduled task to run `Update-GitConfig.ps1` at user login
+  - Supports `-Force` flag to overwrite existing task
+
+- **`Update-GitConfig.ps1`** - Automated synchronization at user login
+
+  - Switches to main branch
+  - Pulls latest changes from remote
+  - Syncs remote tracking branches (safe, doesn't modify user's work branches)
+  - Logs all operations to `docs/update-gitconfig.log`
+  - Runs silently via Windows Task Scheduler
+
+- **`Cleanup-GitConfig.ps1`** - Uninstall and reset utility
   - Removes all gitconfig-related setup for testing/uninstalling
   - Backs up symlinks and config to `Existing.<filename>.bak`
   - Unregisters scheduled task
   - Self-verifies successful cleanup
   - Automatically elevates to admin when needed
-  - Supports `-Force` flag to skip prompts, `-Help` for usage
 
-- **`Update-GitConfig.ps1`** - Automated git pull script
+### Documentation (docs/ folder)
 
-  - Runs 'git pull' in the repository
-  - Scheduled to run via Windows Task Scheduler at user login
-  - Logs all operations to `pull-daily.log`
-  - Keeps the repository synchronized with remote changes
+- **`CHANGELOG.md`** - Version history and changes
 
-- **`.gitconfig`** - Main git configuration (version controlled)
+  - Documents all versions starting with v0.1.0-pre
+  - Follows semantic versioning and Keep a Changelog format
 
-  - User information, aliases, and common settings
-  - Includes `~/.gitconfig.local` for machine-specific paths
-  - Portable across machines via git include pattern
+- **`BRANCH_PROTECTION.md`** - Branch protection rules documentation
+  - Documents GitHub branch protection rules for main branch
+  - Includes setup instructions via GitHub web UI and PowerShell CLI
+  - References GitHub API documentation
 
-- **`.gitconfig.local`** - Machine-specific configuration (NOT version controlled)
+### Configuration (config/ folder)
 
-  - Safe directories configured per machine
-  - Created by `Initialize-LocalConfig.ps1`
-  - Excluded in `.gitignore`
+- **`pester.config.ps1`** - Pester test configuration
+  - Configuration file for PowerShell Pester tests
+  - Located in config/ folder for better organization
 
-- **`.gitignore`** - Excludes local and temporary files
+### Tests (tests/ folder)
 
-  - `.gitconfig.local` - Machine-specific configuration
-  - `pull-daily.log` - Daily pull task output
+- **`run-tests.ps1`** - Test runner script
+
+  - Orchestrates all test execution
+  - Runs all PowerShell test files
+
+- **`Setup-GitConfig.Tests.ps1`** - Tests for Setup-GitConfig.ps1
+- **`Cleanup-GitConfig.Tests.ps1`** - Tests for Cleanup-GitConfig.ps1
+- **`gitconfig_helper.Tests.ps1`** - Tests for gitconfig_helper.py helper functions
+- **`Integration.Tests.ps1`** - End-to-end integration tests
+
+### GitHub Configuration (.github/ folder)
+
+- **`copilot-instructions.md`** - Development guidelines and instructions
+  - Semantic versioning reference (semver.org)
+  - Portability requirements and best practices
+  - Contribution guidelines
+
+### VS Code Configuration (.vscode/ folder)
+
+- **`mcp.json`** - VS Code MCP server configuration
+
+  - Memory MCP server configured at workspace level
+  - Uses `@modelcontextprotocol/server-memory` for knowledge graph
+
+- **`settings.json`** - VS Code workspace settings
+
+  - Project-specific editor configuration
 
 - **`README.md`** - Project documentation
 
