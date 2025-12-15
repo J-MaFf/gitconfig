@@ -72,6 +72,35 @@ This repository contains Git configuration files and helper scripts for managing
 
 ## Development Guidelines
 
+### Semantic Versioning
+
+This project follows [Semantic Versioning (semver.org)](https://semver.org/) for all releases and tags.
+
+**Key Principles:**
+
+- **Format:** `MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`
+  - `MAJOR` - Breaking changes
+  - `MINOR` - New features (backward compatible)
+  - `PATCH` - Bug fixes (backward compatible)
+  - `PRERELEASE` - Alpha, beta, RC versions (prefix with 0 for pre-release versions)
+  - `BUILD` - Build metadata (optional)
+
+**Pre-release Guidelines:**
+
+- Pre-release versions for initial development start with `0.x.y` (e.g., `v0.1.0-alpha`, `v0.1.0-beta`)
+- Use `-pre`, `-alpha`, `-beta`, or `-rc.N` suffixes for pre-release tags
+- Example progression: `v0.1.0-alpha` → `v0.1.0-beta` → `v0.1.0-rc.1` → `v0.1.0`
+- Do NOT use pre-release tags for stable releases
+
+**Release Process:**
+
+1. Use `git tag -a vX.Y.Z -m "Release description"` to create annotated tags
+2. Push tags with `git push origin vX.Y.Z`
+3. Update CHANGELOG with version-specific changes
+4. Major releases require documentation updates
+
+**Reference:** https://semver.org/
+
 ### Portability Requirements
 
 **All scripts and configurations must be portable across different computers and user accounts.**

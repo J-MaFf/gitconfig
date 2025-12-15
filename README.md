@@ -2,6 +2,8 @@
 
 Personal Git configuration and utilities for cross-machine synchronization.
 
+**Current Version:** `v0.1.0-pre` | [Changelog](CHANGELOG.md)
+
 ## Contents
 
 - **`.gitconfig`** - Git configuration with custom aliases and SSH signing setup
@@ -192,6 +194,25 @@ git pull
 ```
 
 Changes are immediately reflected in `~/.gitconfig` and `~/.gitconfig_helper.py` through symlinks.
+
+## Versioning
+
+This project follows [Semantic Versioning (semver.org)](https://semver.org/).
+
+- **Format:** `vMAJOR.MINOR.PATCH[-PRERELEASE]`
+- **Current Status:** Pre-release (`v0.1.0-pre`)
+- **See [CHANGELOG.md](CHANGELOG.md) for detailed version history and changes**
+
+### Version Progression
+
+The project is in initial development (0.x.y pre-release phase). Versions will progress as:
+
+- `v0.1.0-alpha` → `v0.1.0-beta` → `v0.1.0-rc.1` → `v0.1.0` (stable)
+
+Once stable `v1.0.0` is released, semantic versioning will strictly follow:
+- **MAJOR** - Breaking changes
+- **MINOR** - New backward-compatible features
+- **PATCH** - Bug fixes
 
 ## License
 
