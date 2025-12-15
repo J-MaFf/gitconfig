@@ -47,12 +47,14 @@ gitconfig/
 ### Core Files
 
 - **`.gitconfig`** - Main Git configuration file with custom aliases and settings
+
   - SSH signing key configuration (op-ssh-sign)
   - Custom git aliases for common workflows
   - Safe directory configurations for network repositories
   - Includes `~/.gitconfig.local` for machine-specific paths
 
 - **`gitconfig_helper.py`** - Python utility script for Git operations
+
   - Requires: `rich` library for formatted console output
   - Functions:
     - `print_aliases()` - Display all git aliases in a formatted table
@@ -69,6 +71,7 @@ gitconfig/
 ### Scripts (scripts/ folder)
 
 - **`Setup-GitConfig.ps1`** - Unified setup wrapper script
+
   - Orchestrates complete portable git configuration setup
   - Creates symbolic links from home directory to repo files
   - Generates machine-specific `.gitconfig.local` with SSH signing and safe directories
@@ -79,25 +82,29 @@ gitconfig/
   - Single command setup: `.\Setup-GitConfig.ps1 -Force`
 
 - **`Initialize-Symlinks.ps1`** - Create symbolic links from home directory to repo files
+
   - Creates symlinks for `.gitconfig` and `gitconfig_helper.py`
   - Requires administrator privileges for symlink creation on Windows
   - Supports `-Force` flag to overwrite existing files without prompting
   - Supports `-Help` parameter for documentation
 
 - **`Initialize-LocalConfig.ps1`** - Generate machine-specific configuration
+
   - Creates `~/.gitconfig.local` with SSH signing and safe directories
   - Generates configuration specific to each machine
   - Uses environment variables for portability
 
 - **`Register-LoginTask.ps1`** - Create Windows scheduled task for auto-sync
+
   - Creates scheduled task to run `Update-GitConfig.ps1` at user login
   - Supports `-Force` flag to overwrite existing task
 
 - **`Update-GitConfig.ps1`** - Automated synchronization at user login
+
   - Switches to main branch
   - Pulls latest changes from remote
   - Syncs remote tracking branches (safe, doesn't modify user's work branches)
-  - Logs all operations to `pull-daily.log`
+  - Logs all operations to `docs/update-gitconfig.log`
   - Runs silently via Windows Task Scheduler
 
 - **`Cleanup-GitConfig.ps1`** - Uninstall and reset utility
@@ -110,6 +117,7 @@ gitconfig/
 ### Documentation (docs/ folder)
 
 - **`CHANGELOG.md`** - Version history and changes
+
   - Documents all versions starting with v0.1.0-pre
   - Follows semantic versioning and Keep a Changelog format
 
@@ -127,6 +135,7 @@ gitconfig/
 ### Tests (tests/ folder)
 
 - **`run-tests.ps1`** - Test runner script
+
   - Orchestrates all test execution
   - Runs all PowerShell test files
 
@@ -145,10 +154,12 @@ gitconfig/
 ### VS Code Configuration (.vscode/ folder)
 
 - **`mcp.json`** - VS Code MCP server configuration
+
   - Memory MCP server configured at workspace level
   - Uses `@modelcontextprotocol/server-memory` for knowledge graph
 
 - **`settings.json`** - VS Code workspace settings
+
   - Project-specific editor configuration
 
 - **`README.md`** - Project documentation

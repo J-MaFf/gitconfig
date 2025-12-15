@@ -7,7 +7,7 @@ param(
 )
 
 # Log file location
-$logFile = "$RepoPath\pull-daily.log"
+$logFile = "$RepoPath\docs\update-gitconfig.log"
 
 # Function to log messages with timestamp
 function Write-Log {

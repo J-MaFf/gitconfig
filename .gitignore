@@ -1,8 +1,8 @@
 # Machine-specific local configuration (not version controlled)
 .gitconfig.local
 
-# Daily pull logs
-pull-daily.log
+# Update GitConfig logs
+docs/update-gitconfig.log
 
 # Python cache
 __pycache__/
