@@ -59,7 +59,7 @@ Describe "Update-GitConfig.ps1" {
         
         It "Should accept RepoPath parameter" {
             $scriptContent = Get-Content $script:scriptPath -Raw
-            $scriptContent | Should -Match "param\s*\(\s*\[string\]\s*\`$RepoPath"
+            $scriptContent | Should -Match 'param\s*\(\s*\[string\]\s*\$RepoPath'
         }
     }
     
@@ -413,9 +413,11 @@ Describe "Update-GitConfig.ps1" {
         It "Should handle non-existent repository path" {
             $nonExistentPath = Join-Path $TestDrive "non-existent-repo"
             
-            # The script currently throws when trying to write to log file in non-existent directory
-            # This is a known limitation - the script attempts to log before verifying the path
-            # In production, the scheduled task always points to a valid path
+            # NOTE: The script currently throws when trying to write to log file in non-existent directory.
+            # This is a known limitation - the script attempts to log before verifying the path exists.
+            # TODO: Consider enhancing Update-GitConfig.ps1 to check directory existence before logging,
+            # or ensure log directory exists before attempting writes.
+            # In production, the scheduled task always points to a valid path, so this is low priority.
             { & $script:scriptPath -RepoPath $nonExistentPath 2>&1 } | Should -Throw
         }
         
