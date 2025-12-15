@@ -32,8 +32,9 @@ try {
     Write-Log "Switching to main branch..."
     $switchResult = git checkout main 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Write-Log "WARNING: Failed to switch to main branch"
+        Write-Log "ERROR: Failed to switch to main branch"
         Write-Log "Output: $switchResult"
+        exit 1
     }
 
     # Step 2: Pull latest changes on main
