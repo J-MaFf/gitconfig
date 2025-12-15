@@ -50,7 +50,7 @@ def cleanup_branches(force=False):
             console.print(f"[cyan]Switching from '{current_branch}' to 'main'...[/cyan]")
             result = subprocess.run(["git", "checkout", "main"], capture_output=True, text=True, check=False)
             if result.returncode != 0:
-                console.print(f"[red]Error: Failed to switch to main branch[/red]")
+                console.print("[red]Error: Failed to switch to main branch[/red]")
                 console.print(f"[red]{result.stderr.strip()}[/red]")
                 return
             switched_branch = True
@@ -82,7 +82,6 @@ def cleanup_branches(force=False):
             return
 
         branches_to_delete = []
-        branches_no_remote = []
         for line in result_vv.stdout.strip().split("\n"):
             if not line.strip():
                 continue
@@ -131,7 +130,7 @@ def cleanup_branches(force=False):
             # Check if the original branch was deleted during cleanup
             if current_branch in deleted_branches:
                 console.print(f"[yellow]Note: Your original branch '{current_branch}' was deleted during cleanup.[/yellow]")
-                console.print(f"[cyan]Staying on 'main'.[/cyan]\n")
+                console.print("[cyan]Staying on 'main'.[/cyan]\n")
             else:
                 console.print(f"[cyan]Switching back to '{current_branch}'...[/cyan]")
                 result = subprocess.run(["git", "checkout", current_branch], capture_output=True, text=True, check=False)
