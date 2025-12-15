@@ -58,11 +58,21 @@ try {
         $remoteBranches = git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | Where-Object { $_ -notmatch '^origin/HEAD' }
         foreach ($branch in $remoteBranches) {
             $localBranch = $branch -replace '^origin/', ''
-            $trackingCheck = git branch --track $localBranch $branch 2>&1
+            # Check if the local branch already exists
+            git show-ref --verify --quiet "refs/heads/$localBranch"
             if ($LASTEXITCODE -eq 0) {
-                Write-Log "Created tracking branch: $localBranch"
+                Write-Log "Tracking branch already exists: $localBranch"
             }
-        }
+            else {
+                $trackingCheck = git branch --track $localBranch $branch 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Log "Created tracking branch: $localBranch"
+                }
+                else {
+                    Write-Log "WARNING: Failed to create tracking branch: $localBranch"
+                    Write-Log "Output: $trackingCheck"
+                }
+            }
         Write-Log "SUCCESS: Remote tracking branches synchronized"
     }
     else {
