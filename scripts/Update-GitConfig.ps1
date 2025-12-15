@@ -69,7 +69,7 @@ try {
         Write-Log "Output: $branchesResult"
     }
 
-    Write-Log "Repository synchronization completed successfully"
+    Write-Log "Repository synchronization process completed"
 
     Pop-Location
 }
