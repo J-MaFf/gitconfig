@@ -99,7 +99,7 @@ try {
 
     # Verify git can read the config
     Write-Host "Verifying git configuration..." -ForegroundColor Cyan
-    $gitTest = & git config --local --list 2>&1
+    & git config --local --list 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[OK] Git configuration verified!" -ForegroundColor Green
     }
