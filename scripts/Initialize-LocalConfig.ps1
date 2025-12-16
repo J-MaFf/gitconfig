@@ -63,6 +63,10 @@ try {
 # Machine-Specific Git Configuration
 # This file is automatically included by .gitconfig and should NOT be committed
 
+[core]
+	# Use global gitignore file
+	excludesfile = $($homeDir -replace '\\', '/')/.gitignore_global
+
 [gpg "ssh"]
 	# Machine-specific SSH signing program path
 	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe

@@ -85,6 +85,7 @@ Write-Host ""
 # Define files to symlink
 $filesToLink = @(
     @{ File = ".gitconfig" },
+    @{ File = ".gitignore_global" },
     @{ File = "gitconfig_helper.py" }
 )
 
@@ -154,6 +155,9 @@ else {
     try {
         $configContent = @"
 # Machine-Specific Git Configuration
+[core]
+	excludesfile = $($homeDir -replace '\\', '/')/.gitignore_global
+
 [gpg]
 	format = ssh
 
