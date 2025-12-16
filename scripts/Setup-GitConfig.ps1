@@ -187,9 +187,31 @@ else {
 
 Write-Host ""
 
-# STEP 3: Create Scheduled Task
+# STEP 3: Configure Global Gitignore
+Write-Host "[STEP 3] Configuring global gitignore..." -ForegroundColor Cyan
+Write-Host "-----" -ForegroundColor Cyan
+
+$gitignoreGlobalPath = "$homeDir\.gitignore_global"
+if (Test-Path $gitignoreGlobalPath) {
+    try {
+        # Convert path to forward slashes for git config
+        $gitignoreGlobalForward = $gitignoreGlobalPath -replace '\\', '/'
+        & git config --global core.excludesfile $gitignoreGlobalForward
+        Write-Host "[OK] Configured global excludesfile" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[FAIL] Could not configure global excludesfile" -ForegroundColor Red
+    }
+}
+else {
+    Write-Host "[WARN] .gitignore_global symlink not found" -ForegroundColor Yellow
+}
+
+Write-Host ""
+
+# STEP 4: Create Scheduled Task
 if (-not $NoTask) {
-    Write-Host "[STEP 3] Setting up scheduled task..." -ForegroundColor Cyan
+    Write-Host "[STEP 4] Setting up scheduled task..." -ForegroundColor Cyan
     Write-Host "-----" -ForegroundColor Cyan
 
     $taskName = "GitConfig Pull at Login"
@@ -239,8 +261,8 @@ if (-not $NoTask) {
     Write-Host ""
 }
 
-# STEP 4: Verify Setup
-Write-Host "[STEP 4] Verifying setup..." -ForegroundColor Cyan
+# STEP 5: Verify Setup
+Write-Host "[STEP 5] Verifying setup..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 
 foreach ($item in $filesToLink) {
