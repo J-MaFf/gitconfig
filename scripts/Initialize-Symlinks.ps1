@@ -37,6 +37,7 @@ EXAMPLE:
 
 FILES LINKED:
     - .gitconfig
+    - .gitignore_global
     - gitconfig_helper.py
 
 SCHEDULED TASKS:
@@ -66,6 +67,7 @@ Write-Host ""
 # Define files to symlink
 $filesToLink = @(
     ".gitconfig",
+    ".gitignore_global",
     "gitconfig_helper.py"
 )
 

@@ -7,6 +7,7 @@ Personal Git configuration and utilities for cross-machine synchronization.
 ## Contents
 
 - **`.gitconfig`** - Git configuration with custom aliases and SSH signing setup
+- **`.gitignore_global`** - Global gitignore patterns for IDEs, OS files, and development tools
 - **`.gitconfig_helper.py`** - Python utility for managing git aliases and branch cleanup
 - **`scripts/`** - PowerShell automation scripts
   - **`Initialize-Symlinks.ps1`** - Setup script for creating symlinks on Windows
@@ -76,6 +77,7 @@ $repo = "$env:USERPROFILE\Documents\Scripts\gitconfig"
 $home = $env:USERPROFILE
 
 New-Item -ItemType SymbolicLink -Path "$home\.gitconfig" -Target "$repo\.gitconfig" -Force
+New-Item -ItemType SymbolicLink -Path "$home\.gitignore_global" -Target "$repo\.gitignore_global" -Force
 New-Item -ItemType SymbolicLink -Path "$home\.gitconfig_helper.py" -Target "$repo\gitconfig_helper.py" -Force
 ```
 
@@ -110,10 +112,12 @@ git cleanup        # Clean up local branches
 The configuration uses a two-file approach for cross-machine portability:
 
 ### Shared Configuration (`.gitconfig`)
+
 - User information, aliases, and common settings
 - Tracked in Git for consistency across machines
 
 ### Machine-Specific Configuration (`.gitconfig.local`)
+
 - Safe directories and local paths
 - Created by `Initialize-LocalConfig.ps1`
 - NOT tracked in Git (excluded in `.gitignore`)
@@ -133,6 +137,22 @@ The `.gitconfig` includes `~/.gitconfig.local` for machine-specific settings:
 ```
 
 This is a Git best practice for handling environment-specific configurations.
+
+### Global Gitignore
+
+The `.gitignore_global` file is symlinked to `~/.gitignore_global` and automatically configured in `.gitconfig.local`. It contains patterns for:
+
+- **IDE and Editor Files** - VS Code, JetBrains, Sublime, Vim, Emacs, Atom
+- **OS-Specific Files** - macOS (.DS_Store), Windows (Thumbs.db), Linux (.directory)
+- **Language-Specific Artifacts**:
+  - Python: `__pycache__`, `*.pyc`, `.venv`, `venv/`
+  - Node.js: `node_modules/`, `npm-debug.log`
+  - Go, Java, Ruby, C/C++, and more
+- **Build Outputs** - `build/`, `dist/`, `target/`, compiled objects
+- **Local Configuration Files** - `.env`, `.secrets`, credentials, private keys
+- **Temporary Files** - `.tmp`, `.cache`, `.bak`, swap files
+
+These patterns prevent common development artifacts from being accidentally committed to repositories.
 
 ### SSH Signing
 
@@ -210,6 +230,7 @@ The project is in initial development (0.x.y pre-release phase). Versions will p
 - `v0.1.0-alpha` → `v0.1.0-beta` → `v0.1.0-rc.1` → `v0.1.0` (stable)
 
 Once stable `v1.0.0` is released, semantic versioning will strictly follow:
+
 - **MAJOR** - Breaking changes
 - **MINOR** - New backward-compatible features
 - **PATCH** - Bug fixes
