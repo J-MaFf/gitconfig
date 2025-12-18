@@ -33,6 +33,7 @@ This displays a formatted table showing each alias and its corresponding command
 **Purpose**: List all configured Git aliases in a formatted table
 
 **Usage**:
+
 ```bash
 git alias
 ```
@@ -40,6 +41,7 @@ git alias
 **Output**: Displays all custom aliases with their full command definitions
 
 **Example**:
+
 ```
 Alias          Command
 ─────────────────────────────────────────────────────
@@ -55,23 +57,27 @@ alias          [alias list script]
 **Purpose**: Download all remote branches and create local tracking branches
 
 **What it does**:
+
 1. Fetches latest changes from remote repository
 2. Lists all remote branches
 3. Creates local tracking branches for each remote branch
 4. Skips special refs like `origin/HEAD`
 
 **Usage**:
+
 ```bash
 git branches
 ```
 
 **When to use**:
+
 - After cloning a repository to get all branches locally
 - When a team member creates a new remote branch
 - To synchronize your local branch tracking with remote state
 - When joining a project with multiple feature branches
 
 **Example workflow**:
+
 ```bash
 # Clone a repository
 git clone https://github.com/username/project.git
@@ -86,6 +92,7 @@ git checkout bugfix/login-issue
 ```
 
 **What happens**:
+
 ```
 Fetching from origin...
 Creating local tracking branches...
@@ -104,16 +111,19 @@ Creating local tracking branches...
 **Modes**:
 
 **1. Default mode** - Delete branches with deleted remotes (merged branches)
+
 ```bash
 git cleanup
 ```
 
 Deletes local branches whose remote tracking branches have been deleted. This is safe because:
+
 - Remote branch was already deleted (likely merged)
 - Local branch is no longer being tracked
 - Deletion won't lose work already in the repository
 
 **2. Force mode** - Also delete local-only branches
+
 ```bash
 git cleanup --force
 # or
@@ -121,6 +131,7 @@ git cleanup -f
 ```
 
 Additionally deletes branches that never had a remote (local-only branches). Use with caution when:
+
 - You're sure the branch is no longer needed
 - Work has been merged or saved elsewhere
 - You want aggressive cleanup of abandoned branches
@@ -133,6 +144,7 @@ Additionally deletes branches that never had a remote (local-only branches). Use
 - **Before pushing changes**: Ensure local state matches intent
 
 **Example workflow**:
+
 ```bash
 # Merge PR, remote branch gets deleted
 # Local tracking branch still exists
@@ -155,6 +167,7 @@ Also deleting local-only branches:
 ```
 
 **Safety features**:
+
 - Won't delete your current branch
 - Shows what will be deleted before proceeding
 - Requires confirmation in interactive mode
@@ -167,6 +180,7 @@ Also deleting local-only branches:
 #### Combining Aliases in Workflows
 
 **Typical workflow sequence**:
+
 ```bash
 # 1. Get all branches
 git branches
@@ -209,6 +223,7 @@ Best practices for managing branches effectively.
 While not enforced, these conventions improve organization:
 
 **Feature branches**:
+
 ```
 feature/user-authentication
 feature/api-endpoints
@@ -216,6 +231,7 @@ feature/dashboard-redesign
 ```
 
 **Bugfix branches**:
+
 ```
 bugfix/login-error
 bugfix/memory-leak
@@ -223,12 +239,14 @@ fix/typo-in-docs
 ```
 
 **Hotfix branches** (urgent production fixes):
+
 ```
 hotfix/security-patch
 hotfix/critical-bug
 ```
 
 **Release branches**:
+
 ```
 release/v1.0.0
 release/v2.1.0
@@ -237,6 +255,7 @@ release/v2.1.0
 ### Creating and Tracking Branches
 
 **Create a feature branch**:
+
 ```bash
 # Create from main
 git checkout -b feature/my-feature
@@ -246,6 +265,7 @@ git checkout -b feature/my-feature existing-branch
 ```
 
 **Push and track**:
+
 ```bash
 # Push and set upstream
 git push -u origin feature/my-feature
@@ -255,6 +275,7 @@ git pull
 ```
 
 **Get all remote branches locally**:
+
 ```bash
 # Option 1: Use our alias
 git branches
@@ -266,6 +287,7 @@ git fetch --all
 ### Merging Branches
 
 **Standard merge process**:
+
 ```bash
 # Switch to target branch (usually main)
 git checkout main
@@ -282,6 +304,7 @@ git push
 ```
 
 **After PR merge on GitHub**:
+
 ```bash
 # Remote branch gets deleted on GitHub
 # Update local state
@@ -311,6 +334,7 @@ git cleanup       # Remove stale tracking branches
 ```
 
 **Cleanup workflow example**:
+
 ```bash
 # Check branches before cleanup
 git branch
@@ -333,6 +357,7 @@ Automatic repository synchronization and maintenance.
 **Purpose**: Automatically synchronize repository changes at user login
 
 **What it does**:
+
 1. Runs at Windows user login (via Scheduled Task)
 2. Switches to main branch
 3. Runs `git pull` to fetch latest changes
@@ -340,11 +365,13 @@ Automatic repository synchronization and maintenance.
 5. Logs all operations
 
 **Log location**:
+
 ```
 C:\Users\{username}\Documents\Scripts\gitconfig\docs\pull-daily.log
 ```
 
 **Log format**:
+
 ```
 [2025-12-18 09:15:32] Update-GitConfig started
 [2025-12-18 09:15:33] Switched to branch 'main'
@@ -354,6 +381,7 @@ C:\Users\{username}\Documents\Scripts\gitconfig\docs\pull-daily.log
 ```
 
 **Manual sync option**:
+
 ```bash
 # Run manually anytime
 C:\Users\{username}\Documents\Scripts\gitconfig\scripts\Update-GitConfig.ps1
@@ -365,21 +393,25 @@ pwsh -File "C:\Users\{username}\Documents\Scripts\gitconfig\scripts\Update-GitCo
 ### Scheduled Task Management
 
 **View scheduled task**:
+
 ```powershell
 Get-ScheduledTask -TaskName "Update Git Config" | Select-Object *
 ```
 
 **Manual task trigger**:
+
 ```powershell
 Start-ScheduledTask -TaskName "Update Git Config"
 ```
 
 **View task history**:
+
 ```powershell
 Get-ScheduledTaskInfo -TaskName "Update Git Config"
 ```
 
 **Check if auto-sync is running**:
+
 ```bash
 # Look for recent log entries
 Get-Content "C:\Users\7maff\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 20
@@ -388,17 +420,20 @@ Get-Content "C:\Users\7maff\Documents\Scripts\gitconfig\docs\pull-daily.log" -Ta
 ### Customizing Auto-Sync
 
 **Disable scheduled task** (if needed):
+
 ```powershell
 Disable-ScheduledTask -TaskName "Update Git Config"
 ```
 
 **Re-enable scheduled task**:
+
 ```powershell
 Enable-ScheduledTask -TaskName "Update Git Config"
 ```
 
 **Change auto-sync frequency**:
 Edit the scheduled task via Task Scheduler:
+
 1. Open Task Scheduler
 2. Navigate to `Library\Microsoft\Windows\PowerShell\ScheduledJobs`
 3. Find "Update Git Config" task
@@ -525,6 +560,7 @@ git log --oneline -n 20 origin/main
 **Symptoms**: When you run `git branch`, you don't see branches you know exist on the server.
 
 **Solution**:
+
 ```bash
 # Use our alias
 git branches
@@ -541,6 +577,7 @@ git branch -a
 **Symptoms**: You ran `git cleanup` and a branch you needed was deleted.
 
 **Prevention**:
+
 ```bash
 # Always check what cleanup will delete first
 git branch -vv
@@ -551,6 +588,7 @@ git cleanup --force  # Aggressive - removes all stale branches
 ```
 
 **Recovery** (if recently deleted):
+
 ```bash
 # Check reflog for deleted branch
 git reflog
@@ -566,6 +604,7 @@ git checkout -b feature/recovered-branch {commit-hash}
 **Symptoms**: Changes to `.gitconfig` aren't taking effect, or `gitconfig_helper.py` can't be found.
 
 **Verify symlinks**:
+
 ```powershell
 # Check if symlinks exist
 cmd /c dir "$env:USERPROFILE\.gitconfig" /L
@@ -575,6 +614,7 @@ cmd /c dir "$env:USERPROFILE\gitconfig_helper.py" /L
 ```
 
 **Recreate symlinks**:
+
 ```powershell
 # Run setup script
 cd ~\Documents\Scripts\gitconfig
@@ -588,6 +628,7 @@ cd ~\Documents\Scripts\gitconfig
 **Symptoms**: Running `git alias` shows an empty list or error.
 
 **Solution**:
+
 ```bash
 # Verify setup is complete
 git config --get-all alias.alias
@@ -606,6 +647,7 @@ Get-Command gitconfig_helper.py
 **Symptoms**: Repository isn't being synced automatically, log hasn't been updated.
 
 **Check task status**:
+
 ```powershell
 Get-ScheduledTask -TaskName "Update Git Config" | Select-Object State, LastTaskResult
 
@@ -614,11 +656,13 @@ Get-ScheduledTask -TaskName "Update Git Config" | Select-Object State, LastTaskR
 ```
 
 **View task history**:
+
 ```powershell
 Get-ScheduledTaskInfo -TaskName "Update Git Config" | Select-Object LastRunTime, LastTaskResult
 ```
 
 **Manually trigger task**:
+
 ```powershell
 Start-ScheduledTask -TaskName "Update Git Config"
 
@@ -627,6 +671,7 @@ Get-Content "~\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 10
 ```
 
 **Re-register task if needed**:
+
 ```powershell
 .\scripts\Cleanup-GitConfig.ps1 -Force
 .\scripts\Setup-GitConfig.ps1 -Force
@@ -639,6 +684,7 @@ Get-Content "~\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 10
 **Symptoms**: Running `git alias` or other Python-based aliases shows Python error.
 
 **Solution**:
+
 ```bash
 # Verify Python is installed
 python --version
@@ -676,6 +722,7 @@ The setup scripts automatically request admin elevation. If you still get permis
 **Symptoms**: Getting merge conflicts when pulling from main.
 
 **Solution**:
+
 ```bash
 # .gitconfig.local is machine-specific and shouldn't be in version control
 # It should be in .gitignore
@@ -729,6 +776,7 @@ Get-Content "~\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 5
 **If everything shows green** ✅ - Your setup is working correctly!
 
 **If something fails** ❌ - Run the setup script:
+
 ```powershell
 .\scripts\Setup-GitConfig.ps1 -Force
 ```
@@ -780,4 +828,4 @@ Get-Content "~\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 10
 ---
 
 **Last Updated**: December 18, 2025
-**Repository**: https://github.com/J-MaFf/gitconfig
+**Repository**: <https://github.com/J-MaFf/gitconfig>
