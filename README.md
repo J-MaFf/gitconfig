@@ -6,12 +6,16 @@ Personal Git configuration and utilities for cross-machine synchronization.
 
 ## Contents
 
-- **`.gitconfig`** - Git configuration with custom aliases and SSH signing setup
+- **`.gitconfig.template`** - Template for generating machine-specific Git configuration
 - **`.gitignore_global`** - Global gitignore patterns for IDEs, OS files, and development tools
-- **`.gitconfig_helper.py`** - Python utility for managing git aliases and branch cleanup
+- **`gitconfig_helper.py`** - Python utility for managing git aliases and branch cleanup
 - **`scripts/`** - PowerShell automation scripts
-  - **`Initialize-Symlinks.ps1`** - Setup script for creating symlinks on Windows
-  - **`pull-daily.ps1`** - Automated daily git pull script
+  - **`Setup-GitConfig.ps1`** - Unified setup wrapper script (creates symlinks, generates config, sets up scheduled task)
+  - **`Initialize-GitConfig.ps1`** - Generates `.gitconfig` from template with machine-specific paths
+  - **`Initialize-LocalConfig.ps1`** - Generates `.gitconfig.local` with SSH signing and safe directories
+  - **`Initialize-Symlinks.ps1`** - Creates symbolic links for `.gitignore_global` and helper scripts
+  - **`Update-GitConfig.ps1`** - Automated daily git pull script (runs at login)
+  - **`Cleanup-GitConfig.ps1`** - Uninstall and reset utility
 - **`docs/`** - Documentation and knowledge graph
   - **`knowledge-graph.jsonl`** - Entity and relation data for project documentation
 
@@ -47,22 +51,20 @@ Personal Git configuration and utilities for cross-machine synchronization.
    git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
    ```
 
-2. Run the setup script from the scripts directory with administrator privileges:
+2. Run the unified setup script with administrator privileges:
 
    ```powershell
    cd ~/Documents/Scripts/gitconfig
-   .\scripts\Initialize-Symlinks.ps1
+   .\scripts\Setup-GitConfig.ps1 -Force
    ```
 
-3. Initialize machine-specific configuration:
+   This single command will:
+   - Generate `~/.gitconfig` from the template with machine-specific paths
+   - Create symlinks for `.gitignore_global` and `gitconfig_helper.py`
+   - Generate `~/.gitconfig.local` with SSH signing configuration
+   - Set up a scheduled task for automatic updates at login
 
-   ```powershell
-   .\scripts\Initialize-LocalConfig.ps1
-   ```
-
-   This creates `~/.gitconfig.local` with safe directories and paths specific to your machine.
-
-4. Install the Python dependency:
+3. Install the Python dependency:
 
    ```powershell
    python -m pip install rich
@@ -70,15 +72,19 @@ Personal Git configuration and utilities for cross-machine synchronization.
 
 ### Manual Setup
 
-If you prefer to set up symlinks manually:
+If you prefer to run setup steps individually:
 
 ```powershell
 $repo = "$env:USERPROFILE\Documents\Scripts\gitconfig"
-$home = $env:USERPROFILE
 
-New-Item -ItemType SymbolicLink -Path "$home\.gitconfig" -Target "$repo\.gitconfig" -Force
-New-Item -ItemType SymbolicLink -Path "$home\.gitignore_global" -Target "$repo\.gitignore_global" -Force
-New-Item -ItemType SymbolicLink -Path "$home\.gitconfig_helper.py" -Target "$repo\gitconfig_helper.py" -Force
+# Generate .gitconfig from template
+.\scripts\Initialize-GitConfig.ps1 -Force
+
+# Create symlinks
+.\scripts\Initialize-Symlinks.ps1 -Force
+
+# Generate machine-specific configuration
+.\scripts\Initialize-LocalConfig.ps1 -Force
 ```
 
 ## Usage
@@ -86,11 +92,20 @@ New-Item -ItemType SymbolicLink -Path "$home\.gitconfig_helper.py" -Target "$rep
 ### Setup Script Options
 
 ```powershell
+# Unified setup (recommended) - runs all setup steps
+.\scripts\Setup-GitConfig.ps1 -Force
+
+# Without scheduled task creation
+.\scripts\Setup-GitConfig.ps1 -Force -NoTask
+
+# Generate .gitconfig from template
+.\scripts\Initialize-GitConfig.ps1 -Force
+
 # Initialize symlinks (requires admin privileges)
-.\scripts\Initialize-Symlinks.ps1
+.\scripts\Initialize-Symlinks.ps1 -Force
 
 # Initialize local machine-specific configuration
-.\scripts\Initialize-LocalConfig.ps1
+.\scripts\Initialize-LocalConfig.ps1 -Force
 
 # Display help for any script
 .\scripts\Initialize-Symlinks.ps1 -Help
@@ -109,31 +124,52 @@ git cleanup        # Clean up local branches
 
 ## Machine-Agnostic Setup
 
-The configuration uses a two-file approach for cross-machine portability:
+The configuration uses a **template-based generation** approach for maximum portability:
 
-### Shared Configuration (`.gitconfig`)
+### Template Configuration (`.gitconfig.template`)
 
+- Contains placeholders: `{{REPO_PATH}}` and `{{HOME_DIR}}`
+- Version controlled for consistency across machines
 - User information, aliases, and common settings
-- Tracked in Git for consistency across machines
 
-### Machine-Specific Configuration (`.gitconfig.local`)
+### Generated Configuration (`~/.gitconfig`)
 
-- Safe directories and local paths
+- Generated from template by `Initialize-GitConfig.ps1`
+- Placeholders replaced with machine-specific absolute paths
+- NOT tracked in Git (excluded in `.gitignore`)
+- Each machine generates its own version
+
+### Machine-Specific Configuration (`~/.gitconfig.local`)
+
+- SSH signing configuration and safe directories
 - Created by `Initialize-LocalConfig.ps1`
 - NOT tracked in Git (excluded in `.gitignore`)
 - Each machine has its own version
 
-This allows you to clone the repository to different machines and have each one automatically configure itself for local paths without modification.
+This template-based approach ensures:
+- ✅ No hardcoded paths in version control
+- ✅ Complete portability across different machines and users
+- ✅ Easy customization by editing the template
+- ✅ Consistent configuration through version-controlled template
 
 ## Configuration Details
 
-### Git Include Pattern
+### Git Configuration Generation
 
-The `.gitconfig` includes `~/.gitconfig.local` for machine-specific settings:
+The generated `~/.gitconfig` includes `~/.gitconfig.local` for machine-specific settings:
 
 ```gitconfig
 [include]
     path = ~/.gitconfig.local
+```
+
+The template uses placeholders that are replaced during generation:
+- `{{REPO_PATH}}` → Absolute path to the gitconfig repository
+- `{{HOME_DIR}}` → User's home directory path
+
+To regenerate after template changes:
+```powershell
+.\scripts\Initialize-GitConfig.ps1 -Force
 ```
 
 This is a Git best practice for handling environment-specific configurations.

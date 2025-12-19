@@ -2,14 +2,14 @@
 
 ## Repository Overview
 
-This repository contains Git configuration files and helper scripts for managing Git aliases and branch maintenance. It's designed to be symlinked from the home directory for easy access and version control.
+This repository contains Git configuration files and helper scripts for managing Git aliases and branch maintenance. It uses a **template-based generation** approach for maximum portability across machines.
 
 ## Project Structure
 
 ```
 gitconfig/
 ├── README.md                           # Main project documentation
-├── .gitconfig                          # Main Git configuration (version controlled)
+├── .gitconfig.template                 # Template for generating .gitconfig (version controlled)
 ├── .gitignore                          # Git ignore patterns
 ├── gitconfig_helper.py                 # Python utility for Git operations
 ├── knowledge-graph.jsonl               # Memory MCP server knowledge graph
@@ -30,6 +30,7 @@ gitconfig/
 │
 ├── scripts/
 │   ├── Setup-GitConfig.ps1            # Unified setup wrapper script
+│   ├── Initialize-GitConfig.ps1       # Generate .gitconfig from template
 │   ├── Initialize-Symlinks.ps1        # Create symbolic links
 │   ├── Initialize-LocalConfig.ps1     # Generate machine-specific config
 │   ├── Register-LoginTask.ps1         # Create scheduled task
@@ -39,6 +40,7 @@ gitconfig/
 └── tests/
     ├── run-tests.ps1                  # Test runner script
     ├── Setup-GitConfig.Tests.ps1      # Setup script tests
+    ├── Initialize-GitConfig.Tests.ps1 # Config generation tests
     ├── Cleanup-GitConfig.Tests.ps1    # Cleanup script tests
     ├── gitconfig_helper.Tests.ps1     # Python helper tests
     └── Integration.Tests.ps1          # Integration tests
@@ -46,13 +48,19 @@ gitconfig/
 
 ### Core Files
 
-- **`.gitconfig`** - Main Git configuration file with custom aliases and settings
+- **`.gitconfig.template`** - Template for generating machine-specific Git configuration
 
-  - SSH signing key configuration (op-ssh-sign)
+  - Contains placeholders: `{{REPO_PATH}}`, `{{HOME_DIR}}`
+  - Version controlled for consistency across machines
   - Custom git aliases for common workflows
-  - Safe directory configurations for network repositories
   - Includes `~/.gitconfig.local` for machine-specific paths
   - References `~/.gitignore_global` for project-wide ignore patterns
+
+- **`~/.gitconfig`** - Generated Git configuration (NOT version controlled)
+
+  - Generated from `.gitconfig.template` by `Initialize-GitConfig.ps1`
+  - Placeholders replaced with machine-specific absolute paths
+  - Each machine generates its own version during setup
 
 - **`.gitignore_global`** - Global gitignore patterns for all repositories
 
@@ -88,7 +96,8 @@ gitconfig/
 - **`Setup-GitConfig.ps1`** - Unified setup wrapper script
 
   - Orchestrates complete portable git configuration setup
-  - Creates symbolic links from home directory to repo files
+  - Generates `~/.gitconfig` from `.gitconfig.template` with machine-specific paths
+  - Creates symbolic links for `.gitignore_global` and `gitconfig_helper.py`
   - Generates machine-specific `.gitconfig.local` with SSH signing and safe directories
   - Creates Windows scheduled task for auto-sync at login
   - Backs up existing files to `Existing.<filename>.bak` before overwriting
@@ -96,9 +105,20 @@ gitconfig/
   - Supports `-Force` flag to skip prompts, `-NoTask` to skip task creation, `-Help` for usage
   - Single command setup: `.\Setup-GitConfig.ps1 -Force`
 
+- **`Initialize-GitConfig.ps1`** - Generate .gitconfig from template
+
+  - Generates `~/.gitconfig` from `.gitconfig.template`
+  - Replaces placeholders: `{{REPO_PATH}}`, `{{HOME_DIR}}`
+  - Converts paths to forward slashes for git config compatibility
+  - Creates backup if existing .gitconfig found
+  - Verifies generated config is valid INI format
+  - Supports `-Force` flag to overwrite without prompting
+  - Supports `-Help` parameter for documentation
+
 - **`Initialize-Symlinks.ps1`** - Create symbolic links from home directory to repo files
 
-  - Creates symlinks for `.gitconfig` and `gitconfig_helper.py`
+  - Creates symlinks for `.gitignore_global` and `gitconfig_helper.py`
+  - No longer creates `.gitconfig` symlink (now generated from template)
   - Requires administrator privileges for symlink creation on Windows
   - Supports `-Force` flag to overwrite existing files without prompting
   - Supports `-Help` parameter for documentation
@@ -224,7 +244,10 @@ This project follows [Semantic Versioning (semver.org)](https://semver.org/) for
 **All scripts and configurations must be portable across different computers and user accounts.**
 
 - **Never hardcode usernames or absolute paths** (e.g., `C:\Users\jmaffiola`)
-- **Use environment variables** instead:
+- **Use template placeholders** for dynamic values in `.gitconfig.template`:
+  - `{{REPO_PATH}}` - Repository absolute path (replaced during generation)
+  - `{{HOME_DIR}}` - User's home directory (replaced during generation)
+- **Use environment variables** in PowerShell scripts:
   - `$env:USERPROFILE` - User's home directory (e.g., `C:\Users\username`)
   - `$env:HOMEDRIVE` - Drive letter (e.g., `C:`)
 - **Use relative paths** when possible within the repository
@@ -233,13 +256,24 @@ This project follows [Semantic Versioning (semver.org)](https://semver.org/) for
 
 ### When Modifying Files
 
-#### `.gitconfig` Changes
+#### `.gitconfig.template` Changes
 
-- Use proper INI syntax
+- Use proper INI syntax with placeholders
 - Keep aliases short and meaningful
 - Document complex shell commands with comments
-- Test aliases with: `git alias`
+- Use `{{REPO_PATH}}` for repository-specific paths
+- Use `{{HOME_DIR}}` for home directory paths (if needed)
 - **IMPORTANT: Git config does NOT support backslashes in file paths** - Always use forward slashes (/) in paths, even on Windows. Git will reject INI lines with backslash-separated paths as invalid syntax.
+- Test generated config with: `.\scripts\Initialize-GitConfig.ps1 -Force && git alias`
+
+#### Config Generation (`Initialize-GitConfig.ps1`)
+
+- Reads `.gitconfig.template`
+- Replaces `{{REPO_PATH}}` with repository absolute path
+- Replaces `{{HOME_DIR}}` with user's home directory
+- Converts all Windows paths to forward slashes for git compatibility
+- Pattern: `$repoRoot -replace '\\', '/'`
+- Validates generated config with `git config --file <path> --list`
 
 #### `.gitconfig.local` Generation
 

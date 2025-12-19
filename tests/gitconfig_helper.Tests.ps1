@@ -157,8 +157,8 @@ import gitconfig_helper
 
     Context "Integration with Git Aliases" {
         It "Should be callable via git alias (if configured)" {
-            # Verify the script is referenced in .gitconfig
-            $gitConfigPath = Join-Path $repoRoot ".gitconfig"
+            # Verify the script is referenced in .gitconfig.template
+            $gitConfigPath = Join-Path $repoRoot ".gitconfig.template"
             $gitConfigContent = Get-Content $gitConfigPath -Raw
 
             $gitConfigContent | Should -Match "gitconfig_helper"
