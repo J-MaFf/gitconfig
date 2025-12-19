@@ -10,7 +10,7 @@ BeforeAll {
 
     # Check if running on Windows
     $script:platformIsWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : $true
-    
+
     # Check if running as admin (Windows only)
     if ($script:platformIsWindows) {
         try {
@@ -24,12 +24,10 @@ BeforeAll {
         $script:isAdmin = $false
     }
 
-    # Note: Setup execution is skipped in non-interactive Pester environment
-    # The tests verify the setup output/configuration assuming setup has been run separately
-    # This avoids issues with Read-Host prompts in non-interactive test execution
-    if ($script:isAdmin -and -not [System.Environment]::UserInteractive) {
-        Write-Host "Running in non-interactive Pester extension environment - skipping setup execution" -ForegroundColor Yellow
-        Write-Host "Run setup manually: cd $script:repoRoot; .\scripts\Setup-GitConfig.ps1 -Force" -ForegroundColor Cyan
+    # Run setup if in interactive mode
+    if ($script:isAdmin -and [System.Environment]::UserInteractive) {
+        Write-Host "Running Setup-GitConfig.ps1 for testing..." -ForegroundColor Cyan
+        & $script:scriptPath -Force -NoTask -ErrorAction SilentlyContinue | Out-Null
     }
 }
 

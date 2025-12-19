@@ -52,6 +52,16 @@ gitconfig/
   - Custom git aliases for common workflows
   - Safe directory configurations for network repositories
   - Includes `~/.gitconfig.local` for machine-specific paths
+  - References `~/.gitignore_global` for project-wide ignore patterns
+
+- **`.gitignore_global`** - Global gitignore patterns for all repositories
+
+  - IDE configurations (VS Code, JetBrains, Vim, Sublime, Emacs, Atom)
+  - OS-specific files (macOS, Windows, Linux)
+  - Language artifacts (Python, Node.js, Go, Java, Ruby, C/C++)
+  - Build outputs and temporary files
+  - Local configuration and credentials
+  - Symlinked to `~/.gitignore_global` for all Git repositories
 
 - **`gitconfig_helper.py`** - Python utility script for Git operations
 
@@ -64,9 +74,14 @@ gitconfig/
   - Called via git aliases in `.gitconfig`
 
 - **`knowledge-graph.jsonl`** - Memory MCP server knowledge graph
+
   - JSONL format (one JSON object per line)
   - Documents project entities, observations, and relationships
   - Tracked in Git for backup and synchronization across machines
+
+- **`pull-daily.log`** - Log file for automated daily synchronization
+  - Records all operations from `Update-GitConfig.ps1` scheduled task
+  - Useful for troubleshooting auto-sync issues
 
 ### Scripts (scripts/ folder)
 
@@ -147,9 +162,18 @@ gitconfig/
 ### GitHub Configuration (.github/ folder)
 
 - **`copilot-instructions.md`** - Development guidelines and instructions
+
   - Semantic versioning reference (semver.org)
   - Portability requirements and best practices
   - Contribution guidelines
+
+- **`WORKFLOW.md`** - Comprehensive workflow documentation
+  - Git aliases usage guide with examples
+  - Branch management best practices
+  - Automated task documentation
+  - Daily development flow walkthrough
+  - Extensive troubleshooting section
+  - Quick reference and common scenarios
 
 ### VS Code Configuration (.vscode/ folder)
 
@@ -257,6 +281,10 @@ Current custom aliases:
 
 - `git alias` - List all aliases in a formatted table
 - `git branches` - Download all remote branches and create local tracking branches
+  - Uses `git fetch` to sync remote refs
+  - Creates local tracking branches for each remote branch
+  - Error suppression (|| true) to handle existing branches gracefully
+  - Returns exit code 0 for successful completion
 - `git cleanup` - Delete branches with deleted remotes (merged branches)
   - `git cleanup --force` (or `-f`) - Also delete local-only branches that never had a remote
 

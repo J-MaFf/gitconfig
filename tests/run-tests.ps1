@@ -65,27 +65,36 @@ else {
     Write-Host "Running on non-Windows platform. Windows-specific tests will be skipped." -ForegroundColor Yellow
 }
 
-# Build Pester configuration
-$pesterParams = @{
-    Path = $Path
-    Passthru = $PassThru
-    Show = 'All'
+# Build Pester configuration using Pester 5 Configuration object
+$pesterConfig = @{
+    Run          = @{
+        Path     = $Path
+        PassThru = $PassThru
+    }
+    Output       = @{
+        Verbosity = 'Detailed'
+    }
+    CodeCoverage = @{
+        Enabled = $false
+    }
 }
 
+# Add tag filters if specified
 if ($Tag) {
-    $pesterParams['Tag'] = $Tag
+    $pesterConfig.Run['IncludeTag'] = $Tag
 }
 
 if ($ExcludeTag) {
-    $pesterParams['ExcludeTag'] = $ExcludeTag
+    $pesterConfig.Run['ExcludeTag'] = $ExcludeTag
 }
 
 Write-Host "Running Pester Tests for GitConfig" -ForegroundColor Cyan
 Write-Host "===================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Run tests
-$results = Invoke-Pester @pesterParams
+# Run tests using Pester 5 configuration
+$config = New-PesterConfiguration -Hashtable $pesterConfig
+$results = Invoke-Pester -Configuration $config
 
 # Exit with appropriate code
 if ($results.FailedCount -gt 0) {
