@@ -1,6 +1,9 @@
 # Machine-specific local configuration (not version controlled)
 .gitconfig.local
 
+# Generated git configuration (created from .gitconfig.template)
+.gitconfig
+
 # Update GitConfig logs
 docs/update-gitconfig.log
 

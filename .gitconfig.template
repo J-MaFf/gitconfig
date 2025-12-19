@@ -1,0 +1,30 @@
+# Git Configuration Template
+# This file is used to generate ~/.gitconfig during setup
+# Placeholders: {{REPO_PATH}}, {{HOME_DIR}}
+
+# Include machine-specific configuration (local paths, safe directories, etc.)
+[include]
+	path = ~/.gitconfig.local
+
+[user]
+	name = Joey Maffiola
+	email = 7maffiolajoey@gmail.com
+
+[push]
+    autoSetupRemote = true
+
+[alias]
+    # List all aliases
+    alias = !python {{REPO_PATH}}/gitconfig_helper.py print_aliases
+    # Download all remote branches creating local counterparts
+    branches = "!git fetch && git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -v -e ^origin/HEAD$ -e ^origin$ | while read ref; do git branch --track ${ref#origin/} $ref 2>/dev/null; done"
+    cleanup = !python {{REPO_PATH}}/gitconfig_helper.py cleanup $@
+    # Delete local branches that are not present on the remote
+    # Manage machine-specific git configuration
+    localconfig = !git config --file ~/.gitconfig.local
+
+[init]
+	defaultBranch = main
+
+[core]
+	editor = code --wait
