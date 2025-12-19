@@ -6,6 +6,7 @@
 [include]
 	path = ~/.gitconfig.local
 
+# User identification - Customize for your own use
 [user]
 	name = Joey Maffiola
 	email = 7maffiolajoey@gmail.com
