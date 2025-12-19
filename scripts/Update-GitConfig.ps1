@@ -73,6 +73,7 @@ try {
                     Write-Log "Output: $trackingCheck"
                 }
             }
+        }
         Write-Log "SUCCESS: Remote tracking branches synchronized"
     }
     else {
