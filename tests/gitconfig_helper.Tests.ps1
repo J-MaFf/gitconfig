@@ -175,7 +175,7 @@ import gitconfig_helper
             # Create a temporary test repository
             $script:testDir = New-Item -ItemType Directory -Path "$env:TEMP\git_test_$(Get-Random)" -Force
             Push-Location $script:testDir
-            
+
             # Initialize git repo
             & git init 2>&1 | Out-Null
             & git config user.email "test@example.com" 2>&1 | Out-Null
@@ -192,13 +192,13 @@ import gitconfig_helper
             Pop-Location
             $tempDir = New-Item -ItemType Directory -Path "$env:TEMP\not_git_$(Get-Random)" -Force
             Push-Location $tempDir
-            
+
             $result = & python $script:helperScript switch_to_main 2>&1
             $output = $result -join "`n"
-            
+
             $output | Should -Match "not in a git repository"
             $LASTEXITCODE | Should -Be 1
-            
+
             Pop-Location
             Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -208,13 +208,13 @@ import gitconfig_helper
             New-Item -Path "test.txt" -Value "test" -Force | Out-Null
             & git add . 2>&1 | Out-Null
             & git commit -m "Initial commit" 2>&1 | Out-Null
-            
+
             # Make uncommitted changes
             Add-Content -Path "test.txt" -Value "uncommitted"
-            
+
             $result = & python $script:helperScript switch_to_main 2>&1
             $output = $result -join "`n"
-            
+
             $output | Should -Match "uncommitted changes"
             $output | Should -Match "commit or stash"
             $LASTEXITCODE | Should -Be 1
@@ -225,10 +225,10 @@ import gitconfig_helper
             New-Item -Path "test.txt" -Value "test" -Force | Out-Null
             & git add . 2>&1 | Out-Null
             & git commit -m "Initial commit" 2>&1 | Out-Null
-            
+
             $result = & python $script:helperScript switch_to_main 2>&1
             $output = $result -join "`n"
-            
+
             $output | Should -Match "already on main"
             $output | Should -Match "Successfully"
             $LASTEXITCODE | Should -Be 0
@@ -243,7 +243,7 @@ import gitconfig_helper
 
         It "Should provide clear error messages for each failure scenario" {
             $scriptContent = Get-Content $script:helperScript -Raw
-            
+
             # Verify error messages exist for key scenarios
             ($scriptContent -match "Fetching updates" -and $scriptContent -match "Switching from") | Should -Be $true
             ($scriptContent -match "Uncommitted changes detected" -and $scriptContent -match "Merge conflict detected") | Should -Be $true
@@ -259,7 +259,7 @@ import gitconfig_helper
             New-Item -Path "test.txt" -Value "test" -Force | Out-Null
             & git add . 2>&1 | Out-Null
             & git commit -m "Initial commit" 2>&1 | Out-Null
-            
+
             # This should succeed since fetch will just skip if no remote
             $result = & python $script:helperScript switch_to_main 2>&1
             # Should not crash (exit code should be defined)
@@ -270,7 +270,7 @@ import gitconfig_helper
             New-Item -Path "test.txt" -Value "test" -Force | Out-Null
             & git add . 2>&1 | Out-Null
             & git commit -m "Initial commit" 2>&1 | Out-Null
-            
+
             & python $script:helperScript switch_to_main 2>&1 | Out-Null
             $LASTEXITCODE | Should -Be 0
         }
@@ -281,10 +281,9 @@ import gitconfig_helper
             & git add . 2>&1 | Out-Null
             & git commit -m "Initial commit" 2>&1 | Out-Null
             Add-Content -Path "test.txt" -Value "uncommitted"
-            
+
             & python $script:helperScript switch_to_main 2>&1 | Out-Null
             $LASTEXITCODE | Should -Be 1
         }
     }
-
-
+}
