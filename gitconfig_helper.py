@@ -99,11 +99,11 @@ def cleanup_branches(force=False):
             has_no_remote = "[origin/" not in line
             remote_is_gone = ": gone]" in line
 
-            if has_no_remote:
-                # Auto-delete branches with no remote tracking (merged/deleted remotes)
+            if remote_is_gone:
+                # Auto-delete branches where remote has been deleted (merged branches)
                 branches_to_delete.append(branch_name)
-            elif remote_is_gone and force:
-                # Delete branches where remote explicitly marked as gone if --force specified
+            elif has_no_remote and force:
+                # Delete local-only branches (never had a remote) only with --force flag
                 branches_to_delete.append(branch_name)
 
         # Delete the identified branches
