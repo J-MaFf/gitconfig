@@ -8,7 +8,7 @@ Personal Git configuration and utilities for cross-machine synchronization.
 
 - **`.gitconfig.template`** - Template for generating machine-specific Git configuration
 - **`.gitignore_global`** - Global gitignore patterns for IDEs, OS files, and development tools
-- **`gitconfig_helper.py`** - Python utility for managing git aliases and branch cleanup
+- **`gitconfig_helper.py`** - Python utility for managing git aliases, branch cleanup, and main branch operations
 - **`scripts/`** - PowerShell automation scripts
   - **`Setup-GitConfig.ps1`** - Unified setup wrapper script (creates symlinks, generates config, sets up scheduled task)
   - **`Initialize-GitConfig.ps1`** - Generates `.gitconfig` from template with machine-specific paths
@@ -26,6 +26,12 @@ Personal Git configuration and utilities for cross-machine synchronization.
 - **`git alias`** - List all configured git aliases in a formatted table
 - **`git branches`** - Download all remote branches and create local tracking branches
 - **`git cleanup`** - Delete local branches that no longer have remote tracking
+- **`git main`** - Switch to main branch with full error handling
+  - Fetches updates from remote (with pruning)
+  - Checks for uncommitted changes (prevents data loss)
+  - Switches to main branch
+  - Pulls latest changes
+  - Detects and reports merge conflicts
 
 ### Git Configuration
 
@@ -120,6 +126,7 @@ After installation, use the configured aliases:
 git alias          # Show all aliases
 git branches       # Track all remote branches
 git cleanup        # Clean up local branches
+git main           # Switch to main with automatic updates
 ```
 
 ## Machine-Agnostic Setup
@@ -147,6 +154,7 @@ The configuration uses a **template-based generation** approach for maximum port
 - Each machine has its own version
 
 This template-based approach ensures:
+
 - ✅ No hardcoded paths in version control
 - ✅ Complete portability across different machines and users
 - ✅ Easy customization by editing the template
@@ -164,10 +172,12 @@ The generated `~/.gitconfig` includes `~/.gitconfig.local` for machine-specific 
 ```
 
 The template uses placeholders that are replaced during generation:
+
 - `{{REPO_PATH}}` → Absolute path to the gitconfig repository
 - `{{HOME_DIR}}` → User's home directory path
 
 To regenerate after template changes:
+
 ```powershell
 .\scripts\Initialize-GitConfig.ps1 -Force
 ```
