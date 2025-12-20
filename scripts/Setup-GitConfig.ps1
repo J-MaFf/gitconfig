@@ -5,6 +5,7 @@
 param(
     [switch]$Force = $false,
     [switch]$NoTask = $false,
+    [switch]$NoPrompt = $false,
     [switch]$Help = $false
 )
 
@@ -44,6 +45,7 @@ if (-not $isAdmin) {
 
     if ($Force) { $scriptArgs += "-Force" }
     if ($NoTask) { $scriptArgs += "-NoTask" }
+    if ($NoPrompt) { $scriptArgs += "-NoPrompt" }
 
     Write-Host "Relaunching with administrator privileges..." -ForegroundColor Cyan
     Write-Host ""
@@ -331,5 +333,8 @@ Write-Host ""
 Write-Host "Setup Complete!" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Press Enter to exit..." -ForegroundColor Cyan
-Read-Host | Out-Null
+
+if (-not $NoPrompt) {
+    Write-Host "Press Enter to exit..." -ForegroundColor Cyan
+    Read-Host | Out-Null
+}
