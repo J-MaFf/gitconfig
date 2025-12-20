@@ -6,7 +6,12 @@ BeforeAll {
     $script:logFile = Join-Path $script:testRepo "docs\update-gitconfig.log"
 
     # Check if running on Windows
-    $script:platformIsWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : $true
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        $script:platformIsWindows = $IsWindows
+    }
+    else {
+        $script:platformIsWindows = $true
+    }
 
     # Helper function to create a test git repository
     function New-TestRepository {
@@ -132,6 +137,12 @@ Describe "Update-GitConfig.ps1" {
             git checkout -b feature-branch 2>&1 | Out-Null
             Pop-Location
 
+            # Ensure we're not in the test repo directory for cleanup
+            $currentPath = Get-Location
+            if ($currentPath.Path -eq $script:testRepo) {
+                Pop-Location
+            }
+
             # Remove existing log file
             if (Test-Path $script:logFile) {
                 Remove-Item $script:logFile -Force
@@ -199,23 +210,26 @@ Describe "Update-GitConfig.ps1" {
             New-Item -Path $script:testRepo -ItemType Directory -Force | Out-Null
             Push-Location $script:testRepo
 
-            # Clone from remote
-            git clone $remoteRepo . 2>&1 | Out-Null
-            git config user.email "test@example.com"
-            git config user.name "Test User"
+            try {
+                # Clone from remote
+                git clone $remoteRepo . 2>&1 | Out-Null
+                git config user.email "test@example.com"
+                git config user.name "Test User"
 
-            # Create initial commit
-            New-Item -Path "docs" -ItemType Directory -Force | Out-Null
-            "# Test" | Out-File -FilePath "README.md" -Encoding utf8
-            git add .
-            git commit -m "Initial" 2>&1 | Out-Null
-            git push origin HEAD:main 2>&1 | Out-Null
+                # Create initial commit
+                New-Item -Path "docs" -ItemType Directory -Force | Out-Null
+                "# Test" | Out-File -FilePath "README.md" -Encoding utf8
+                git add .
+                git commit -m "Initial" 2>&1 | Out-Null
+                git push origin HEAD:main 2>&1 | Out-Null
 
-            # Set main as default branch
-            git checkout -b main 2>&1 | Out-Null
-            git branch --set-upstream-to=origin/main main 2>&1 | Out-Null
-
-            Pop-Location
+                # Set main as default branch
+                git checkout -b main 2>&1 | Out-Null
+                git branch --set-upstream-to=origin/main main 2>&1 | Out-Null
+            }
+            finally {
+                Pop-Location
+            }
 
             # Remove existing log file
             if (Test-Path $script:logFile) {
@@ -282,38 +296,41 @@ Describe "Update-GitConfig.ps1" {
             New-Item -Path $script:testRepo -ItemType Directory -Force | Out-Null
             Push-Location $script:testRepo
 
-            # Clone from remote
-            git clone $remoteRepo . 2>&1 | Out-Null
-            git config user.email "test@example.com"
-            git config user.name "Test User"
+            try {
+                # Clone from remote
+                git clone $remoteRepo . 2>&1 | Out-Null
+                git config user.email "test@example.com"
+                git config user.name "Test User"
 
-            # Create initial commit on main
-            New-Item -Path "docs" -ItemType Directory -Force | Out-Null
-            "# Test" | Out-File -FilePath "README.md" -Encoding utf8
-            git add .
-            git commit -m "Initial" 2>&1 | Out-Null
-            git push origin HEAD:main 2>&1 | Out-Null
+                # Create initial commit on main
+                New-Item -Path "docs" -ItemType Directory -Force | Out-Null
+                "# Test" | Out-File -FilePath "README.md" -Encoding utf8
+                git add .
+                git commit -m "Initial" 2>&1 | Out-Null
+                git push origin HEAD:main 2>&1 | Out-Null
 
-            # Create additional remote branches
-            git checkout -b feature-1 2>&1 | Out-Null
-            "Feature 1" | Out-File -FilePath "feature1.txt" -Encoding utf8
-            git add .
-            git commit -m "Feature 1" 2>&1 | Out-Null
-            git push origin feature-1 2>&1 | Out-Null
+                # Create additional remote branches
+                git checkout -b feature-1 2>&1 | Out-Null
+                "Feature 1" | Out-File -FilePath "feature1.txt" -Encoding utf8
+                git add .
+                git commit -m "Feature 1" 2>&1 | Out-Null
+                git push origin feature-1 2>&1 | Out-Null
 
-            git checkout main 2>&1 | Out-Null
-            git checkout -b feature-2 2>&1 | Out-Null
-            "Feature 2" | Out-File -FilePath "feature2.txt" -Encoding utf8
-            git add .
-            git commit -m "Feature 2" 2>&1 | Out-Null
-            git push origin feature-2 2>&1 | Out-Null
+                git checkout main 2>&1 | Out-Null
+                git checkout -b feature-2 2>&1 | Out-Null
+                "Feature 2" | Out-File -FilePath "feature2.txt" -Encoding utf8
+                git add .
+                git commit -m "Feature 2" 2>&1 | Out-Null
+                git push origin feature-2 2>&1 | Out-Null
 
-            # Switch back to main and delete local feature branches
-            git checkout main 2>&1 | Out-Null
-            git branch -D feature-1 2>&1 | Out-Null
-            git branch -D feature-2 2>&1 | Out-Null
-
-            Pop-Location
+                # Switch back to main and delete local feature branches
+                git checkout main 2>&1 | Out-Null
+                git branch -D feature-1 2>&1 | Out-Null
+                git branch -D feature-2 2>&1 | Out-Null
+            }
+            finally {
+                Pop-Location
+            }
 
             # Remove existing log file
             if (Test-Path $script:logFile) {
@@ -454,35 +471,38 @@ Describe "Update-GitConfig.ps1" {
             New-Item -Path $script:testRepo -ItemType Directory -Force | Out-Null
             Push-Location $script:testRepo
 
-            # Clone from remote
-            git clone $remoteRepo . 2>&1 | Out-Null
-            git config user.email "test@example.com"
-            git config user.name "Test User"
+            try {
+                # Clone from remote
+                git clone $remoteRepo . 2>&1 | Out-Null
+                git config user.email "test@example.com"
+                git config user.name "Test User"
 
-            # Create initial structure
-            New-Item -Path "docs" -ItemType Directory -Force | Out-Null
-            "# Test" | Out-File -FilePath "README.md" -Encoding utf8
-            git add .
-            git commit -m "Initial" 2>&1 | Out-Null
-            git push origin HEAD:main 2>&1 | Out-Null
+                # Create initial structure
+                New-Item -Path "docs" -ItemType Directory -Force | Out-Null
+                "# Test" | Out-File -FilePath "README.md" -Encoding utf8
+                git add .
+                git commit -m "Initial" 2>&1 | Out-Null
+                git push origin HEAD:main 2>&1 | Out-Null
 
-            # Create a remote branch
-            git checkout -b remote-feature 2>&1 | Out-Null
-            "Remote Feature" | Out-File -FilePath "remote.txt" -Encoding utf8
-            git add .
-            git commit -m "Remote feature" 2>&1 | Out-Null
-            git push origin remote-feature 2>&1 | Out-Null
+                # Create a remote branch
+                git checkout -b remote-feature 2>&1 | Out-Null
+                "Remote Feature" | Out-File -FilePath "remote.txt" -Encoding utf8
+                git add .
+                git commit -m "Remote feature" 2>&1 | Out-Null
+                git push origin remote-feature 2>&1 | Out-Null
 
-            # Create a local-only branch and switch to it
-            git checkout -b local-feature 2>&1 | Out-Null
-            "Local Feature" | Out-File -FilePath "local.txt" -Encoding utf8
-            git add .
-            git commit -m "Local feature" 2>&1 | Out-Null
+                # Create a local-only branch and switch to it
+                git checkout -b local-feature 2>&1 | Out-Null
+                "Local Feature" | Out-File -FilePath "local.txt" -Encoding utf8
+                git add .
+                git commit -m "Local feature" 2>&1 | Out-Null
 
-            # Delete remote tracking branch locally to test sync
-            git branch -D remote-feature 2>&1 | Out-Null
-
-            Pop-Location
+                # Delete remote tracking branch locally to test sync
+                git branch -D remote-feature 2>&1 | Out-Null
+            }
+            finally {
+                Pop-Location
+            }
 
             # Remove existing log file
             if (Test-Path $script:logFile) {

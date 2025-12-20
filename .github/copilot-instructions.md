@@ -322,9 +322,80 @@ This ensures all changes are reviewed and tracked through pull requests.
 When adding new Python-based git aliases:
 
 1. Add the function to `gitconfig_helper.py`
-2. Add a corresponding git alias in `.gitconfig`
-3. Use the pattern: `!python ${USERPROFILE}/Documents/Scripts/gitconfig/gitconfig_helper.py function_name $@`
-   - Note: Use `$@` to pass command-line arguments/flags to the Python script
+2. Add a corresponding git alias in `.gitconfig.template`
+3. Use the pattern: `main = !python {{REPO_PATH}}/gitconfig_helper.py function_name`
+   - Use `{{REPO_PATH}}` placeholder in template (gets replaced during setup)
+   - Pass command-line arguments after the function name if needed
+
+### Using the Python Helper for New Functions
+
+The Python utility file provides a robust foundation for implementing git alias functions. When creating new functions for git operations:
+
+**Function Pattern to Follow:**
+
+```python
+def your_function_name():
+    """Brief description of what the function does.
+
+    Steps:
+    1. First step
+    2. Second step
+    3. etc.
+    """
+    console = Console()
+
+    try:
+        # Verify we're in a git repository
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            capture_output=True, text=True, check=False
+        )
+        if result.returncode != 0:
+            console.print("[red]Error: Not in a git repository[/red]")
+            return 1
+
+        # Your implementation here with Rich console output
+        console.print("[cyan]Status message[/cyan]")
+        console.print("[green]OK Success message[/green]")
+        return 0
+
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        return 1
+```
+
+**Key Requirements:**
+
+- Use `subprocess.run()` for git commands with `capture_output=True, text=True, check=False`
+- Return `0` for success, `1+` for specific failure types
+- Use Rich console with color codes: `[red]`, `[green]`, `[cyan]`, `[yellow]`, `[dim]`
+- Check for git repository at start: `git rev-parse --git-dir`
+- Provide clear error messages for each failure point
+- Support passing arguments via `sys.argv[2:]`
+- Update the `__main__` section to handle the new command
+
+**Adding to .gitconfig.template:**
+
+```ini
+[alias]
+    your_alias = !python {{REPO_PATH}}/gitconfig_helper.py your_function_name
+```
+
+**Examples in Repository:**
+
+- `switch_to_main()` - Full error handling with merge conflict detection
+- `cleanup_branches(force=False)` - Complex branch operations with Rich tables
+- `print_aliases()` - Table formatting and display
+
+**Testing New Functions:**
+
+Add comprehensive test cases to `tests/gitconfig_helper.Tests.ps1`:
+
+- Verify git repo detection
+- Test error scenarios (uncommitted changes, failed operations)
+- Verify exit codes (0 = success, 1 = failure)
+- Check Rich console output formatting
+- Use temporary test repositories for integration testing
 
 ### Git Aliases Reference
 
@@ -338,6 +409,13 @@ Current custom aliases:
   - Returns exit code 0 for successful completion
 - `git cleanup` - Delete branches with deleted remotes (merged branches)
   - `git cleanup --force` (or `-f`) - Also delete local-only branches that never had a remote
+- `git main` - Switch to main branch with full error handling
+  - Fetches updates from remote (with pruning)
+  - Checks for uncommitted changes (prevents data loss)
+  - Switches to main branch
+  - Pulls latest changes
+  - Detects and reports merge conflicts
+  - Clear error messages guide user through resolution
 
 ## Workflow
 

@@ -8,7 +8,12 @@ BeforeAll {
     }
 
     # Detect platform
-    $script:platformIsWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : $true
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        $script:platformIsWindows = $IsWindows
+    }
+    else {
+        $script:platformIsWindows = $true
+    }
 
     # Choose PowerShell executable based on platform
     $script:pwshExe = if ($script:platformIsWindows) { "powershell" } else { "pwsh" }
