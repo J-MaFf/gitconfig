@@ -194,7 +194,7 @@ else {
 
 # Check git still works
 try {
-    $gitVersion = & git --version 2>&1
+    & git --version > $null 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[OK] Git still functional" -ForegroundColor Green
     }

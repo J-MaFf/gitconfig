@@ -1,7 +1,6 @@
 BeforeAll {
-    $repoRoot = Split-Path -Parent $PSScriptRoot
-    $helperScript = Join-Path $repoRoot "gitconfig_helper.py"
-    $pythonExe = "python"
+    $script:repoRoot = Split-Path -Parent $PSScriptRoot
+    $script:helperScript = Join-Path $script:repoRoot "gitconfig_helper.py"
 }
 
 Describe "gitconfig_helper.py" {
@@ -13,39 +12,39 @@ Describe "gitconfig_helper.py" {
         }
 
         It "Script has valid Python syntax" {
-            $result = & python -m py_compile $helperScript 2>&1
+            & python -m py_compile $script:helperScript 2>&1
             $LASTEXITCODE | Should -Be 0
         }
 
         It "Script can be imported without errors" {
-            $repoRootForward = $repoRoot -replace '\\', '/'
+            $repoRootForward = $script:repoRoot -replace '\\', '/'
             $pythonCode = @"
 import sys
 sys.path.insert(0, '$repoRootForward')
 import gitconfig_helper
 "@
-            $result = & python -c $pythonCode 2>&1
+            & python -c $pythonCode 2>&1
             $LASTEXITCODE | Should -Be 0
         }
     }
 
     Context "print_aliases Function" {
         It "Should accept 'print_aliases' function name" {
-            $result = & python $helperScript print_aliases 2>&1
+            & python $script:helperScript print_aliases 2>&1
             # Should complete without error (exit code 0)
             # Output might be empty if no aliases are configured
             $LASTEXITCODE | Should -Be 0
         }
 
         It "Should return formatted output when called" {
-            $result = & python $helperScript print_aliases 2>&1
+            $result = & python $script:helperScript print_aliases 2>&1
             $output = $result -join "`n"
             # Should contain some output (either aliases or empty table)
             $output | Should -Not -BeNullOrEmpty
         }
 
         It "Should output contain 'Git Aliases' table header" {
-            $result = & python $helperScript print_aliases 2>&1
+            $result = & python $script:helperScript print_aliases 2>&1
             $output = $result -join "`n"
             # The table should mention aliases
             ($output -like "*alias*" -or $output -like "*Git*") | Should -Be $true
@@ -55,7 +54,7 @@ import gitconfig_helper
     Context "cleanup Function" {
         It "Should accept 'cleanup' function name without arguments" {
             # Just verify it can be called - actual cleanup depends on git state
-            $result = & python $helperScript cleanup 2>&1
+            $result = & python $script:helperScript cleanup 2>&1
             # Should complete execution (may return 0 or non-zero depending on git state)
             $result | Should -Not -BeNullOrEmpty
         }
