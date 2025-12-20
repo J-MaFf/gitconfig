@@ -218,7 +218,7 @@ def get_git_aliases():
 
 def switch_to_main():
     """Switch to main branch with full error handling and conflict detection.
-    
+
     Steps:
     1. Verify we're in a git repository
     2. Fetch updates from remote
@@ -251,7 +251,7 @@ def switch_to_main():
             console.print("[red]Error: Failed to fetch from remote[/red]")
             console.print(f"[red]{result.stderr.strip()}[/red]")
             return 1
-        console.print("[green]✓ Fetch complete[/green]")
+        console.print("[green]OK Fetch complete[/green]")
 
         # Step 3: Check for uncommitted changes
         result_status = subprocess.run(
@@ -271,22 +271,22 @@ def switch_to_main():
                 console.print("[red]Error: Failed to checkout main branch[/red]")
                 console.print(f"[red]{result.stderr.strip()}[/red]")
                 return 1
-            console.print("[green]✓ Switched to main[/green]")
+            console.print("[green]OK Switched to main[/green]")
         else:
             console.print("[cyan]Already on main branch[/cyan]")
 
         # Step 5: Pull latest changes
         console.print("[cyan]Pulling latest changes...[/cyan]")
         result = subprocess.run(["git", "pull"], capture_output=True, text=True, check=False)
-        
+
         if result.returncode != 0:
             # Check if it's a merge conflict
             result_status = subprocess.run(
                 ["git", "status", "--porcelain"], capture_output=True, text=True, check=True
             )
-            
+
             if "UU" in result_status.stdout or "AA" in result_status.stdout or "DD" in result_status.stdout:
-                console.print("[red]✗ Merge conflict detected during pull![/red]")
+                console.print("[red]CONFLICT Merge conflict detected during pull![/red]")
                 console.print("[yellow]Resolve conflicts and commit:[/yellow]")
                 console.print(result_status.stdout)
                 console.print("[cyan]After resolving, run: git add . && git commit[/cyan]")
@@ -295,9 +295,9 @@ def switch_to_main():
                 console.print("[red]Error: Pull failed[/red]")
                 console.print(f"[red]{result.stderr.strip()}[/red]")
                 return 1
-        
-        console.print("[green]✓ Pull complete[/green]")
-        console.print("[green]✓ Successfully switched to main and updated![/green]")
+
+        console.print("[green]OK Pull complete[/green]")
+        console.print("[green]OK Successfully switched to main and updated![/green]")
         return 0
 
     except subprocess.CalledProcessError as e:
