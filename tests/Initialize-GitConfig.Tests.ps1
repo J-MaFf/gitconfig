@@ -146,7 +146,6 @@ Describe "Initialize-GitConfig.ps1" {
 
     Context "Error Handling" {
         It "Should fail gracefully if template is missing" {
-            $missingTemplatePath = Join-Path $script:repoRoot ".gitconfig.missing"
             $scriptContent = Get-Content $script:scriptPath -Raw
             $scriptContent | Should -Match 'Template not found'
         }
