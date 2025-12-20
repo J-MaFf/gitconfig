@@ -73,6 +73,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Merged branches are removed without requiring separate `git cleanup` call
   - Local-only branches are preserved (use `git cleanup --force` if needed)
 
+### Improved
+
+- **`git main` Workflow Order**
+  - Main branch is pulled/updated before cleanup runs
+  - Cleanup has accurate information about deleted branches
+  - Ensures current branch (with deleted remote) is safely switched before cleanup
+  - Logical sequence: switch to main → pull latest → cleanup stale branches
+
 ### Changed
 
 - **BREAKING**: `.gitconfig` is now generated from `.gitconfig.template` instead of being version controlled
