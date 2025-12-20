@@ -242,7 +242,7 @@ import gitconfig_helper
             ($output -match "already on main" -or $output -match "Fetching") | Should -Be $true
             # Test should verify exit code 0 for clean state
             $LASTEXITCODE | Should -Be 0
-            
+
             # Cleanup
             Remove-Item $bareRepo -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -296,7 +296,7 @@ import gitconfig_helper
             & python $script:helperScript switch_to_main 2>&1 | Out-Null
             # Successful execution should always return exit code 0
             $LASTEXITCODE | Should -Be 0
-            
+
             # Cleanup
             Remove-Item $bareRepo -Recurse -Force -ErrorAction SilentlyContinue
         }
