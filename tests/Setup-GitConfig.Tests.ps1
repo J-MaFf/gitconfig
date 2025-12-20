@@ -96,7 +96,6 @@ Describe "Setup-GitConfig.ps1" {
 
         It "Should have valid INI format" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
             $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
-            $content = Get-Content $localConfigPath -Raw
 
             # Should not throw git config error
             $result = & git config -f $localConfigPath --list 2>$null
