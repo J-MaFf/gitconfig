@@ -97,7 +97,8 @@ Describe "Initialize-GitConfig.ps1" {
         It "Generated config should contain absolute paths" {
             $generatedContent = Get-Content $script:outputPath -Raw
             # Should have actual repository path, not relative or placeholder
-            $generatedContent | Should -Match 'python\s+/.*gitconfig_helper\.py'
+            # Matches both Unix (/path/to/gitconfig_helper.py) and Windows (C:/path/to/gitconfig_helper.py)
+            $generatedContent | Should -Match 'python\s+[A-Za-z]?:?/.*gitconfig_helper\.py'
         }
 
         It "Generated config should preserve [include] section" {
@@ -124,18 +125,18 @@ Describe "Initialize-GitConfig.ps1" {
             # Create a dummy .gitconfig
             $dummyContent = "# Test config"
             Set-Content -Path $script:outputPath -Value $dummyContent -Force
-            
+
             # Run generation with Force
             & $script:scriptPath -Force | Out-Null
-            
+
             # Check backup was created
             $backupPath = "$($script:outputPath).bak"
             $backupPath | Should -Exist
-            
+
             # Verify backup contains old content
             $backupContent = Get-Content $backupPath -Raw
             $backupContent | Should -Match "# Test config"
-            
+
             # Clean up backup
             if (Test-Path $backupPath) {
                 Remove-Item $backupPath -Force
