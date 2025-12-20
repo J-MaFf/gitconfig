@@ -239,6 +239,23 @@ This project follows [Semantic Versioning (semver.org)](https://semver.org/) for
 
 **Reference:** https://semver.org/
 
+### Branch Protection Rules
+
+**CRITICAL: The `main` branch is protected and does NOT accept direct commits.**
+
+- **All changes to `main` must go through pull requests**
+- **Never commit directly to `main` branch**
+- **Always create a feature/bugfix branch for any changes**
+- **Workflow:**
+  1. Create a new branch: `git checkout -b feature/your-feature-name`
+  2. Make your changes and commit
+  3. Push the branch: `git push origin feature/your-feature-name`
+  4. Open a pull request on GitHub
+  5. PR gets merged to `main` (only valid merge method allowed)
+  6. Delete the feature branch after merge: `git cleanup`
+
+This ensures all changes are reviewed and tracked through pull requests.
+
 ### Portability Requirements
 
 **All scripts and configurations must be portable across different computers and user accounts.**
