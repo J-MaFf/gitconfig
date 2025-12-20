@@ -224,8 +224,8 @@ def switch_to_main():
     2. Fetch updates from remote
     3. Check for uncommitted changes
     4. Switch to main branch
-    5. Clean up branches with deleted remotes
-    6. Pull latest changes
+    5. Pull latest changes
+    6. Clean up branches with deleted remotes
     7. Detect and report merge conflicts
     """
     console = Console()
@@ -276,11 +276,7 @@ def switch_to_main():
         else:
             console.print("[cyan]Already on main branch[/cyan]")
 
-        # Step 5: Clean up branches with deleted remotes
-        console.print("[cyan]Cleaning up branches with deleted remotes...[/cyan]")
-        cleanup_branches(force=False)
-
-        # Step 6: Pull latest changes
+        # Step 5: Pull latest changes
         console.print("[cyan]Pulling latest changes...[/cyan]")
         result = subprocess.run(["git", "pull"], capture_output=True, text=True, check=False)
 
@@ -300,6 +296,10 @@ def switch_to_main():
                 console.print("[red]Error: Pull failed[/red]")
                 console.print(f"[red]{result.stderr.strip()}[/red]")
                 return 1
+
+        # Step 6: Clean up branches with deleted remotes
+        console.print("[cyan]Cleaning up branches with deleted remotes...[/cyan]")
+        cleanup_branches(force=False)
 
         console.print("[green]OK Successfully switched to main and updated![/green]")
         return 0
