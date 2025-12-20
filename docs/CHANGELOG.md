@@ -63,7 +63,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## Unreleased
+## [Unreleased]
+
+### Added
+
+- **Enhanced `git main` Alias**
+  - Automatic cleanup of branches with deleted remotes during `git main`
+  - Integrated `cleanup_branches()` function into switch_to_main workflow
+  - Merged branches are removed without requiring separate `git cleanup` call
+  - Local-only branches are preserved (use `git cleanup --force` if needed)
 
 ### Changed
 

@@ -28,6 +28,7 @@ Personal Git configuration and utilities for cross-machine synchronization.
 - **`git cleanup`** - Delete local branches that no longer have remote tracking
 - **`git main`** - Switch to main branch with full error handling
   - Fetches updates from remote (with pruning)
+  - Cleans up branches with deleted remotes (automatic merged branch cleanup)
   - Checks for uncommitted changes (prevents data loss)
   - Switches to main branch
   - Pulls latest changes
