@@ -65,6 +65,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- **BREAKING**: `.gitconfig` is now generated from `.gitconfig.template` instead of being version controlled
+  - Existing setup will require running `Setup-GitConfig.ps1` again to regenerate
+  - Benefits: No hardcoded paths, complete portability across machines
+- Updated `Setup-GitConfig.ps1` to generate config instead of creating symlink
+- `.gitconfig` is no longer a symlink - it's a generated file in home directory
+- Only `.gitignore_global` and `gitconfig_helper.py` are symlinked now
+
+### Added
+
+- **Template-Based Configuration**
+  - `.gitconfig.template` - Version-controlled template with placeholders
+  - `Initialize-GitConfig.ps1` - Script to generate `.gitconfig` from template
+  - Placeholders: `{{REPO_PATH}}`, `{{HOME_DIR}}` replaced during generation
+  - Automatic path conversion to forward slashes for git compatibility
+
+- **Tests**
+  - `Initialize-GitConfig.Tests.ps1` - Comprehensive tests for config generation
+  - Tests verify placeholder replacement, path conversion, INI format validity
+
+### Improved
+
+- **Portability**: No hardcoded paths in version control
+- **Maintainability**: Changes to template automatically propagate on regeneration
+- **Documentation**: Updated README, copilot-instructions.md to reflect new architecture
+- **Testing**: Updated `Setup-GitConfig.Tests.ps1` to verify generation instead of symlinking
+
 ### Planned
 
 - Additional git aliases for common workflows

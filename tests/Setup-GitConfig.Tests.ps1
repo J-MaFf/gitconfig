@@ -50,12 +50,32 @@ Describe "Setup-GitConfig.ps1" {
         }
     }
 
-    Context "Symlink Creation" {
-        It "Should create .gitconfig symlink pointing to repository" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
+    Context "Config Generation" {
+        It "Should generate .gitconfig in home directory" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
             $gitconfigPath = Join-Path $script:testHome ".gitconfig"
             $gitconfigPath | Should -Exist
+        }
 
+        It "Generated .gitconfig should not be a symlink" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
+            $gitconfigPath = Join-Path $script:testHome ".gitconfig"
             $item = Get-Item $gitconfigPath
+            $item.LinkType | Should -Not -Be "SymbolicLink"
+        }
+
+        It "Generated .gitconfig should have no placeholders" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
+            $gitconfigPath = Join-Path $script:testHome ".gitconfig"
+            $content = Get-Content $gitconfigPath -Raw
+            $content | Should -Not -Match '\{\{REPO_PATH\}\}'
+            $content | Should -Not -Match '\{\{HOME_DIR\}\}'
+        }
+    }
+
+    Context "Symlink Creation" {
+        It "Should create .gitignore_global symlink pointing to repository" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
+            $gitignorePath = Join-Path $script:testHome ".gitignore_global"
+            $gitignorePath | Should -Exist
+
+            $item = Get-Item $gitignorePath
             $item.LinkType | Should -Be "SymbolicLink"
         }
 
@@ -76,7 +96,6 @@ Describe "Setup-GitConfig.ps1" {
 
         It "Should have valid INI format" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
             $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
-            $content = Get-Content $localConfigPath -Raw
 
             # Should not throw git config error
             $result = & git config -f $localConfigPath --list 2>$null

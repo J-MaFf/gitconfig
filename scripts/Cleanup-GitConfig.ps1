@@ -19,10 +19,11 @@ OPTIONS:
 
 DESCRIPTION:
     Removes all gitconfig-related setup:
-    1. Deletes symlinks (.gitconfig and gitconfig_helper.py)
-    2. Removes .gitconfig.local
-    3. Deletes scheduled task (if it exists)
-    4. Clears git SSH signing config
+    1. Backs up and removes .gitconfig (generated file)
+    2. Removes symlinks (.gitignore_global and gitconfig_helper.py)
+    3. Removes .gitconfig.local
+    4. Deletes scheduled task (if it exists)
+    5. Clears git SSH signing config
 
 NOTE: Requires administrator privileges
 "@
@@ -76,7 +77,7 @@ $removed = 0
 Write-Host "[STEP 1] Removing symlinks..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 
-$filesToRemove = @(".gitconfig", "gitconfig_helper.py")
+$filesToRemove = @(".gitconfig", ".gitignore_global", "gitconfig_helper.py")
 
 foreach ($file in $filesToRemove) {
     $path = Join-Path $homeDir $file
@@ -193,7 +194,7 @@ else {
 
 # Check git still works
 try {
-    $gitVersion = & git --version 2>&1
+    & git --version > $null 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[OK] Git still functional" -ForegroundColor Green
     }

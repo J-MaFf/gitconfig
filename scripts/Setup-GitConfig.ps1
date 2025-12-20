@@ -82,15 +82,40 @@ catch {
 }
 Write-Host ""
 
-# Define files to symlink
+# Define files to symlink (removed .gitconfig - now generated)
 $filesToLink = @(
-    @{ File = ".gitconfig" },
     @{ File = ".gitignore_global" },
     @{ File = "gitconfig_helper.py" }
 )
 
-# STEP 1: Create Symlinks
-Write-Host "[STEP 1] Creating symlinks..." -ForegroundColor Cyan
+# STEP 1: Generate .gitconfig from template
+Write-Host "[STEP 1] Generating .gitconfig from template..." -ForegroundColor Cyan
+Write-Host "-----" -ForegroundColor Cyan
+
+$generateScript = Join-Path $scriptsDir "Initialize-GitConfig.ps1"
+if (Test-Path $generateScript) {
+    try {
+        if ($Force) {
+            & $generateScript -Force | Out-Null
+        }
+        else {
+            & $generateScript | Out-Null
+        }
+        Write-Host "[OK] Generated .gitconfig" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[FAIL] Could not generate .gitconfig" -ForegroundColor Red
+        Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+else {
+    Write-Host "[ERROR] Generator script not found: $generateScript" -ForegroundColor Red
+}
+
+Write-Host ""
+
+# STEP 2: Create Symlinks
+Write-Host "[STEP 2] Creating symlinks..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 
 $linkErrors = 0
@@ -139,8 +164,8 @@ foreach ($item in $filesToLink) {
 
 Write-Host ""
 
-# STEP 2: Generate Local Config
-Write-Host "[STEP 2] Generating machine-specific configuration..." -ForegroundColor Cyan
+# STEP 3: Generate Local Config
+Write-Host "[STEP 3] Generating machine-specific configuration..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 
 $localConfigPath = "$homeDir\.gitconfig.local"
@@ -187,8 +212,8 @@ else {
 
 Write-Host ""
 
-# STEP 3: Configure Global Gitignore
-Write-Host "[STEP 3] Configuring global gitignore..." -ForegroundColor Cyan
+# STEP 4: Configure Global Gitignore
+Write-Host "[STEP 4] Configuring global gitignore..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 
 $gitignoreGlobalPath = "$homeDir\.gitignore_global"
@@ -209,9 +234,9 @@ else {
 
 Write-Host ""
 
-# STEP 4: Create Scheduled Task
+# STEP 5: Create Scheduled Task
 if (-not $NoTask) {
-    Write-Host "[STEP 4] Setting up scheduled task..." -ForegroundColor Cyan
+    Write-Host "[STEP 5] Setting up scheduled task..." -ForegroundColor Cyan
     Write-Host "-----" -ForegroundColor Cyan
 
     $taskName = "GitConfig Pull at Login"
@@ -261,10 +286,20 @@ if (-not $NoTask) {
     Write-Host ""
 }
 
-# STEP 5: Verify Setup
-Write-Host "[STEP 5] Verifying setup..." -ForegroundColor Cyan
+# STEP 6: Verify Setup
+Write-Host "[STEP 6] Verifying setup..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 
+# Verify generated .gitconfig
+$gitconfigPath = Join-Path $homeDir ".gitconfig"
+if (Test-Path $gitconfigPath) {
+    Write-Host "[OK] .gitconfig verified" -ForegroundColor Green
+}
+else {
+    Write-Host "[FAIL] .gitconfig missing" -ForegroundColor Red
+}
+
+# Verify symlinks
 foreach ($item in $filesToLink) {
     $linkPath = Join-Path $homeDir $item.File
     if (Test-Path $linkPath) {
