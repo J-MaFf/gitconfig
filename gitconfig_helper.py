@@ -222,10 +222,11 @@ def switch_to_main():
     Steps:
     1. Verify we're in a git repository
     2. Fetch updates from remote
-    3. Check for uncommitted changes
-    4. Switch to main branch
-    5. Pull latest changes
-    6. Detect and report merge conflicts
+    3. Clean up branches with deleted remotes
+    4. Check for uncommitted changes
+    5. Switch to main branch
+    6. Pull latest changes
+    7. Detect and report merge conflicts
     """
     console = Console()
 
@@ -253,7 +254,11 @@ def switch_to_main():
             return 1
         console.print("[green]OK Fetch complete[/green]")
 
-        # Step 3: Check for uncommitted changes
+        # Step 3: Clean up branches with deleted remotes
+        console.print("[cyan]Cleaning up branches with deleted remotes...[/cyan]")
+        cleanup_branches(force=False)
+
+        # Step 4: Check for uncommitted changes
         result_status = subprocess.run(
             ["git", "status", "--porcelain"], capture_output=True, text=True, check=True
         )
@@ -263,7 +268,7 @@ def switch_to_main():
             console.print(result_status.stdout)
             return 1
 
-        # Step 4: Switch to main (if not already there)
+        # Step 5: Switch to main (if not already there)
         if current_branch != "main":
             console.print(f"[cyan]Switching from '{current_branch}' to 'main'...[/cyan]")
             result = subprocess.run(["git", "checkout", "main"], capture_output=True, text=True, check=False)
@@ -275,7 +280,7 @@ def switch_to_main():
         else:
             console.print("[cyan]Already on main branch[/cyan]")
 
-        # Step 5: Pull latest changes
+        # Step 6: Pull latest changes
         console.print("[cyan]Pulling latest changes...[/cyan]")
         result = subprocess.run(["git", "pull"], capture_output=True, text=True, check=False)
 
