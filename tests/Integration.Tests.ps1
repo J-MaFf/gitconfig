@@ -21,7 +21,7 @@ Describe "GitConfig Integration" {
             # This test is skipped in non-interactive environments (Pester extension)
             # Also skipped on non-Windows platforms as the scripts are Windows-specific
             # Run manually on command line: .\Setup-GitConfig.ps1 -Force
-            $result = & $pwshExe -NoProfile -ExecutionPolicy Bypass -File $setupScript -Force -NoPrompt 2>&1
+            $result = & $pwshExe -NoProfile -ExecutionPolicy Bypass -File $setupScript -Force 2>&1
             $LASTEXITCODE | Should -Be 0
         }
 
