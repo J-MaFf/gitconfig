@@ -356,7 +356,7 @@ def your_function_name():
 
         # Your implementation here with Rich console output
         console.print("[cyan]Status message[/cyan]")
-        console.print("[green]✓ Success message[/green]")
+        console.print("[green]OK Success message[/green]")
         return 0
 
     except subprocess.CalledProcessError as e:
