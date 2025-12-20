@@ -225,7 +225,7 @@ import gitconfig_helper
             New-Item -Path "test.txt" -Value "test" -Force | Out-Null
             & git add . 2>&1 | Out-Null
             & git commit -m "Initial commit" 2>&1 | Out-Null
-            
+
             # Set up a dummy remote to avoid "no tracking information" error
             & git remote add origin "https://github.com/test/repo.git" 2>&1 | Out-Null
             & git branch -u origin/main 2>&1 | Out-Null
@@ -275,8 +275,8 @@ import gitconfig_helper
             New-Item -Path "test.txt" -Value "test" -Force | Out-Null
             & git add . 2>&1 | Out-Null
             & git commit -m "Initial commit" 2>&1 | Out-Null
-            
-            # Set up a dummy remote to avoid "no tracking information" error  
+
+            # Set up a dummy remote to avoid "no tracking information" error
             & git remote add origin "https://github.com/test/repo.git" 2>&1 | Out-Null
             & git branch -u origin/main 2>&1 | Out-Null
 
