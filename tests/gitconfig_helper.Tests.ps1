@@ -266,7 +266,7 @@ import gitconfig_helper
             & git commit -m "Initial commit" 2>&1 | Out-Null
 
             # This should succeed since fetch will just skip if no remote
-            $result = & python $script:helperScript switch_to_main 2>&1
+            & python $script:helperScript switch_to_main 2>&1 | Out-Null
             # Should not crash (exit code should be defined)
             $LASTEXITCODE | Should -BeIn @(0, 1)
         }
