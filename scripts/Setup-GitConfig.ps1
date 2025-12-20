@@ -331,5 +331,3 @@ Write-Host ""
 Write-Host "Setup Complete!" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Press Enter to exit..." -ForegroundColor Cyan
-Read-Host | Out-Null
