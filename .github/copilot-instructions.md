@@ -411,10 +411,10 @@ Current custom aliases:
   - `git cleanup --force` (or `-f`) - Also delete local-only branches that never had a remote
 - `git main` - Switch to main branch with full error handling
   - Fetches updates from remote (with pruning)
-  - Cleans up branches with deleted remotes (automatic merged branch cleanup)
   - Checks for uncommitted changes (prevents data loss)
   - Switches to main branch
-  - Pulls latest changes
+  - Pulls latest changes (main is now fully updated)
+  - Cleans up branches with deleted remotes (automatic merged branch cleanup)
   - Detects and reports merge conflicts
   - Clear error messages guide user through resolution
 

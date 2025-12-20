@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### New Features
 
 - **Enhanced `git main` Alias**
   - Automatic cleanup of branches with deleted remotes during `git main`
@@ -73,7 +73,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Merged branches are removed without requiring separate `git cleanup` call
   - Local-only branches are preserved (use `git cleanup --force` if needed)
 
-### Changed
+- **Template-Based Configuration**
+  - `.gitconfig.template` - Version-controlled template with placeholders
+  - `Initialize-GitConfig.ps1` - Script to generate `.gitconfig` from template
+  - Placeholders: `{{REPO_PATH}}`, `{{HOME_DIR}}` replaced during generation
+  - Automatic path conversion to forward slashes for git compatibility
+
+- **Additional Tests**
+  - `Initialize-GitConfig.Tests.ps1` - Comprehensive tests for config generation
+  - Tests verify placeholder replacement, path conversion, INI format validity
+
+### Improvements
+
+- **`git main` Workflow Order**
+  - Main branch is pulled/updated before cleanup runs
+  - Cleanup has accurate information about deleted branches
+  - Ensures current branch (with deleted remote) is safely switched before cleanup
+  - Logical sequence: switch to main → pull latest → cleanup stale branches
+
+- **Portability**: No hardcoded paths in version control
+- **Maintainability**: Changes to template automatically propagate on regeneration
+- **Documentation**: Updated README, copilot-instructions.md to reflect new architecture
+- **Testing**: Updated `Setup-GitConfig.Tests.ps1` to verify generation instead of symlinking
+
+### Breaking Changes
 
 - **BREAKING**: `.gitconfig` is now generated from `.gitconfig.template` instead of being version controlled
   - Existing setup will require running `Setup-GitConfig.ps1` again to regenerate
@@ -81,25 +104,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `Setup-GitConfig.ps1` to generate config instead of creating symlink
 - `.gitconfig` is no longer a symlink - it's a generated file in home directory
 - Only `.gitignore_global` and `gitconfig_helper.py` are symlinked now
-
-### Added
-
-- **Template-Based Configuration**
-  - `.gitconfig.template` - Version-controlled template with placeholders
-  - `Initialize-GitConfig.ps1` - Script to generate `.gitconfig` from template
-  - Placeholders: `{{REPO_PATH}}`, `{{HOME_DIR}}` replaced during generation
-  - Automatic path conversion to forward slashes for git compatibility
-
-- **Tests**
-  - `Initialize-GitConfig.Tests.ps1` - Comprehensive tests for config generation
-  - Tests verify placeholder replacement, path conversion, INI format validity
-
-### Improved
-
-- **Portability**: No hardcoded paths in version control
-- **Maintainability**: Changes to template automatically propagate on regeneration
-- **Documentation**: Updated README, copilot-instructions.md to reflect new architecture
-- **Testing**: Updated `Setup-GitConfig.Tests.ps1` to verify generation instead of symlinking
 
 ### Planned
 
