@@ -1,40 +1,40 @@
 BeforeAll {
-    $repoRoot = Split-Path -Parent $PSScriptRoot
-    $setupScript = Join-Path $repoRoot "scripts\Setup-GitConfig.ps1"
-    $cleanupScript = Join-Path $repoRoot "scripts\Cleanup-GitConfig.ps1"
-    $testHome = $env:USERPROFILE
-    if (-not $testHome) {
-        $testHome = $env:HOME  # Unix/Linux fallback
+    $script:repoRoot = Split-Path -Parent $PSScriptRoot
+    $script:setupScript = Join-Path $script:repoRoot "scripts\Setup-GitConfig.ps1"
+    $script:cleanupScript = Join-Path $script:repoRoot "scripts\Cleanup-GitConfig.ps1"
+    $script:testHome = $env:USERPROFILE
+    if (-not $script:testHome) {
+        $script:testHome = $env:HOME  # Unix/Linux fallback
     }
 
     # Detect platform
-    $platformIsWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : $true
+    $script:platformIsWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : $true
 
     # Choose PowerShell executable based on platform
-    $pwshExe = if ($platformIsWindows) { "powershell" } else { "pwsh" }
+    $script:pwshExe = if ($script:platformIsWindows) { "powershell" } else { "pwsh" }
 }
 
 Describe "GitConfig Integration" {
 
     Context "End-to-End Setup and Verification" {
-        It "Should complete setup without errors" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $platformIsWindows)) {
+        It "Should complete setup without errors" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
             # This test is skipped in non-interactive environments (Pester extension)
             # Also skipped on non-Windows platforms as the scripts are Windows-specific
             # Run manually on command line: .\Setup-GitConfig.ps1 -Force
-            $result = & $pwshExe -NoProfile -ExecutionPolicy Bypass -File $setupScript -Force 2>&1
+            & $script:pwshExe -NoProfile -ExecutionPolicy Bypass -File $script:setupScript -Force 2>&1 | Out-Null
             $LASTEXITCODE | Should -Be 0
         }
 
-        It "Should have all required symlinks after setup" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $platformIsWindows)) {
-            $gitconfigPath = Join-Path $testHome ".gitconfig"
-            $helperPath = Join-Path $testHome "gitconfig_helper.py"
+        It "Should have all required symlinks after setup" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
+            $gitconfigPath = Join-Path $script:testHome ".gitconfig"
+            $helperPath = Join-Path $script:testHome "gitconfig_helper.py"
 
             $gitconfigPath | Should -Exist
             $helperPath | Should -Exist
         }
 
-        It "Should have valid .gitconfig.local file" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $platformIsWindows)) {
-            $localConfigPath = Join-Path $testHome ".gitconfig.local"
+        It "Should have valid .gitconfig.local file" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
+            $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
             $localConfigPath | Should -Exist
 
             $content = Get-Content $localConfigPath -Raw
@@ -44,11 +44,11 @@ Describe "GitConfig Integration" {
             $content | Should -Match '\[safe\]'
         }
 
-        It ".gitconfig.local should have valid INI format" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $platformIsWindows)) {
-            $localConfigPath = Join-Path $testHome ".gitconfig.local"
+        It ".gitconfig.local should have valid INI format" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
+            $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
 
             # Should not error when git reads it
-            $result = & git config -f $localConfigPath --list 2>&1
+            & git config -f $localConfigPath --list 2>&1 | Out-Null
             $LASTEXITCODE | Should -Be 0
         }
     }
@@ -104,15 +104,15 @@ Describe "GitConfig Integration" {
     }
 
     Context "Cleanup and Reset" {
-        It "Should remove setup on cleanup" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $platformIsWindows)) {
+        It "Should remove setup on cleanup" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
             # This test is skipped in non-interactive environments (Pester extension)
             # Also skipped on non-Windows platforms as the scripts are Windows-specific
             # Run manually on command line: .\Cleanup-GitConfig.ps1 -Force
-            $result = & $pwshExe -NoProfile -ExecutionPolicy Bypass -File $cleanupScript -Force 2>&1
+            & $script:pwshExe -NoProfile -ExecutionPolicy Bypass -File $script:cleanupScript -Force 2>&1 | Out-Null
             $LASTEXITCODE | Should -Be 0
 
             # Verify symlinks are gone
-            $gitconfigPath = Join-Path $testHome ".gitconfig"
+            $gitconfigPath = Join-Path $script:testHome ".gitconfig"
             $gitconfigPath | Should -Not -Exist
         }
 
@@ -126,13 +126,13 @@ Describe "GitConfig Integration" {
 
 Describe "GitConfig Helper Script" {
     It "gitconfig_helper.py should exist in repository" {
-        $helperPath = Join-Path $repoRoot "gitconfig_helper.py"
+        $helperPath = Join-Path $script:repoRoot "gitconfig_helper.py"
         $helperPath | Should -Exist
     }
 
     It "gitconfig_helper.py should be valid Python" {
-        $helperPath = Join-Path $repoRoot "gitconfig_helper.py"
-        $result = & python -m py_compile $helperPath 2>&1
+        $helperPath = Join-Path $script:repoRoot "gitconfig_helper.py"
+        & python -m py_compile $helperPath 2>&1 | Out-Null
         $LASTEXITCODE | Should -Be 0
     }
 }
