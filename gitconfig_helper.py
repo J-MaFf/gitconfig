@@ -216,7 +216,97 @@ def get_git_aliases():
         ]
 
 
+def switch_to_main():
+    """Switch to main branch with full error handling and conflict detection.
+    
+    Steps:
+    1. Verify we're in a git repository
+    2. Fetch updates from remote
+    3. Check for uncommitted changes
+    4. Switch to main branch
+    5. Pull latest changes
+    6. Detect and report merge conflicts
+    """
+    console = Console()
+
+    try:
+        # Step 1: Verify git repository
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"], capture_output=True, text=True, check=False
+        )
+        if result.returncode != 0:
+            console.print("[red]Error: Not in a git repository[/red]")
+            return 1
+
+        # Get current branch
+        result_current = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, check=True
+        )
+        current_branch = result_current.stdout.strip()
+
+        # Step 2: Fetch updates
+        console.print("[cyan]Fetching updates from remote...[/cyan]")
+        result = subprocess.run(["git", "fetch", "-p"], capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            console.print("[red]Error: Failed to fetch from remote[/red]")
+            console.print(f"[red]{result.stderr.strip()}[/red]")
+            return 1
+        console.print("[green]✓ Fetch complete[/green]")
+
+        # Step 3: Check for uncommitted changes
+        result_status = subprocess.run(
+            ["git", "status", "--porcelain"], capture_output=True, text=True, check=True
+        )
+        if result_status.stdout.strip():
+            console.print("[red]Error: Uncommitted changes detected[/red]")
+            console.print("[yellow]Please commit or stash your changes before switching to main:[/yellow]")
+            console.print(result_status.stdout)
+            return 1
+
+        # Step 4: Switch to main (if not already there)
+        if current_branch != "main":
+            console.print(f"[cyan]Switching from '{current_branch}' to 'main'...[/cyan]")
+            result = subprocess.run(["git", "checkout", "main"], capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                console.print("[red]Error: Failed to checkout main branch[/red]")
+                console.print(f"[red]{result.stderr.strip()}[/red]")
+                return 1
+            console.print("[green]✓ Switched to main[/green]")
+        else:
+            console.print("[cyan]Already on main branch[/cyan]")
+
+        # Step 5: Pull latest changes
+        console.print("[cyan]Pulling latest changes...[/cyan]")
+        result = subprocess.run(["git", "pull"], capture_output=True, text=True, check=False)
+        
+        if result.returncode != 0:
+            # Check if it's a merge conflict
+            result_status = subprocess.run(
+                ["git", "status", "--porcelain"], capture_output=True, text=True, check=True
+            )
+            
+            if "UU" in result_status.stdout or "AA" in result_status.stdout or "DD" in result_status.stdout:
+                console.print("[red]✗ Merge conflict detected during pull![/red]")
+                console.print("[yellow]Resolve conflicts and commit:[/yellow]")
+                console.print(result_status.stdout)
+                console.print("[cyan]After resolving, run: git add . && git commit[/cyan]")
+                return 1
+            else:
+                console.print("[red]Error: Pull failed[/red]")
+                console.print(f"[red]{result.stderr.strip()}[/red]")
+                return 1
+        
+        console.print("[green]✓ Pull complete[/green]")
+        console.print("[green]✓ Successfully switched to main and updated![/green]")
+        return 0
+
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        return 1
+
+
 def print_aliases():
+
     console = Console()
     table = Table(title="Git Aliases", show_lines=True, header_style="bold yellow")
 
@@ -241,6 +331,9 @@ if __name__ == "__main__":
             # Check for --force flag
             force = "--force" in sys.argv or "-f" in sys.argv
             cleanup_branches(force=force)
+        elif function_name == "switch_to_main":
+            exit_code = switch_to_main()
+            sys.exit(exit_code)
         else:
             print(f"Function {function_name} not found.")
     else:

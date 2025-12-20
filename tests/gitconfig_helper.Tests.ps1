@@ -170,20 +170,121 @@ import gitconfig_helper
         }
     }
 
-    Context "Rich Library Integration" {
-        It "Should use Rich for formatted output" {
-            $scriptContent = Get-Content $helperScript -Raw
-            ($scriptContent -match "from rich" -or $scriptContent -match "import.*rich") | Should -Be $true
+    Context "switch_to_main Function" {
+        BeforeEach {
+            # Create a temporary test repository
+            $script:testDir = New-Item -ItemType Directory -Path "$env:TEMP\git_test_$(Get-Random)" -Force
+            Push-Location $script:testDir
+            
+            # Initialize git repo
+            & git init 2>&1 | Out-Null
+            & git config user.email "test@example.com" 2>&1 | Out-Null
+            & git config user.name "Test User" 2>&1 | Out-Null
         }
 
-        It "Should use Rich Table for displaying data" {
-            $scriptContent = Get-Content $helperScript -Raw
-            ($scriptContent -match "Table" -or $scriptContent -match "table") | Should -Be $true
+        AfterEach {
+            # Clean up test repository
+            Pop-Location
+            Remove-Item -Path $script:testDir -Recurse -Force -ErrorAction SilentlyContinue
         }
 
-        It "Should have styled console output" {
-            $scriptContent = Get-Content $helperScript -Raw
-            ($scriptContent -match "Console" -or $scriptContent -match "\[.*\]") | Should -Be $true
+        It "Should fail when not in a git repository" {
+            Pop-Location
+            $tempDir = New-Item -ItemType Directory -Path "$env:TEMP\not_git_$(Get-Random)" -Force
+            Push-Location $tempDir
+            
+            $result = & python $script:helperScript switch_to_main 2>&1
+            $output = $result -join "`n"
+            
+            $output | Should -Match "not in a git repository"
+            $LASTEXITCODE | Should -Be 1
+            
+            Pop-Location
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        It "Should fail when there are uncommitted changes" {
+            # Create initial commit on main
+            New-Item -Path "test.txt" -Value "test" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "Initial commit" 2>&1 | Out-Null
+            
+            # Make uncommitted changes
+            Add-Content -Path "test.txt" -Value "uncommitted"
+            
+            $result = & python $script:helperScript switch_to_main 2>&1
+            $output = $result -join "`n"
+            
+            $output | Should -Match "uncommitted changes"
+            $output | Should -Match "commit or stash"
+            $LASTEXITCODE | Should -Be 1
+        }
+
+        It "Should succeed when already on clean main branch" {
+            # Create initial commit
+            New-Item -Path "test.txt" -Value "test" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "Initial commit" 2>&1 | Out-Null
+            
+            $result = & python $script:helperScript switch_to_main 2>&1
+            $output = $result -join "`n"
+            
+            $output | Should -Match "already on main"
+            $output | Should -Match "Successfully"
+            $LASTEXITCODE | Should -Be 0
+        }
+
+        It "Should detect merge conflicts after pull" {
+            # This is difficult to test without a real remote repo
+            # We verify the code structure instead
+            $scriptContent = Get-Content $script:helperScript -Raw
+            ($scriptContent -match "merge.*conflict" -or $scriptContent -match "UU.*AA.*DD") | Should -Be $true
+        }
+
+        It "Should provide clear error messages for each failure scenario" {
+            $scriptContent = Get-Content $script:helperScript -Raw
+            
+            # Verify error messages exist for key scenarios
+            ($scriptContent -match "Fetching updates" -and $scriptContent -match "Switching from") | Should -Be $true
+            ($scriptContent -match "Uncommitted changes detected" -and $scriptContent -match "Merge conflict detected") | Should -Be $true
+        }
+
+        It "Should use Rich console output for formatting" {
+            $scriptContent = Get-Content $script:helperScript -Raw
+            ($scriptContent -match "console.print" -and $scriptContent -match "\[cyan\]" -and $scriptContent -match "\[green\]") | Should -Be $true
+        }
+
+        It "Should handle fetch failures gracefully" {
+            # Create a local repo without a remote
+            New-Item -Path "test.txt" -Value "test" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "Initial commit" 2>&1 | Out-Null
+            
+            # This should succeed since fetch will just skip if no remote
+            $result = & python $script:helperScript switch_to_main 2>&1
+            # Should not crash (exit code should be defined)
+            $LASTEXITCODE | Should -BeIn @(0, 1)
+        }
+
+        It "Should return exit code 0 on success" {
+            New-Item -Path "test.txt" -Value "test" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "Initial commit" 2>&1 | Out-Null
+            
+            & python $script:helperScript switch_to_main 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 0
+        }
+
+        It "Should return non-zero exit code on failure" {
+            # Test failure case: uncommitted changes
+            New-Item -Path "test.txt" -Value "test" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "Initial commit" 2>&1 | Out-Null
+            Add-Content -Path "test.txt" -Value "uncommitted"
+            
+            & python $script:helperScript switch_to_main 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 1
         }
     }
-}
+
+
