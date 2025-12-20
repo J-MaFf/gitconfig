@@ -233,10 +233,10 @@ import gitconfig_helper
             $result = & python $script:helperScript switch_to_main 2>&1
             $output = $result -join "`n"
 
-            # Should show we're on main or handling the pull error gracefully
-            ($output -match "already on main" -or $output -match "Error" -or $output -match "no tracking") | Should -Be $true
-            # For a local repo without real remote, exit code 1 is acceptable
-            $LASTEXITCODE | Should -BeIn @(0, 1)
+            # Should handle clean main branch scenario
+            ($output -match "already on main" -or $output -match "Fetching") | Should -Be $true
+            # Test should verify exit code 0 for clean state
+            $LASTEXITCODE | Should -Be 0
         }
 
         It "Should detect merge conflicts after pull" {
@@ -267,8 +267,8 @@ import gitconfig_helper
 
             # This should succeed since fetch will just skip if no remote
             & python $script:helperScript switch_to_main 2>&1 | Out-Null
-            # Should not crash (exit code should be defined)
-            $LASTEXITCODE | Should -BeIn @(0, 1)
+            # Fetch should succeed (exit code 0) even without a remote
+            $LASTEXITCODE | Should -Be 0
         }
 
         It "Should return exit code 0 on success" {
@@ -281,8 +281,8 @@ import gitconfig_helper
             & git branch -u origin/main 2>&1 | Out-Null
 
             & python $script:helperScript switch_to_main 2>&1 | Out-Null
-            # For a local repo without real remote, exit code 0 or 1 both acceptable
-            $LASTEXITCODE | Should -BeIn @(0, 1)
+            # Successful execution should always return exit code 0
+            $LASTEXITCODE | Should -Be 0
         }
 
         It "Should return non-zero exit code on failure" {
