@@ -286,7 +286,7 @@ def switch_to_main():
             )
 
             if "UU" in result_status.stdout or "AA" in result_status.stdout or "DD" in result_status.stdout:
-                console.print("[red]CONFLICT Merge conflict detected during pull![/red]")
+                console.print("[red]Error: Merge conflict detected during pull![/red]")
                 console.print("[yellow]Resolve conflicts and commit:[/yellow]")
                 console.print(result_status.stdout)
                 console.print("[cyan]After resolving, run: git add . && git commit[/cyan]")
@@ -296,7 +296,6 @@ def switch_to_main():
                 console.print(f"[red]{result.stderr.strip()}[/red]")
                 return 1
 
-        console.print("[green]OK Pull complete[/green]")
         console.print("[green]OK Successfully switched to main and updated![/green]")
         return 0
 
