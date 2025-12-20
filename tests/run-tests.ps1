@@ -48,7 +48,12 @@ catch {
 }
 
 # Check for admin privileges (Windows only)
-$platformIsWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : $true
+if ($PSVersionTable.PSVersion.Major -ge 6) {
+    $platformIsWindows = $IsWindows
+}
+else {
+    $platformIsWindows = $true
+}
 if ($platformIsWindows) {
     try {
         $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
