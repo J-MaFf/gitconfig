@@ -221,22 +221,30 @@ import gitconfig_helper
         }
 
         It "Should succeed when already on clean main branch" {
+            # Create a bare repository to act as remote
+            $bareRepo = New-Item -ItemType Directory -Path "$env:TEMP\bare_$(Get-Random)" -Force
+            & git init --bare $bareRepo 2>&1 | Out-Null
+
             # Create initial commit
             New-Item -Path "test.txt" -Value "test" -Force | Out-Null
             & git add . 2>&1 | Out-Null
             & git commit -m "Initial commit" 2>&1 | Out-Null
 
-            # Set up a dummy remote to avoid "no tracking information" error
-            & git remote add origin "https://github.com/test/repo.git" 2>&1 | Out-Null
+            # Set up local bare repo as remote
+            & git remote add origin $bareRepo 2>&1 | Out-Null
+            & git push -u origin main 2>&1 | Out-Null
             & git branch -u origin/main 2>&1 | Out-Null
 
             $result = & python $script:helperScript switch_to_main 2>&1
             $output = $result -join "`n"
 
-            # Should handle clean main branch scenario
+            # Should show we're already on main or processing successfully
             ($output -match "already on main" -or $output -match "Fetching") | Should -Be $true
             # Test should verify exit code 0 for clean state
             $LASTEXITCODE | Should -Be 0
+            
+            # Cleanup
+            Remove-Item $bareRepo -Recurse -Force -ErrorAction SilentlyContinue
         }
 
         It "Should detect merge conflicts after pull" {
@@ -272,17 +280,25 @@ import gitconfig_helper
         }
 
         It "Should return exit code 0 on success" {
+            # Create a bare repository to act as remote
+            $bareRepo = New-Item -ItemType Directory -Path "$env:TEMP\bare_$(Get-Random)" -Force
+            & git init --bare $bareRepo 2>&1 | Out-Null
+
             New-Item -Path "test.txt" -Value "test" -Force | Out-Null
             & git add . 2>&1 | Out-Null
             & git commit -m "Initial commit" 2>&1 | Out-Null
 
-            # Set up a dummy remote to avoid "no tracking information" error
-            & git remote add origin "https://github.com/test/repo.git" 2>&1 | Out-Null
+            # Set up local bare repo as remote
+            & git remote add origin $bareRepo 2>&1 | Out-Null
+            & git push -u origin main 2>&1 | Out-Null
             & git branch -u origin/main 2>&1 | Out-Null
 
             & python $script:helperScript switch_to_main 2>&1 | Out-Null
             # Successful execution should always return exit code 0
             $LASTEXITCODE | Should -Be 0
+            
+            # Cleanup
+            Remove-Item $bareRepo -Recurse -Force -ErrorAction SilentlyContinue
         }
 
         It "Should return non-zero exit code on failure" {
