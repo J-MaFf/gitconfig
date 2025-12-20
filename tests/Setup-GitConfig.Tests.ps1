@@ -9,7 +9,12 @@ BeforeAll {
     $script:testRepo = $script:repoRoot
 
     # Check if running on Windows
-    $script:platformIsWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : $true
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        $script:platformIsWindows = $IsWindows
+    }
+    else {
+        $script:platformIsWindows = $true
+    }
 
     # Check if running as admin (Windows only)
     if ($script:platformIsWindows) {
@@ -27,7 +32,7 @@ BeforeAll {
     # Run setup if in interactive mode
     if ($script:isAdmin -and [System.Environment]::UserInteractive) {
         Write-Host "Running Setup-GitConfig.ps1 for testing..." -ForegroundColor Cyan
-        & $script:scriptPath -Force -NoTask -ErrorAction SilentlyContinue | Out-Null
+        & $script:scriptPath -Force -ErrorAction SilentlyContinue | Out-Null
     }
 }
 

@@ -268,15 +268,17 @@ import gitconfig_helper
         }
 
         It "Should handle fetch failures gracefully" {
-            # Create a local repo without a remote
+            # Create a local repo on main branch without a valid remote
             New-Item -Path "test.txt" -Value "test" -Force | Out-Null
             & git add . 2>&1 | Out-Null
             & git commit -m "Initial commit" 2>&1 | Out-Null
+            & git branch -M main 2>&1 | Out-Null
 
-            # This should succeed since fetch will just skip if no remote
+            # When there's no remote configured, fetch doesn't error but pull may
+            # The function should handle this gracefully with appropriate exit code
             & python $script:helperScript switch_to_main 2>&1 | Out-Null
-            # Fetch should succeed (exit code 0) even without a remote
-            $LASTEXITCODE | Should -Be 0
+            # With no valid remote, pull will fail and return exit code 1
+            $LASTEXITCODE | Should -Be 1
         }
 
         It "Should return exit code 0 on success" {

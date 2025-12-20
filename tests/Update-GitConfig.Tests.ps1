@@ -6,7 +6,12 @@ BeforeAll {
     $script:logFile = Join-Path $script:testRepo "docs\update-gitconfig.log"
 
     # Check if running on Windows
-    $script:platformIsWindows = $PSVersionTable.PSVersion.Major -ge 6 ? $IsWindows : $true
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        $script:platformIsWindows = $IsWindows
+    }
+    else {
+        $script:platformIsWindows = $true
+    }
 
     # Helper function to create a test git repository
     function New-TestRepository {
