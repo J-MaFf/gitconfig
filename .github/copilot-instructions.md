@@ -327,38 +327,38 @@ When adding new Python-based git aliases:
    - Use `{{REPO_PATH}}` placeholder in template (gets replaced during setup)
    - Pass command-line arguments after the function name if needed
 
-### Using gitconfig_helper.py for New Functions
+### Using the Python Helper for New Functions
 
-The `gitconfig_helper.py` file (#file:gitconfig_helper.py) provides a robust foundation for implementing git operations. When creating new git alias functions:
+The Python utility file provides a robust foundation for implementing git alias functions. When creating new functions for git operations:
 
 **Function Pattern to Follow:**
 
 ```python
 def your_function_name():
     """Brief description of what the function does.
-    
+
     Steps:
     1. First step
     2. Second step
     3. etc.
     """
     console = Console()
-    
+
     try:
         # Verify we're in a git repository
         result = subprocess.run(
-            ["git", "rev-parse", "--git-dir"], 
+            ["git", "rev-parse", "--git-dir"],
             capture_output=True, text=True, check=False
         )
         if result.returncode != 0:
             console.print("[red]Error: Not in a git repository[/red]")
             return 1
-        
+
         # Your implementation here with Rich console output
         console.print("[cyan]Status message[/cyan]")
         console.print("[green]✓ Success message[/green]")
         return 0
-        
+
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Error: {e}[/red]")
         return 1
@@ -390,6 +390,7 @@ def your_function_name():
 **Testing New Functions:**
 
 Add comprehensive test cases to `tests/gitconfig_helper.Tests.ps1`:
+
 - Verify git repo detection
 - Test error scenarios (uncommitted changes, failed operations)
 - Verify exit codes (0 = success, 1 = failure)
