@@ -16,13 +16,13 @@
 
 [alias]
     # List all aliases
-    alias = !python {{REPO_PATH}}/gitconfig_helper.py print_aliases
+    alias = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py print_aliases || python {{REPO_PATH}}/gitconfig_helper.py print_aliases"
     # Download all remote branches creating local counterparts
-    branches = "!git fetch && git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -v -e '^origin/HEAD$' -e '^origin$' | tr '\\n' '\\0' | while IFS= read -r -d '' ref; do git branch --track \"${ref#origin/}\" \"$ref\" 2>/dev/null || true; done"
-    cleanup = !python {{REPO_PATH}}/gitconfig_helper.py cleanup $@
+    branches = "!git fetch && git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -v -e '^origin/HEAD$' -e '^origin$' | while read ref; do git branch --track \"${ref#origin/}\" \"$ref\" 2>/dev/null || true; done"
+    cleanup = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\" || python {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\""
     # Switch to main with error handling: fetch, check for uncommitted changes,
     # checkout main, and pull. Detects and reports merge conflicts.
-    main = !python {{REPO_PATH}}/gitconfig_helper.py switch_to_main
+    main = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py switch_to_main || python {{REPO_PATH}}/gitconfig_helper.py switch_to_main"
     # Manage machine-specific git configuration
     localconfig = !git config --file ~/.gitconfig.local
 
