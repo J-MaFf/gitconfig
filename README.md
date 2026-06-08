@@ -9,13 +9,26 @@ Personal Git configuration and utilities for cross-machine synchronization.
 - **`.gitconfig.template`** - Template for generating machine-specific Git configuration
 - **`.gitignore_global`** - Global gitignore patterns for IDEs, OS files, and development tools
 - **`gitconfig_helper.py`** - Python utility for managing git aliases, branch cleanup, and main branch operations
-- **`scripts/`** - PowerShell automation scripts
-  - **`Setup-GitConfig.ps1`** - Unified setup wrapper script (creates symlinks, generates config, sets up scheduled task)
-  - **`Initialize-GitConfig.ps1`** - Generates `.gitconfig` from template with machine-specific paths
-  - **`Initialize-LocalConfig.ps1`** - Generates `.gitconfig.local` with SSH signing and safe directories
-  - **`Initialize-Symlinks.ps1`** - Creates symbolic links for `.gitignore_global` and helper scripts
-  - **`Update-GitConfig.ps1`** - Automated daily git pull script (runs at login)
-  - **`Cleanup-GitConfig.ps1`** - Uninstall and reset utility
+- **`scripts/`** - Platform-specific automation scripts
+  - **Windows (PowerShell)**
+    - **`Setup-GitConfig.ps1`** - Unified setup wrapper (symlinks, config, scheduled task)
+    - **`Initialize-GitConfig.ps1`** - Generates `.gitconfig` from template
+    - **`Initialize-LocalConfig.ps1`** - Generates `.gitconfig.local` with SSH signing
+    - **`Initialize-Symlinks.ps1`** - Creates symbolic links
+    - **`Update-GitConfig.ps1`** - Automated git pull (runs at login via Task Scheduler)
+    - **`Cleanup-GitConfig.ps1`** - Uninstall and reset utility
+  - **`mac version/`** - macOS bash scripts
+    - **`setup-gitconfig.sh`** - Unified setup wrapper (symlinks, config, launchd agent)
+    - **`initialize-gitconfig.sh`** - Generates `.gitconfig` from template
+    - **`initialize-local-config.sh`** - Generates `.gitconfig.local` with auto-detected `op-ssh-sign`
+    - **`update-gitconfig.sh`** - Automated git pull (triggered by launchd at login)
+    - **`cleanup-gitconfig.sh`** - Uninstall and reset utility
+  - **`linux version/`** - Linux bash scripts
+    - **`setup-gitconfig.sh`** - Unified setup wrapper (symlinks, config, cron job)
+    - **`initialize-gitconfig.sh`** - Generates `.gitconfig` from template
+    - **`initialize-local-config.sh`** - Generates `.gitconfig.local`
+    - **`update-gitconfig.sh`** - Automated git pull (runs via cron)
+    - **`cleanup-gitconfig.sh`** - Uninstall and reset utility
 - **`docs/`** - Documentation and knowledge graph
   - **`knowledge-graph.jsonl`** - Entity and relation data for project documentation
 
@@ -44,9 +57,13 @@ Personal Git configuration and utilities for cross-machine synchronization.
 ## Requirements
 
 - **Python 3.7+** (for gitconfig_helper.py)
-- **rich** library: Install with `python -m pip install rich`
-- **PowerShell 5.1+** (for setup script)
-- **Administrator privileges** (recommended for creating symlinks on Windows)
+- **rich** library: `pip3 install rich` (macOS/Linux) or `python -m pip install rich` (Windows)
+
+**Windows:** PowerShell 5.1+, Administrator privileges (for symlinks and Task Scheduler)
+
+**macOS:** macOS 12+, Homebrew recommended. Optional: [1Password CLI](https://developer.1password.com/docs/cli/) (`brew install 1password-cli`) for SSH commit signing.
+
+**Linux:** bash 4.0+, cron
 
 ## Installation
 
@@ -77,7 +94,65 @@ Personal Git configuration and utilities for cross-machine synchronization.
    python -m pip install rich
    ```
 
-### Manual Setup
+### Quick Setup (macOS)
+
+**Requirements:** macOS 12+, [Homebrew](https://brew.sh), Python 3
+
+1. Clone this repository:
+
+   ```bash
+   git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
+   ```
+
+2. Run the macOS setup script:
+
+   ```bash
+   cd ~/Documents/Scripts/gitconfig
+   bash scripts/mac\ version/setup-gitconfig.sh --force
+   ```
+
+   This single command will:
+   - Generate `~/.gitconfig` from the template with machine-specific paths
+   - Create symlinks for `.gitignore_global` and `gitconfig_helper.py`
+   - Generate `~/.gitconfig.local` (with auto-detected 1Password SSH signing, if installed)
+   - Register a **launchd agent** for automatic updates at each login
+
+3. Install the Python dependency:
+
+   ```bash
+   pip3 install rich
+   ```
+
+4. *(Optional)* Enable SSH commit signing with 1Password:
+
+   ```bash
+   brew install 1password-cli
+   # Re-run setup to auto-detect op-ssh-sign:
+   bash scripts/mac\ version/setup-gitconfig.sh --force
+   ```
+
+### Quick Setup (Linux)
+
+1. Clone this repository:
+
+   ```bash
+   git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
+   ```
+
+2. Run the Linux setup script:
+
+   ```bash
+   cd ~/Documents/Scripts/gitconfig
+   bash scripts/linux\ version/setup-gitconfig.sh --force
+   ```
+
+3. Install the Python dependency:
+
+   ```bash
+   pip install rich
+   ```
+
+### Manual Setup (Windows)
 
 If you prefer to run setup steps individually:
 
