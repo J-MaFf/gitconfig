@@ -225,6 +225,13 @@ PLIST
             if launchctl load "$PLIST_PATH" 2>/dev/null; then
                 echo "[OK] launchd agent registered: $PLIST_LABEL"
                 echo "     Runs automatically at each login."
+                echo ""
+                echo "     NOTE: macOS may block the agent from accessing ~/Documents"
+                echo "     until your terminal app has Full Disk Access."
+                echo "     If auto-sync does not run, go to:"
+                echo "       System Settings > Privacy & Security > Full Disk Access"
+                echo "     enable your terminal app, then reload the agent with:"
+                echo "       launchctl unload $PLIST_PATH && launchctl load $PLIST_PATH"
             else
                 echo "[WARN] Could not load launchd agent immediately."
                 echo "       It will activate at next login."
