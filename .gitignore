@@ -7,6 +7,9 @@
 # Update GitConfig logs
 docs/update-gitconfig.log
 
+# Claude Code local session data
+.claude/
+
 # Python cache
 __pycache__/
 *.pyc
