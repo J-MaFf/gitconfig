@@ -4,358 +4,90 @@ Personal Git configuration and utilities for cross-machine synchronization.
 
 **Current Version:** `v0.1.0-pre` | [Changelog](CHANGELOG.md)
 
-## Contents
-
-- **`.gitconfig.template`** - Template for generating machine-specific Git configuration
-- **`.gitignore_global`** - Global gitignore patterns for IDEs, OS files, and development tools
-- **`gitconfig_helper.py`** - Python utility for managing git aliases, branch cleanup, and main branch operations
-- **`scripts/`** - Platform-specific automation scripts
-  - **Windows (PowerShell)**
-    - **`Setup-GitConfig.ps1`** - Unified setup wrapper (symlinks, config, scheduled task)
-    - **`Initialize-GitConfig.ps1`** - Generates `.gitconfig` from template
-    - **`Initialize-LocalConfig.ps1`** - Generates `.gitconfig.local` with SSH signing
-    - **`Initialize-Symlinks.ps1`** - Creates symbolic links
-    - **`Update-GitConfig.ps1`** - Automated git pull (runs at login via Task Scheduler)
-    - **`Cleanup-GitConfig.ps1`** - Uninstall and reset utility
-  - **`mac version/`** - macOS bash scripts
-    - **`setup-gitconfig.sh`** - Unified setup wrapper (symlinks, config, launchd agent)
-    - **`initialize-gitconfig.sh`** - Generates `.gitconfig` from template
-    - **`initialize-local-config.sh`** - Generates `.gitconfig.local` with auto-detected `op-ssh-sign`
-    - **`update-gitconfig.sh`** - Automated git pull (triggered by launchd at login)
-    - **`cleanup-gitconfig.sh`** - Uninstall and reset utility
-  - **`linux version/`** - Linux bash scripts
-    - **`setup-gitconfig.sh`** - Unified setup wrapper (symlinks, config, cron job)
-    - **`initialize-gitconfig.sh`** - Generates `.gitconfig` from template
-    - **`initialize-local-config.sh`** - Generates `.gitconfig.local`
-    - **`update-gitconfig.sh`** - Automated git pull (runs via cron)
-    - **`cleanup-gitconfig.sh`** - Uninstall and reset utility
-- **`docs/`** - Documentation and knowledge graph
-  - **`knowledge-graph.jsonl`** - Entity and relation data for project documentation
-
-## Features
-
-### Git Aliases
-
-- **`git alias`** - List all configured git aliases in a formatted table
-- **`git branches`** - Download all remote branches and create local tracking branches
-- **`git cleanup`** - Delete local branches that no longer have remote tracking
-- **`git main`** - Switch to main branch with full error handling
-  - Fetches updates from remote (with pruning)
-  - Checks for uncommitted changes (prevents data loss)
-  - Switches to main branch
-  - Pulls latest changes (main is now fully updated)
-  - Cleans up branches with deleted remotes (automatic merged branch cleanup)
-  - Detects and reports merge conflicts
-
-### Git Configuration
-
-- SSH-based commit signing with OpenSSH key format
-- Auto-setup remote tracking for pushed branches
-- Custom editor (VS Code with `--wait` flag)
-- Safe directories configured for shared network locations
-
-## Requirements
-
-- **Python 3.7+** (for gitconfig_helper.py)
-- **rich** library: `pip3 install rich` (macOS/Linux) or `python -m pip install rich` (Windows)
-
-**Windows:** PowerShell 5.1+, Administrator privileges (for symlinks and Task Scheduler)
-
-**macOS:** macOS 12+, Homebrew recommended. Optional: [1Password CLI](https://developer.1password.com/docs/cli/) (`brew install 1password-cli`) for SSH commit signing.
-
-**Linux:** bash 4.0+, cron
-
 ## Installation
 
-### Quick Setup (Windows PowerShell)
-
-1. Clone this repository:
-
-   ```powershell
-   git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
-   ```
-
-2. Run the unified setup script with administrator privileges:
-
-   ```powershell
-   cd ~/Documents/Scripts/gitconfig
-   .\scripts\Setup-GitConfig.ps1 -Force
-   ```
-
-   This single command will:
-   - Generate `~/.gitconfig` from the template with machine-specific paths
-   - Create symlinks for `.gitignore_global` and `gitconfig_helper.py`
-   - Generate `~/.gitconfig.local` with SSH signing configuration
-   - Set up a scheduled task for automatic updates at login
-
-3. Install the Python dependency:
-
-   ```powershell
-   python -m pip install rich
-   ```
-
-### Quick Setup (macOS)
+### macOS
 
 **Requirements:** macOS 12+, [Homebrew](https://brew.sh), Python 3
 
-1. Clone this repository:
+```bash
+git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
+cd ~/Documents/Scripts/gitconfig
+bash scripts/mac\ version/setup-gitconfig.sh --force
+pip3 install rich
+```
 
-   ```bash
-   git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
-   ```
+*(Optional)* Enable SSH commit signing with 1Password:
 
-2. Run the macOS setup script:
+```bash
+brew install 1password-cli
+bash scripts/mac\ version/setup-gitconfig.sh --force
+```
 
-   ```bash
-   cd ~/Documents/Scripts/gitconfig
-   bash scripts/mac\ version/setup-gitconfig.sh --force
-   ```
+### Windows (PowerShell)
 
-   This single command will:
-   - Generate `~/.gitconfig` from the template with machine-specific paths
-   - Create symlinks for `.gitignore_global` and `gitconfig_helper.py`
-   - Generate `~/.gitconfig.local` (with auto-detected 1Password SSH signing, if installed)
-   - Register a **launchd agent** for automatic updates at each login
-
-3. Install the Python dependency:
-
-   ```bash
-   pip3 install rich
-   ```
-
-4. *(Optional)* Enable SSH commit signing with 1Password:
-
-   ```bash
-   brew install 1password-cli
-   # Re-run setup to auto-detect op-ssh-sign:
-   bash scripts/mac\ version/setup-gitconfig.sh --force
-   ```
-
-### Quick Setup (Linux)
-
-1. Clone this repository:
-
-   ```bash
-   git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
-   ```
-
-2. Run the Linux setup script:
-
-   ```bash
-   cd ~/Documents/Scripts/gitconfig
-   bash scripts/linux\ version/setup-gitconfig.sh --force
-   ```
-
-3. Install the Python dependency:
-
-   ```bash
-   pip install rich
-   ```
-
-### Manual Setup (Windows)
-
-If you prefer to run setup steps individually:
+**Requirements:** PowerShell 5.1+, Administrator privileges
 
 ```powershell
-$repo = "$env:USERPROFILE\Documents\Scripts\gitconfig"
-
-# Generate .gitconfig from template
-.\scripts\Initialize-GitConfig.ps1 -Force
-
-# Create symlinks
-.\scripts\Initialize-Symlinks.ps1 -Force
-
-# Generate machine-specific configuration
-.\scripts\Initialize-LocalConfig.ps1 -Force
+git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
+cd ~/Documents/Scripts/gitconfig
+.\scripts\Setup-GitConfig.ps1 -Force
+python -m pip install rich
 ```
+
+### Linux
+
+**Requirements:** bash 4.0+, cron, Python 3
+
+```bash
+git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
+cd ~/Documents/Scripts/gitconfig
+bash scripts/linux\ version/setup-gitconfig.sh --force
+pip install rich
+```
+
+The setup script handles generating `~/.gitconfig` from the template, creating symlinks, and registering an auto-update job (launchd on macOS, Task Scheduler on Windows, cron on Linux).
 
 ## Usage
 
-### Setup Script Options
-
-```powershell
-# Unified setup (recommended) - runs all setup steps
-.\scripts\Setup-GitConfig.ps1 -Force
-
-# Without scheduled task creation
-.\scripts\Setup-GitConfig.ps1 -Force -NoTask
-
-# Generate .gitconfig from template
-.\scripts\Initialize-GitConfig.ps1 -Force
-
-# Initialize symlinks (requires admin privileges)
-.\scripts\Initialize-Symlinks.ps1 -Force
-
-# Initialize local machine-specific configuration
-.\scripts\Initialize-LocalConfig.ps1 -Force
-
-# Display help for any script
-.\scripts\Initialize-Symlinks.ps1 -Help
-.\scripts\Initialize-LocalConfig.ps1 -Help
-```
-
-### Using Git Aliases
-
-After installation, use the configured aliases:
+### Git Aliases
 
 ```bash
 git alias          # Show all aliases
 git branches       # Track all remote branches
-git cleanup        # Clean up local branches
-git main           # Switch to main with automatic updates
+git cleanup        # Clean up merged local branches
+git main           # Switch to main with fetch, pull, and branch cleanup
 ```
 
-## Machine-Agnostic Setup
-
-The configuration uses a **template-based generation** approach for maximum portability:
-
-### Template Configuration (`.gitconfig.template`)
-
-- Contains placeholders: `{{REPO_PATH}}` and `{{HOME_DIR}}`
-- Version controlled for consistency across machines
-- User information, aliases, and common settings
-
-### Generated Configuration (`~/.gitconfig`)
-
-- Generated from template by `Initialize-GitConfig.ps1`
-- Placeholders replaced with machine-specific absolute paths
-- NOT tracked in Git (excluded in `.gitignore`)
-- Each machine generates its own version
-
-### Machine-Specific Configuration (`~/.gitconfig.local`)
-
-- SSH signing configuration and safe directories
-- Created by `Initialize-LocalConfig.ps1`
-- NOT tracked in Git (excluded in `.gitignore`)
-- Each machine has its own version
-
-This template-based approach ensures:
-
-- ✅ No hardcoded paths in version control
-- ✅ Complete portability across different machines and users
-- ✅ Easy customization by editing the template
-- ✅ Consistent configuration through version-controlled template
-
-## Configuration Details
-
-### Git Configuration Generation
-
-The generated `~/.gitconfig` includes `~/.gitconfig.local` for machine-specific settings:
-
-```gitconfig
-[include]
-    path = ~/.gitconfig.local
-```
-
-The template uses placeholders that are replaced during generation:
-
-- `{{REPO_PATH}}` → Absolute path to the gitconfig repository
-- `{{HOME_DIR}}` → User's home directory path
-
-To regenerate after template changes:
+### Setup Script Options (Windows)
 
 ```powershell
-.\scripts\Initialize-GitConfig.ps1 -Force
+.\scripts\Setup-GitConfig.ps1 -Force           # Full setup
+.\scripts\Setup-GitConfig.ps1 -Force -NoTask   # Skip scheduled task
+.\scripts\Initialize-GitConfig.ps1 -Force      # Regenerate .gitconfig from template
+.\scripts\Initialize-Symlinks.ps1 -Force       # Recreate symlinks
+.\scripts\Initialize-LocalConfig.ps1 -Force    # Regenerate local config
 ```
 
-This is a Git best practice for handling environment-specific configurations.
+## Contents
 
-### Global Gitignore
-
-The `.gitignore_global` file is symlinked to `~/.gitignore_global` and automatically configured in `.gitconfig.local`. It contains patterns for:
-
-- **IDE and Editor Files** - VS Code, JetBrains, Sublime, Vim, Emacs, Atom
-- **OS-Specific Files** - macOS (.DS_Store), Windows (Thumbs.db), Linux (.directory)
-- **Language-Specific Artifacts**:
-  - Python: `__pycache__`, `*.pyc`, `.venv`, `venv/`
-  - Node.js: `node_modules/`, `npm-debug.log`
-  - Go, Java, Ruby, C/C++, and more
-- **Build Outputs** - `build/`, `dist/`, `target/`, compiled objects
-- **Local Configuration Files** - `.env`, `.secrets`, credentials, private keys
-- **Temporary Files** - `.tmp`, `.cache`, `.bak`, swap files
-
-These patterns prevent common development artifacts from being accidentally committed to repositories.
-
-### SSH Signing
-
-The `.gitconfig` is configured for SSH-based commit signing using:
-
-- OpenSSH key format (ed25519)
-- 1Password SSH agent (`op-ssh-sign.exe`)
-- Auto-signing on all commits
-
-Update the `signingkey` and `gpg.ssh.program` values if using a different key or agent.
-
-### Safe Directories
-
-Network locations and local directories are configured as safe git directories to avoid permission issues:
-
-- `\\10.210.3.10\dept\IT\PC Setup\winget-app-setup`
-- `C:\Users\<username>\Documents\Scripts\winget-app-setup`
-- `C:\Users\<username>\Documents\Scripts\winget-install`
-- `\\10.210.3.10\dept\IT\Programs\Office\OfficeConfigs`
-- `\\KFWS9BDC01\DEPT\IT\Programs\Office\OfficeConfigs`
-
-Modify these paths as needed for your environment.
+- **`.gitconfig.template`** - Template for generating machine-specific Git configuration
+- **`.gitignore_global`** - Global gitignore patterns for IDEs, OS files, and build artifacts
+- **`gitconfig_helper.py`** - Python utility for managing git aliases, branch cleanup, and main branch operations
+- **`scripts/`** - Platform-specific setup and automation scripts
 
 ## Troubleshooting
 
-### Symlink Creation Fails
+**Symlink creation fails (Windows):** Run PowerShell as Administrator.
 
-- **Windows 10/11**: Run PowerShell as Administrator
-- **Older Windows**: You may need to enable developer mode or use `mklink` command
-
-### Python Dependencies Not Installing
+**Python dependency issues:**
 
 ```powershell
 python -m pip install --upgrade pip
 python -m pip install rich
 ```
 
-### Git Aliases Not Working
-
-Verify the symlink is created:
-
-```powershell
-ls $PROFILE  # Should show .gitconfig symlink
-```
-
-Test the alias:
-
-```bash
-git alias
-```
-
-## Updates and Syncing
-
-To pull the latest configuration changes:
-
-```powershell
-cd ~/.dotfiles
-git pull
-```
-
-Changes are immediately reflected in `~/.gitconfig` and `~/.gitconfig_helper.py` through symlinks.
-
-## Versioning
-
-This project follows [Semantic Versioning (semver.org)](https://semver.org/).
-
-- **Format:** `vMAJOR.MINOR.PATCH[-PRERELEASE]`
-- **Current Status:** Pre-release (`v0.1.0-pre`)
-- **See [CHANGELOG.md](CHANGELOG.md) for detailed version history and changes**
-
-### Version Progression
-
-The project is in initial development (0.x.y pre-release phase). Versions will progress as:
-
-- `v0.1.0-alpha` → `v0.1.0-beta` → `v0.1.0-rc.1` → `v0.1.0` (stable)
-
-Once stable `v1.0.0` is released, semantic versioning will strictly follow:
-
-- **MAJOR** - Breaking changes
-- **MINOR** - New backward-compatible features
-- **PATCH** - Bug fixes
+**Aliases not working:** Verify the symlink exists and `.gitconfig` includes the helper path.
 
 ## License
 
