@@ -286,3 +286,5 @@ dist/
 *.md.swp
 .vimrc.custom
 Session.vim
+
+**/.claude/settings.local.json
