@@ -54,8 +54,9 @@ if (-not $isAdmin) {
     Write-Host ""
 }
 
-# Get the repository root (parent of scripts directory)
-$repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+# Get the repository root (two levels up from scripts\windows version\)
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot  = Split-Path -Parent (Split-Path -Parent $scriptDir)
 $homeDir = $env:USERPROFILE
 
 Write-Host "Dotfiles Setup" -ForegroundColor Cyan

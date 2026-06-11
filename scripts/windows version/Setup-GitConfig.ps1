@@ -58,9 +58,10 @@ if (-not $isAdmin) {
     }
 }
 
-$repoRoot    = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$scriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot    = Split-Path -Parent (Split-Path -Parent $scriptDir)
 $homeDir     = $env:USERPROFILE
-$scriptsDir  = Join-Path $repoRoot "scripts\windows version"
+$scriptsDir  = $scriptDir
 $cleanupScript     = Join-Path $scriptsDir "Cleanup-GitConfig.ps1"
 $initGitScript     = Join-Path $scriptsDir "Initialize-GitConfig.ps1"
 $initLocalScript   = Join-Path $scriptsDir "Initialize-LocalConfig.ps1"

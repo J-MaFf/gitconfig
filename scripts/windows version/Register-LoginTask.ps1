@@ -2,9 +2,14 @@
 # This script creates a scheduled task to run Update-GitConfig.ps1 when the user logs in
 
 param(
-    [string]$ScriptPath = "$env:USERPROFILE\Documents\Scripts\gitconfig\scripts\Update-GitConfig.ps1",
+    [string]$ScriptPath = "",
     [switch]$Force
 )
+
+if (-not $ScriptPath) {
+    $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $ScriptPath = Join-Path $scriptDir "Update-GitConfig.ps1"
+}
 
 # Task configuration
 $taskName = "GitConfig Pull at Login"

@@ -38,7 +38,8 @@ TEMPLATE PLACEHOLDERS:
 }
 
 # Get paths
-$repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot  = Split-Path -Parent (Split-Path -Parent $scriptDir)
 $homeDir = $env:USERPROFILE
 if (-not $homeDir) {
     $homeDir = $env:HOME  # Unix/Linux fallback
