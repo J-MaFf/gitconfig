@@ -1,8 +1,10 @@
 #!/bin/bash
 
 # GitConfig Setup Wrapper - Linux/Unix Version
-# Orchestrates complete setup of portable git configuration
-# Works on Linux, macOS, and other Unix-like systems
+# Orchestrates complete setup of portable git configuration.
+#
+# Key Linux/Unix differences vs macOS version:
+#   - Uses cron instead of launchd for login sync
 
 set -e
 
@@ -10,25 +12,12 @@ FORCE=false
 NO_CRON=false
 HELP=false
 
-# Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -f|--force)
-            FORCE=true
-            shift
-            ;;
-        --no-cron)
-            NO_CRON=true
-            shift
-            ;;
-        -h|--help)
-            HELP=true
-            shift
-            ;;
-        *)
-            echo "Unknown option: $1"
-            exit 1
-            ;;
+        -f|--force)  FORCE=true;   shift ;;
+        --no-cron)   NO_CRON=true; shift ;;
+        -h|--help)   HELP=true;    shift ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
 
@@ -57,12 +46,14 @@ EOF
     exit 0
 fi
 
-# Get paths
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 HOME_DIR="$HOME"
-SCRIPTS_DIR="$REPO_ROOT/scripts"
-CLEANUP_SCRIPT="$SCRIPTS_DIR/linux version/cleanup-gitconfig.sh"
+CLEANUP_SCRIPT="$SCRIPT_DIR/cleanup-gitconfig.sh"
+LOCAL_CONFIG_SCRIPT="$SCRIPT_DIR/initialize-local-config.sh"
+
+# shellcheck source=../shared/functions.sh
+source "$REPO_ROOT/scripts/shared/functions.sh"
 
 echo "GitConfig Setup"
 echo "====================================="
@@ -70,11 +61,11 @@ echo "Repository: $REPO_ROOT"
 echo "Home Directory: $HOME_DIR"
 echo ""
 
-# STEP 0: Clean up any existing installation first
+# STEP 0: Clean up previous installation
 echo "[STEP 0] Cleaning up previous installation..."
 echo "-----"
 if [ -f "$CLEANUP_SCRIPT" ]; then
-    if $CLEANUP_SCRIPT --force 2>/dev/null; then
+    if bash "$CLEANUP_SCRIPT" --force 2>/dev/null; then
         echo "[OK] Previous installation cleaned up"
     else
         echo "[WARN] No previous installation found or cleanup failed (this is OK)"
@@ -84,84 +75,28 @@ else
 fi
 echo ""
 
-# Files to symlink
-declare -a FILES_TO_LINK=(
-    ".gitignore_global"
-    "gitconfig_helper.py"
-)
-
 # STEP 1: Generate .gitconfig from template
 echo "[STEP 1] Generating .gitconfig from template..."
 echo "-----"
-
-GENERATE_SCRIPT="$SCRIPTS_DIR/linux version/initialize-gitconfig.sh"
-if [ -f "$GENERATE_SCRIPT" ]; then
-    if [ "$FORCE" = true ]; then
-        if bash "$GENERATE_SCRIPT" --force; then
-            echo "[OK] Generated .gitconfig"
-        else
-            echo "[FAIL] Could not generate .gitconfig"
-        fi
-    else
-        if bash "$GENERATE_SCRIPT"; then
-            echo "[OK] Generated .gitconfig"
-        else
-            echo "[FAIL] Could not generate .gitconfig"
-        fi
-    fi
+if [ "$FORCE" = true ]; then
+    generate_gitconfig "$REPO_ROOT" "$HOME_DIR" "true" && echo "[OK] Generated .gitconfig" || echo "[FAIL] Could not generate .gitconfig"
 else
-    echo "[ERROR] Generator script not found: $GENERATE_SCRIPT"
+    generate_gitconfig "$REPO_ROOT" "$HOME_DIR" "false" && echo "[OK] Generated .gitconfig" || echo "[FAIL] Could not generate .gitconfig"
 fi
 echo ""
 
-# STEP 2: Create Symlinks
+# STEP 2: Create symlinks
 echo "[STEP 2] Creating symlinks..."
 echo "-----"
-
 LINK_ERRORS=0
-for file in "${FILES_TO_LINK[@]}"; do
-    SOURCE_FILE="$REPO_ROOT/$file"
-    LINK_PATH="$HOME_DIR/$file"
-
-    if [ ! -f "$SOURCE_FILE" ]; then
-        echo "[ERROR] Source not found: $SOURCE_FILE"
-        ((LINK_ERRORS++))
-        continue
-    fi
-
-    if [ -e "$LINK_PATH" ]; then
-        if [ "$FORCE" = false ]; then
-            read -p "$file exists. Overwrite? (y/n) " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                echo "Skipped: $file"
-                continue
-            fi
-        fi
-
-        BACKUP_NAME="Existing.$file.bak"
-        BACKUP_PATH="$HOME_DIR/$BACKUP_NAME"
-        if [ -e "$BACKUP_PATH" ]; then
-            rm -f "$BACKUP_PATH"
-        fi
-        mv "$LINK_PATH" "$BACKUP_PATH"
-        echo "Backed up existing $file to $BACKUP_NAME"
-    fi
-
-    if ln -s "$SOURCE_FILE" "$LINK_PATH" 2>/dev/null; then
-        echo "[OK] Linked $file"
-    else
-        echo "[FAIL] Could not create symlink for $file"
-        ((LINK_ERRORS++))
-    fi
+for file in ".gitignore_global" "gitconfig_helper.py"; do
+    create_symlink "$REPO_ROOT/$file" "$HOME_DIR/$file" "$FORCE" || ((LINK_ERRORS++))
 done
 echo ""
 
-# STEP 3: Generate Local Config
+# STEP 3: Generate local config
 echo "[STEP 3] Generating machine-specific configuration..."
 echo "-----"
-
-LOCAL_CONFIG_SCRIPT="$SCRIPTS_DIR/linux version/initialize-local-config.sh"
 if [ -f "$LOCAL_CONFIG_SCRIPT" ]; then
     if [ "$FORCE" = true ]; then
         bash "$LOCAL_CONFIG_SCRIPT" --force
@@ -173,36 +108,24 @@ else
 fi
 echo ""
 
-# STEP 4: Configure Global Gitignore
+# STEP 4: Configure global gitignore
 echo "[STEP 4] Configuring global gitignore..."
 echo "-----"
-
-GITIGNORE_GLOBAL_PATH="$HOME_DIR/.gitignore_global"
-if [ -e "$GITIGNORE_GLOBAL_PATH" ]; then
-    if git config --global core.excludesfile "$GITIGNORE_GLOBAL_PATH" 2>/dev/null; then
-        echo "[OK] Configured global excludesfile"
-    else
-        echo "[FAIL] Could not configure global excludesfile"
-    fi
-else
-    echo "[WARN] .gitignore_global symlink not found"
-fi
+configure_global_gitignore "$HOME_DIR"
 echo ""
 
-# STEP 5: Set up Cron Job
+# STEP 5: Set up cron job
 if [ "$NO_CRON" = false ]; then
     echo "[STEP 5] Setting up cron job..."
     echo "-----"
 
-    CRON_SCRIPT="$SCRIPTS_DIR/linux version/update-gitconfig.sh"
+    CRON_SCRIPT="$SCRIPT_DIR/update-gitconfig.sh"
 
     if [ ! -f "$CRON_SCRIPT" ]; then
         echo "[WARN] update-gitconfig.sh not found"
     else
         CRON_ENTRY="0 9 * * * bash \"$CRON_SCRIPT\" >> /tmp/gitconfig-update.log 2>&1"
-        CRON_JOB_DESC="GitConfig daily update at 9 AM"
 
-        # Check if cron job already exists
         if crontab -l 2>/dev/null | grep -q "$CRON_SCRIPT"; then
             if [ "$FORCE" = false ]; then
                 read -p "Cron job already exists. Replace? (y/n) " -n 1 -r
@@ -210,60 +133,38 @@ if [ "$NO_CRON" = false ]; then
                 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                     echo "Skipped: Cron job"
                     echo ""
-                    return 0
+                    NO_CRON=true
                 fi
             fi
-            # Remove old cron entry
-            crontab -l 2>/dev/null | grep -v "$CRON_SCRIPT" | crontab - 2>/dev/null || true
+            if [ "$NO_CRON" = false ]; then
+                crontab -l 2>/dev/null | grep -v "$CRON_SCRIPT" | crontab - 2>/dev/null || true
+            fi
         fi
 
-        # Add new cron entry
-        (crontab -l 2>/dev/null || true; echo "$CRON_ENTRY") | crontab - 2>/dev/null
-        if [ $? -eq 0 ]; then
-            echo "[OK] Created cron job for daily updates at 9 AM"
-        else
-            echo "[WARN] Could not create cron job (cron may not be available)"
+        if [ "$NO_CRON" = false ]; then
+            (crontab -l 2>/dev/null || true; echo "$CRON_ENTRY") | crontab - 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo "[OK] Created cron job for daily updates at 9 AM"
+            else
+                echo "[WARN] Could not create cron job (cron may not be available)"
+            fi
         fi
     fi
     echo ""
 fi
 
-# STEP 6: Verify Setup
+# STEP 6: Verify setup
 echo "[STEP 6] Verifying setup..."
 echo "-----"
 
-# Verify generated .gitconfig
-GITCONFIG_PATH="$HOME_DIR/.gitconfig"
-if [ -f "$GITCONFIG_PATH" ]; then
-    echo "[OK] .gitconfig verified"
-else
-    echo "[FAIL] .gitconfig missing"
-fi
+ERRORS=0
 
-# Verify symlinks
-for file in "${FILES_TO_LINK[@]}"; do
-    LINK_PATH="$HOME_DIR/$file"
-    if [ -e "$LINK_PATH" ]; then
-        echo "[OK] $file verified"
-    else
-        echo "[FAIL] $file missing"
-    fi
-done
+[ -f "$HOME_DIR/.gitconfig" ]          && echo "[OK] .gitconfig verified"          || { echo "[FAIL] .gitconfig missing";          ((ERRORS++)); }
+[ -e "$HOME_DIR/.gitignore_global" ]   && echo "[OK] .gitignore_global verified"   || { echo "[FAIL] .gitignore_global missing";   ((ERRORS++)); }
+[ -e "$HOME_DIR/gitconfig_helper.py" ] && echo "[OK] gitconfig_helper.py verified" || { echo "[FAIL] gitconfig_helper.py missing"; ((ERRORS++)); }
+[ -f "$HOME_DIR/.gitconfig.local" ]    && echo "[OK] .gitconfig.local verified"    || { echo "[FAIL] .gitconfig.local missing";    ((ERRORS++)); }
 
-# Verify local config
-LOCAL_CONFIG_PATH="$HOME_DIR/.gitconfig.local"
-if [ -f "$LOCAL_CONFIG_PATH" ]; then
-    echo "[OK] .gitconfig.local verified"
-else
-    echo "[FAIL] .gitconfig.local missing"
-fi
-
-# Test git configuration
-if git config --list > /dev/null 2>&1; then
-    echo "[OK] Git configuration accessible"
-else
-    echo "[WARN] Could not verify git configuration"
-fi
+git config --list > /dev/null 2>&1 && echo "[OK] Git configuration accessible" || echo "[WARN] Could not verify git configuration"
 
 echo ""
 echo "Setup Complete!"

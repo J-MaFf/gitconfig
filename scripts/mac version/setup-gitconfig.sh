@@ -52,8 +52,11 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 HOME_DIR="$HOME"
-SCRIPTS_MAC_DIR="$SCRIPT_DIR"
-CLEANUP_SCRIPT="$SCRIPTS_MAC_DIR/cleanup-gitconfig.sh"
+CLEANUP_SCRIPT="$SCRIPT_DIR/cleanup-gitconfig.sh"
+LOCAL_CONFIG_SCRIPT="$SCRIPT_DIR/initialize-local-config.sh"
+
+# shellcheck source=../shared/functions.sh
+source "$REPO_ROOT/scripts/shared/functions.sh"
 
 echo "GitConfig Setup (macOS)"
 echo "====================================="
@@ -75,69 +78,28 @@ else
 fi
 echo ""
 
-# Files to symlink
-declare -a FILES_TO_LINK=(".gitignore_global" "gitconfig_helper.py")
-
 # STEP 1: Generate .gitconfig from template
 echo "[STEP 1] Generating .gitconfig from template..."
 echo "-----"
-
-GENERATE_SCRIPT="$SCRIPTS_MAC_DIR/initialize-gitconfig.sh"
-if [ -f "$GENERATE_SCRIPT" ]; then
-    if [ "$FORCE" = true ]; then
-        bash "$GENERATE_SCRIPT" --force && echo "[OK] Generated .gitconfig" || echo "[FAIL] Could not generate .gitconfig"
-    else
-        bash "$GENERATE_SCRIPT" && echo "[OK] Generated .gitconfig" || echo "[FAIL] Could not generate .gitconfig"
-    fi
+if [ "$FORCE" = true ]; then
+    generate_gitconfig "$REPO_ROOT" "$HOME_DIR" "true" && echo "[OK] Generated .gitconfig" || echo "[FAIL] Could not generate .gitconfig"
 else
-    echo "[ERROR] Generator script not found: $GENERATE_SCRIPT"
+    generate_gitconfig "$REPO_ROOT" "$HOME_DIR" "false" && echo "[OK] Generated .gitconfig" || echo "[FAIL] Could not generate .gitconfig"
 fi
 echo ""
 
 # STEP 2: Create symlinks
 echo "[STEP 2] Creating symlinks..."
 echo "-----"
-
 LINK_ERRORS=0
-for file in "${FILES_TO_LINK[@]}"; do
-    SOURCE_FILE="$REPO_ROOT/$file"
-    LINK_PATH="$HOME_DIR/$file"
-
-    if [ ! -f "$SOURCE_FILE" ]; then
-        echo "[ERROR] Source not found: $SOURCE_FILE"
-        ((LINK_ERRORS++))
-        continue
-    fi
-
-    if [ -e "$LINK_PATH" ] || [ -L "$LINK_PATH" ]; then
-        if [ "$FORCE" = false ]; then
-            read -p "$file exists. Overwrite? (y/n) " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                echo "Skipped: $file"
-                continue
-            fi
-        fi
-        BACKUP="$HOME_DIR/Existing.$file.bak"
-        [ -e "$BACKUP" ] && rm -f "$BACKUP"
-        mv "$LINK_PATH" "$BACKUP"
-        echo "Backed up existing $file to Existing.$file.bak"
-    fi
-
-    if ln -s "$SOURCE_FILE" "$LINK_PATH" 2>/dev/null; then
-        echo "[OK] Linked $file"
-    else
-        echo "[FAIL] Could not create symlink for $file"
-        ((LINK_ERRORS++))
-    fi
+for file in ".gitignore_global" "gitconfig_helper.py"; do
+    create_symlink "$REPO_ROOT/$file" "$HOME_DIR/$file" "$FORCE" || ((LINK_ERRORS++))
 done
 echo ""
 
 # STEP 3: Generate local config
 echo "[STEP 3] Generating machine-specific configuration..."
 echo "-----"
-
-LOCAL_CONFIG_SCRIPT="$SCRIPTS_MAC_DIR/initialize-local-config.sh"
 if [ -f "$LOCAL_CONFIG_SCRIPT" ]; then
     if [ "$FORCE" = true ]; then
         bash "$LOCAL_CONFIG_SCRIPT" --force
@@ -152,17 +114,7 @@ echo ""
 # STEP 4: Configure global gitignore
 echo "[STEP 4] Configuring global gitignore..."
 echo "-----"
-
-GITIGNORE_GLOBAL="$HOME_DIR/.gitignore_global"
-if [ -e "$GITIGNORE_GLOBAL" ]; then
-    if git config --global core.excludesfile "$GITIGNORE_GLOBAL" 2>/dev/null; then
-        echo "[OK] Configured global excludesfile"
-    else
-        echo "[FAIL] Could not configure global excludesfile"
-    fi
-else
-    echo "[WARN] .gitignore_global symlink not found"
-fi
+configure_global_gitignore "$HOME_DIR"
 echo ""
 
 # STEP 5: Register launchd agent for login-triggered auto-sync
@@ -170,7 +122,7 @@ if [ "$NO_LAUNCHD" = false ]; then
     echo "[STEP 5] Setting up launchd login agent..."
     echo "-----"
 
-    UPDATE_SCRIPT="$SCRIPTS_MAC_DIR/update-gitconfig.sh"
+    UPDATE_SCRIPT="$SCRIPT_DIR/update-gitconfig.sh"
     PLIST_LABEL="com.gitconfig.update"
     LAUNCH_AGENTS_DIR="$HOME_DIR/Library/LaunchAgents"
     PLIST_PATH="$LAUNCH_AGENTS_DIR/$PLIST_LABEL.plist"
@@ -187,7 +139,6 @@ if [ "$NO_LAUNCHD" = false ]; then
                 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                     echo "Skipped: launchd agent"
                     echo ""
-                    # jump to step 6
                     SKIP_LAUNCHD=true
                 fi
             fi
@@ -248,45 +199,17 @@ echo "-----"
 
 ERRORS=0
 
-GITCONFIG_PATH="$HOME_DIR/.gitconfig"
-if [ -f "$GITCONFIG_PATH" ]; then
-    echo "[OK] .gitconfig verified"
-else
-    echo "[FAIL] .gitconfig missing"
-    ((ERRORS++))
-fi
-
-for file in "${FILES_TO_LINK[@]}"; do
-    if [ -e "$HOME_DIR/$file" ]; then
-        echo "[OK] $file verified"
-    else
-        echo "[FAIL] $file missing"
-        ((ERRORS++))
-    fi
-done
-
-LOCAL_CONFIG="$HOME_DIR/.gitconfig.local"
-if [ -f "$LOCAL_CONFIG" ]; then
-    echo "[OK] .gitconfig.local verified"
-else
-    echo "[FAIL] .gitconfig.local missing"
-    ((ERRORS++))
-fi
+[ -f "$HOME_DIR/.gitconfig" ]       && echo "[OK] .gitconfig verified"       || { echo "[FAIL] .gitconfig missing";       ((ERRORS++)); }
+[ -e "$HOME_DIR/.gitignore_global" ] && echo "[OK] .gitignore_global verified" || { echo "[FAIL] .gitignore_global missing"; ((ERRORS++)); }
+[ -e "$HOME_DIR/gitconfig_helper.py" ] && echo "[OK] gitconfig_helper.py verified" || { echo "[FAIL] gitconfig_helper.py missing"; ((ERRORS++)); }
+[ -f "$HOME_DIR/.gitconfig.local" ] && echo "[OK] .gitconfig.local verified"  || { echo "[FAIL] .gitconfig.local missing";  ((ERRORS++)); }
 
 if [ "$NO_LAUNCHD" = false ]; then
     PLIST_PATH="$HOME_DIR/Library/LaunchAgents/com.gitconfig.update.plist"
-    if [ -f "$PLIST_PATH" ]; then
-        echo "[OK] launchd agent verified"
-    else
-        echo "[WARN] launchd agent plist not found (setup may have been skipped)"
-    fi
+    [ -f "$PLIST_PATH" ] && echo "[OK] launchd agent verified" || echo "[WARN] launchd agent plist not found (setup may have been skipped)"
 fi
 
-if git config --list > /dev/null 2>&1; then
-    echo "[OK] Git configuration accessible"
-else
-    echo "[WARN] Could not verify git configuration"
-fi
+git config --list > /dev/null 2>&1 && echo "[OK] Git configuration accessible" || echo "[WARN] Could not verify git configuration"
 
 echo ""
 echo "Setup Complete!"
