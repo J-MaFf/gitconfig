@@ -10,6 +10,13 @@
 [user]
 	name = Joey Maffiola
 	email = 7maffiolajoey@gmail.com
+	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGjNJEhPFIZHo3t9aIb8Q2P4sY2AVV37/4eJoeDdREgB
+
+[gpg]
+	format = ssh
+
+[commit]
+	gpgsign = true
 
 [push]
     autoSetupRemote = true
