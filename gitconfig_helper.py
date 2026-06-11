@@ -19,6 +19,17 @@ except ImportError:
     from rich.table import Table
 
 
+def run_git(*args, check=False):
+    return subprocess.run(
+        ["git", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=check,
+    )
+
+
 def cleanup_branches(force=False):
     """Run git cleanup and display deleted branches in a table.
 
@@ -31,27 +42,13 @@ def cleanup_branches(force=False):
     try:
         # Verify we're in a git repository
         try:
-            subprocess.run(
-                ["git", "rev-parse", "--git-dir"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=True,
-            )
+            run_git("rev-parse", "--git-dir", check=True)
         except subprocess.CalledProcessError:
             console.print("[red]Error: Not in a git repository[/red]")
             return
 
         # Get current branch
-        result_current = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        )
+        result_current = run_git("rev-parse", "--abbrev-ref", "HEAD", check=True)
         current_branch = result_current.stdout.strip()
         switched_branch = False
 
@@ -60,14 +57,7 @@ def cleanup_branches(force=False):
             console.print(
                 f"[cyan]Switching from '{current_branch}' to 'main'...[/cyan]"
             )
-            result = subprocess.run(
-                ["git", "checkout", "main"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
+            result = run_git("checkout", "main")
             if result.returncode != 0:
                 console.print("[red]Error: Failed to switch to main branch[/red]")
                 console.print(f"[red]{result.stderr.strip()}[/red]")
@@ -75,14 +65,7 @@ def cleanup_branches(force=False):
             switched_branch = True
 
         # Get all branches before cleanup
-        result_before = subprocess.run(
-            ["git", "branch", "-vv"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        )
+        result_before = run_git("branch", "-vv", check=True)
         branches_before = set(
             line.strip().split()[0].lstrip("*").strip()
             for line in result_before.stdout.strip().split("\n")
@@ -91,19 +74,12 @@ def cleanup_branches(force=False):
 
         # Run the actual cleanup command (not the alias to avoid recursion)
         console.print("[cyan]Running git cleanup...[/cyan]")
-        subprocess.run(["git", "fetch", "-p"], check=False)
+        run_git("fetch", "-p")
 
         # Get list of branches to delete:
         # 1. Branches with no remote tracking (no [origin/...] in output) - requires confirmation
         # 2. Branches where the remote has been deleted (contains ": gone]") - auto-delete
-        result_vv = subprocess.run(
-            ["git", "branch", "-vv"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
+        result_vv = run_git("branch", "-vv")
 
         # Handle empty or failed output
         if not result_vv.stdout:
@@ -137,28 +113,14 @@ def cleanup_branches(force=False):
 
         # Delete the identified branches
         for branch in branches_to_delete:
-            result = subprocess.run(
-                ["git", "branch", "-D", branch],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
+            result = run_git("branch", "-D", branch)
             if result.returncode != 0:
                 console.print(
                     f"[yellow]Warning: Failed to delete branch '{branch}': {result.stderr.strip()}[/yellow]"
                 )
 
         # Get all branches after cleanup
-        result_after = subprocess.run(
-            ["git", "branch", "-vv"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        )
+        result_after = run_git("branch", "-vv", check=True)
         branches_after = set(
             line.strip().split()[0].lstrip("*").strip()
             for line in result_after.stdout.strip().split("\n")
@@ -178,14 +140,7 @@ def cleanup_branches(force=False):
                 console.print("[cyan]Staying on 'main'.[/cyan]\n")
             else:
                 console.print(f"[cyan]Switching back to '{current_branch}'...[/cyan]")
-                result = subprocess.run(
-                    ["git", "checkout", current_branch],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    check=False,
-                )
+                result = run_git("checkout", current_branch)
                 if result.returncode != 0:
                     console.print(
                         f"[yellow]Warning: Failed to switch back to '{current_branch}'[/yellow]"
@@ -225,15 +180,7 @@ def get_git_aliases():
     }
 
     try:
-        # Get all aliases from git config
-        result = subprocess.run(
-            ["git", "config", "--get-regexp", "alias"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        )
+        result = run_git("config", "--get-regexp", "alias", check=True)
 
         aliases = []
         for line in result.stdout.strip().split("\n"):
@@ -288,39 +235,18 @@ def switch_to_main():
 
     try:
         # Step 1: Verify git repository
-        result = subprocess.run(
-            ["git", "rev-parse", "--git-dir"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
+        result = run_git("rev-parse", "--git-dir")
         if result.returncode != 0:
             console.print("[red]Error: Not in a git repository[/red]")
             return 1
 
         # Get current branch
-        result_current = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        )
+        result_current = run_git("rev-parse", "--abbrev-ref", "HEAD", check=True)
         current_branch = result_current.stdout.strip()
 
         # Step 2: Fetch updates
         console.print("[cyan]Fetching updates from remote...[/cyan]")
-        result = subprocess.run(
-            ["git", "fetch", "-p"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
+        result = run_git("fetch", "-p")
         if result.returncode != 0:
             console.print("[red]Error: Failed to fetch from remote[/red]")
             console.print(f"[red]{result.stderr.strip()}[/red]")
@@ -328,14 +254,7 @@ def switch_to_main():
         console.print("[green]OK Fetch complete[/green]")
 
         # Step 3: Check for uncommitted changes
-        result_status = subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-        )
+        result_status = run_git("status", "--porcelain", check=True)
         if result_status.stdout.strip():
             console.print("[red]Error: Uncommitted changes detected[/red]")
             console.print(
@@ -349,14 +268,7 @@ def switch_to_main():
             console.print(
                 f"[cyan]Switching from '{current_branch}' to 'main'...[/cyan]"
             )
-            result = subprocess.run(
-                ["git", "checkout", "main"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
+            result = run_git("checkout", "main")
             if result.returncode != 0:
                 console.print("[red]Error: Failed to checkout main branch[/red]")
                 console.print(f"[red]{result.stderr.strip()}[/red]")
@@ -367,25 +279,11 @@ def switch_to_main():
 
         # Step 5: Pull latest changes
         console.print("[cyan]Pulling latest changes...[/cyan]")
-        result = subprocess.run(
-            ["git", "pull"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
+        result = run_git("pull")
 
         if result.returncode != 0:
             # Check if it's a merge conflict
-            result_status = subprocess.run(
-                ["git", "status", "--porcelain"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=True,
-            )
+            result_status = run_git("status", "--porcelain", check=True)
 
             if (
                 "UU" in result_status.stdout
