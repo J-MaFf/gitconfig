@@ -4,6 +4,14 @@ Inherits global rules from `/Scripts/CLAUDE.md`. Rules here override or extend g
 
 ---
 
+## Git Workflow
+
+Use the **git-policies** skill for all git and GitHub work in this repo: issue-first workflow, branch naming, signed commits, PR conventions, squash & merge, and branch cleanup.
+
+Invoke it at the start of any session that involves git: `/git-policies`
+
+---
+
 ## Platform
 
 This repo targets **macOS, Linux, and Windows** — it's a cross-platform dotfiles/git-config tool.
@@ -20,10 +28,10 @@ This repo targets **macOS, Linux, and Windows** — it's a cross-platform dotfil
 | File | Purpose |
 |------|---------|
 | `gitconfig_helper.py` | Cross-platform helper — Python 3 |
-| `scripts/Setup-GitConfig.ps1` | Windows setup entrypoint |
-| `scripts/mac version/` | macOS bash setup scripts |
-| `scripts/linux version/` | Linux bash setup scripts |
-| `config/` | Shared git config templates |
+| `scripts/windows version/Setup-GitConfig.ps1` | Windows setup entrypoint |
+| `scripts/shared/` | Shared bash library and scripts (mac + linux) |
+| `scripts/mac version/` | macOS bash entry points |
+| `scripts/linux version/` | Linux bash entry points |
 | `tests/` | Pester tests for Windows scripts |
 
 ---
