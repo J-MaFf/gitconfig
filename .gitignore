@@ -4,7 +4,8 @@
 # Generated git configuration (created from .gitconfig.template)
 .gitconfig
 
-# Update GitConfig logs
+# Test output and logs
+test_output.txt
 docs/update-gitconfig.log
 
 # Claude Code local session data
