@@ -76,6 +76,12 @@ def cleanup_branches(force=False):
         console.print("[cyan]Running git cleanup...[/cyan]")
         run_git("fetch", "-p")
 
+        # Pull latest changes on main so local doesn't fall behind after cleanup
+        console.print("[cyan]Pulling latest changes on main...[/cyan]")
+        pull_result = run_git("pull")
+        if pull_result.returncode != 0:
+            console.print(f"[yellow]Warning: git pull failed: {pull_result.stderr.strip()}[/yellow]")
+
         # Get list of branches to delete:
         # 1. Branches with no remote tracking (no [origin/...] in output) - requires confirmation
         # 2. Branches where the remote has been deleted (contains ": gone]") - auto-delete
