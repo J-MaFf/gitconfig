@@ -153,8 +153,40 @@ if (-not $NoTask) {
     Write-Host ""
 }
 
-# STEP 6: Verify setup
-Write-Host "[STEP 6] Verifying setup..." -ForegroundColor Cyan
+# STEP 6: Install Python dependencies
+Write-Host "[STEP 6] Installing Python dependencies..." -ForegroundColor Cyan
+Write-Host "-----" -ForegroundColor Cyan
+$pip = Get-Command pip -ErrorAction SilentlyContinue
+$pip3 = Get-Command pip3 -ErrorAction SilentlyContinue
+$pipCmd = if ($pip3) { "pip3" } elseif ($pip) { "pip" } else { $null }
+
+if ($pipCmd) {
+    $richCheck = & $pipCmd show rich 2>$null
+    if ($richCheck) {
+        Write-Host "[OK] Python 'rich' already installed" -ForegroundColor Green
+    }
+    else {
+        try {
+            & $pipCmd install rich --quiet 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "[OK] Installed Python 'rich'" -ForegroundColor Green
+            }
+            else {
+                Write-Host "[WARN] Could not install 'rich' — run manually: pip install rich" -ForegroundColor Yellow
+            }
+        }
+        catch {
+            Write-Host "[WARN] Could not install 'rich' — run manually: pip install rich" -ForegroundColor Yellow
+        }
+    }
+}
+else {
+    Write-Host "[WARN] pip not found — install Python 3 from https://python.org" -ForegroundColor Yellow
+}
+Write-Host ""
+
+# STEP 7: Verify setup
+Write-Host "[STEP 7] Verifying setup..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 
 $verifyFiles = @(".gitconfig", ".gitignore_global", "gitconfig_helper.py", ".gitconfig.local")
@@ -162,6 +194,15 @@ foreach ($file in $verifyFiles) {
     $path = Join-Path $homeDir $file
     if (Test-Path $path) { Write-Host "[OK] $file verified" -ForegroundColor Green }
     else                  { Write-Host "[FAIL] $file missing" -ForegroundColor Red }
+}
+
+try {
+    $richImport = & python -c "import rich" 2>$null
+    if ($LASTEXITCODE -eq 0) { Write-Host "[OK] Python 'rich' importable" -ForegroundColor Green }
+    else                     { Write-Host "[WARN] Python 'rich' not importable" -ForegroundColor Yellow }
+}
+catch {
+    Write-Host "[WARN] Could not verify Python 'rich'" -ForegroundColor Yellow
 }
 
 try {
