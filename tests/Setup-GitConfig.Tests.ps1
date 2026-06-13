@@ -55,6 +55,23 @@ Describe "install.ps1" {
         }
     }
 
+    Context "Python Dependencies" {
+        It "Should attempt to install Python rich library" {
+            $scriptContent = Get-Content $script:scriptPath -Raw
+            $scriptContent | Should -Match "pip.*install.*rich"
+        }
+
+        It "Should verify rich is importable" {
+            $scriptContent = Get-Content $script:scriptPath -Raw
+            $scriptContent | Should -Match "import rich"
+        }
+
+        It "Should warn gracefully if pip is not available" {
+            $scriptContent = Get-Content $script:scriptPath -Raw
+            $scriptContent | Should -Match "\[WARN\].*pip"
+        }
+    }
+
     Context "Config Generation" {
         It "Should generate .gitconfig in home directory" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
             $gitconfigPath = Join-Path $script:testHome ".gitconfig"
