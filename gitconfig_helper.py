@@ -13,10 +13,9 @@ try:
     from rich.console import Console
     from rich.table import Table
 except ImportError:
-    print("The 'rich' library is not installed. Attempting to install it now...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "rich"])
-    from rich.console import Console
-    from rich.table import Table
+    print("Error: the 'rich' library is not installed.")
+    print("Run the install script for your platform, or: pip install rich")
+    sys.exit(1)
 
 
 def run_git(*args, check=False):
@@ -28,6 +27,14 @@ def run_git(*args, check=False):
         errors="replace",
         check=check,
     )
+
+
+def _default_branch():
+    """Return the configured default branch name, falling back to 'main'."""
+    result = run_git("config", "--get", "init.defaultBranch")
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return "main"
 
 
 def cleanup_branches(force=False):
@@ -51,13 +58,14 @@ def cleanup_branches(force=False):
         result_current = run_git("rev-parse", "--abbrev-ref", "HEAD", check=True)
         current_branch = result_current.stdout.strip()
         switched_branch = False
+        default_branch = _default_branch()
 
-        # Switch to main if not already on it
-        if current_branch != "main":
+        # Switch to default branch if not already on it
+        if current_branch != default_branch:
             console.print(
-                f"[cyan]Switching from '{current_branch}' to 'main'...[/cyan]"
+                f"[cyan]Switching from '{current_branch}' to '{default_branch}'...[/cyan]"
             )
-            result = run_git("checkout", "main")
+            result = run_git("checkout", default_branch)
             if result.returncode != 0:
                 console.print("[red]Error: Failed to switch to main branch[/red]")
                 console.print(f"[red]{result.stderr.strip()}[/red]")
@@ -143,7 +151,7 @@ def cleanup_branches(force=False):
                 console.print(
                     f"[yellow]Note: Your original branch '{current_branch}' was deleted during cleanup.[/yellow]"
                 )
-                console.print("[cyan]Staying on 'main'.[/cyan]\n")
+                console.print(f"[cyan]Staying on '{default_branch}'.[/cyan]\n")
             else:
                 console.print(f"[cyan]Switching back to '{current_branch}'...[/cyan]")
                 result = run_git("checkout", current_branch)
@@ -218,11 +226,7 @@ def get_git_aliases():
 
         return sorted(aliases)
     except subprocess.CalledProcessError:
-        return [
-            ("alias", "List all aliases"),
-            ("branches", "Track all remote branches"),
-            ("cleanup", "Cleanup merged branches"),
-        ]
+        return []
 
 
 def switch_to_main():
@@ -249,6 +253,7 @@ def switch_to_main():
         # Get current branch
         result_current = run_git("rev-parse", "--abbrev-ref", "HEAD", check=True)
         current_branch = result_current.stdout.strip()
+        default_branch = _default_branch()
 
         # Step 2: Fetch updates
         console.print("[cyan]Fetching updates from remote...[/cyan]")
@@ -264,24 +269,24 @@ def switch_to_main():
         if result_status.stdout.strip():
             console.print("[red]Error: Uncommitted changes detected[/red]")
             console.print(
-                "[yellow]Please commit or stash your changes before switching to main:[/yellow]"
+                f"[yellow]Please commit or stash your changes before switching to {default_branch}:[/yellow]"
             )
             console.print(result_status.stdout)
             return 1
 
-        # Step 4: Switch to main (if not already there)
-        if current_branch != "main":
+        # Step 4: Switch to default branch (if not already there)
+        if current_branch != default_branch:
             console.print(
-                f"[cyan]Switching from '{current_branch}' to 'main'...[/cyan]"
+                f"[cyan]Switching from '{current_branch}' to '{default_branch}'...[/cyan]"
             )
-            result = run_git("checkout", "main")
+            result = run_git("checkout", default_branch)
             if result.returncode != 0:
-                console.print("[red]Error: Failed to checkout main branch[/red]")
+                console.print(f"[red]Error: Failed to checkout {default_branch} branch[/red]")
                 console.print(f"[red]{result.stderr.strip()}[/red]")
                 return 1
-            console.print("[green]OK Switched to main[/green]")
+            console.print(f"[green]OK Switched to {default_branch}[/green]")
         else:
-            console.print("[cyan]Already on main branch[/cyan]")
+            console.print(f"[cyan]Already on {default_branch} branch[/cyan]")
 
         # Step 5: Pull latest changes
         console.print("[cyan]Pulling latest changes...[/cyan]")
