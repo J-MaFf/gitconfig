@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Formatted console output using Rich library
 
 - **Setup Automation (PowerShell Scripts)**
-  - `Setup-GitConfig.ps1` - Unified setup wrapper orchestrating complete configuration
+  - `install.ps1` - Unified setup wrapper orchestrating complete configuration
   - `Initialize-Symlinks.ps1` - Create symbolic links from home directory to repo files
   - `Initialize-LocalConfig.ps1` - Generate machine-specific `.gitconfig.local`
   - `Register-LoginTask.ps1` - Create Windows scheduled task for auto-sync
@@ -99,9 +99,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking Changes
 
 - **BREAKING**: `.gitconfig` is now generated from `.gitconfig.template` instead of being version controlled
-  - Existing setup will require running `Setup-GitConfig.ps1` again to regenerate
+  - Existing setup will require running `install.ps1` again to regenerate
   - Benefits: No hardcoded paths, complete portability across machines
-- Updated `Setup-GitConfig.ps1` to generate config instead of creating symlink
+- Updated `install.ps1` to generate config instead of creating symlink
 - `.gitconfig` is no longer a symlink - it's a generated file in home directory
 - Only `.gitignore_global` and `gitconfig_helper.py` are symlinked now
 

@@ -28,7 +28,7 @@ This repo targets **macOS, Linux, and Windows** — it's a cross-platform dotfil
 | File | Purpose |
 |------|---------|
 | `gitconfig_helper.py` | Cross-platform helper — Python 3 |
-| `scripts/windows version/Setup-GitConfig.ps1` | Windows setup entrypoint |
+| `scripts/windows version/install.ps1` | Windows setup entrypoint |
 | `scripts/shared/` | Shared bash library and scripts (mac + linux) |
 | `scripts/mac version/` | macOS bash entry points |
 | `scripts/linux version/` | Linux bash entry points |

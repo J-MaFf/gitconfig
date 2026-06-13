@@ -227,7 +227,7 @@ if ($verifyErrors -eq 0) {
     Write-Host "All gitconfig-related files and tasks removed." -ForegroundColor Green
     Write-Host ""
     Write-Host "Ready to test fresh setup:" -ForegroundColor Cyan
-    Write-Host "  .\Setup-GitConfig.ps1 -Force" -ForegroundColor Cyan
+    Write-Host "  .\install.ps1 -Force" -ForegroundColor Cyan
 }
 else {
     Write-Host "Cleanup INCOMPLETE - $verifyErrors items still present" -ForegroundColor Red

@@ -12,7 +12,7 @@ if ($Help) {
     Write-Host @"
 GitConfig Setup Wrapper
 
-USAGE: .\Setup-GitConfig.ps1 [OPTIONS]
+USAGE: .\install.ps1 [OPTIONS]
 
 OPTIONS:
     -Force      Overwrite existing files without prompting

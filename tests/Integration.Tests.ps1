@@ -1,6 +1,6 @@
 BeforeAll {
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
-    $script:setupScript = Join-Path $script:repoRoot "scripts\Setup-GitConfig.ps1"
+    $script:setupScript = Join-Path $script:repoRoot "scripts\install.ps1"
     $script:cleanupScript = Join-Path $script:repoRoot "scripts\Cleanup-GitConfig.ps1"
     $script:testHome = $env:USERPROFILE
     if (-not $script:testHome) {
@@ -25,7 +25,7 @@ Describe "GitConfig Integration" {
         It "Should complete setup without errors" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
             # This test is skipped in non-interactive environments (Pester extension)
             # Also skipped on non-Windows platforms as the scripts are Windows-specific
-            # Run manually on command line: .\Setup-GitConfig.ps1 -Force
+            # Run manually on command line: .\install.ps1 -Force
             & $script:pwshExe -NoProfile -ExecutionPolicy Bypass -File $script:setupScript -Force 2>&1 | Out-Null
             $LASTEXITCODE | Should -Be 0
         }
