@@ -153,8 +153,26 @@ if [ "$NO_CRON" = false ]; then
     echo ""
 fi
 
-# STEP 6: Verify setup
-echo "[STEP 6] Verifying setup..."
+# STEP 6: Install Python dependencies
+echo "[STEP 6] Installing Python dependencies..."
+echo "-----"
+if command -v pip3 &>/dev/null; then
+    if pip3 show rich &>/dev/null 2>&1; then
+        echo "[OK] Python 'rich' already installed"
+    elif pip3 install rich --quiet 2>/dev/null; then
+        echo "[OK] Installed Python 'rich'"
+    elif pip3 install rich --quiet --break-system-packages 2>/dev/null; then
+        echo "[OK] Installed Python 'rich' (--break-system-packages)"
+    else
+        echo "[WARN] Could not install 'rich' — run manually: pip3 install rich"
+    fi
+else
+    echo "[WARN] pip3 not found — install Python 3: sudo apt install python3-pip"
+fi
+echo ""
+
+# STEP 7: Verify setup
+echo "[STEP 7] Verifying setup..."
 echo "-----"
 
 ERRORS=0
@@ -165,6 +183,7 @@ ERRORS=0
 [ -f "$HOME_DIR/.gitconfig.local" ]    && echo "[OK] .gitconfig.local verified"    || { echo "[FAIL] .gitconfig.local missing";    ((ERRORS++)); }
 
 git config --list > /dev/null 2>&1 && echo "[OK] Git configuration accessible" || echo "[WARN] Could not verify git configuration"
+python3 -c "import rich" &>/dev/null && echo "[OK] Python 'rich' importable" || echo "[WARN] Python 'rich' not importable"
 
 echo ""
 echo "Setup Complete!"
