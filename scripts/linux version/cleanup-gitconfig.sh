@@ -103,7 +103,7 @@ if [ $ERRORS -eq 0 ]; then
     echo "Cleanup SUCCESSFUL!"
     echo ""
     echo "Ready to test fresh setup:"
-    echo "  bash $SCRIPT_DIR/setup-gitconfig.sh --force"
+    echo "  bash $SCRIPT_DIR/install.sh --force"
 else
     echo "Cleanup INCOMPLETE - $ERRORS items still present"
 fi

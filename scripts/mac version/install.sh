@@ -26,7 +26,7 @@ if [ "$HELP" = true ]; then
     cat << 'EOF'
 GitConfig Setup Wrapper - macOS Version
 
-USAGE: ./setup-gitconfig.sh [OPTIONS]
+USAGE: ./install.sh [OPTIONS]
 
 OPTIONS:
     -f, --force       Overwrite existing files without prompting

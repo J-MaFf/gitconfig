@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # GitConfig Cleanup Script - macOS Version
-# Removes symlinks, config files, and launchd agent created by setup-gitconfig.sh.
+# Removes symlinks, config files, and launchd agent created by install.sh.
 
 set -e
 
@@ -107,7 +107,7 @@ if [ $ERRORS -eq 0 ]; then
     echo "Cleanup SUCCESSFUL!"
     echo ""
     echo "To reinstall, run:"
-    echo "  bash $SCRIPT_DIR/setup-gitconfig.sh --force"
+    echo "  bash $SCRIPT_DIR/install.sh --force"
 else
     echo "Cleanup INCOMPLETE — $ERRORS items still present"
 fi
