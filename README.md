@@ -30,7 +30,7 @@ bash scripts/mac\ version/install.sh --force
 ```powershell
 git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
 cd ~/Documents/Scripts/gitconfig
-.\scripts\windows` version\install.ps1 -Force
+& ".\scripts\windows version\install.ps1" -Force
 ```
 
 ### Linux
@@ -60,7 +60,7 @@ Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` 
 ### Windows (PowerShell)
 
 ```powershell
-.\scripts\windows` version\Cleanup-GitConfig.ps1
+& ".\scripts\windows version\Cleanup-GitConfig.ps1"
 ```
 
 Removes: `~/.gitconfig`, symlinks, `~/.gitconfig.local`, and the `Update-GitConfig` scheduled task.
@@ -87,11 +87,11 @@ git main           # Switch to main with fetch, pull, and branch cleanup
 ### Setup Script Options (Windows)
 
 ```powershell
-.\scripts\windows` version\install.ps1 -Force           # Full setup
-.\scripts\windows` version\install.ps1 -Force -NoTask   # Skip scheduled task
-.\scripts\windows` version\Initialize-GitConfig.ps1 -Force      # Regenerate .gitconfig from template
-.\scripts\windows` version\Initialize-Symlinks.ps1 -Force       # Recreate symlinks
-.\scripts\windows` version\Initialize-LocalConfig.ps1 -Force    # Regenerate local config
+& ".\scripts\windows version\install.ps1" -Force           # Full setup
+& ".\scripts\windows version\install.ps1" -Force -NoTask   # Skip scheduled task
+& ".\scripts\windows version\Initialize-GitConfig.ps1" -Force      # Regenerate .gitconfig from template
+& ".\scripts\windows version\Initialize-Symlinks.ps1" -Force       # Recreate symlinks
+& ".\scripts\windows version\Initialize-LocalConfig.ps1" -Force    # Regenerate local config
 ```
 
 ## Contents
