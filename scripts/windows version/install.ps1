@@ -196,13 +196,23 @@ foreach ($file in $verifyFiles) {
     else                  { Write-Host "[FAIL] $file missing" -ForegroundColor Red }
 }
 
-try {
-    $richImport = & python -c "import rich" 2>$null
-    if ($LASTEXITCODE -eq 0) { Write-Host "[OK] Python 'rich' importable" -ForegroundColor Green }
-    else                     { Write-Host "[WARN] Python 'rich' not importable" -ForegroundColor Yellow }
+$pyCmd = if (Get-Command py -ErrorAction SilentlyContinue)      { "py" }
+         elseif (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" }
+         elseif (Get-Command python -ErrorAction SilentlyContinue)  { "python" }
+         else { $null }
+
+if ($pyCmd) {
+    try {
+        & $pyCmd -c "import rich" 2>$null
+        if ($LASTEXITCODE -eq 0) { Write-Host "[OK] Python 'rich' importable" -ForegroundColor Green }
+        else                     { Write-Host "[WARN] Python 'rich' not importable" -ForegroundColor Yellow }
+    }
+    catch {
+        Write-Host "[WARN] Could not verify Python 'rich'" -ForegroundColor Yellow
+    }
 }
-catch {
-    Write-Host "[WARN] Could not verify Python 'rich'" -ForegroundColor Yellow
+else {
+    Write-Host "[WARN] Python not found — cannot verify 'rich'" -ForegroundColor Yellow
 }
 
 try {
