@@ -92,11 +92,11 @@ CONFIG_CONTENT="# Machine-Specific Git Configuration (Linux)
 if [ -f "$SIGNING_KEY_PATH" ]; then
     echo "[INFO] Detected SSH signing key: $SIGNING_KEY_PATH"
     CONFIG_CONTENT+="
-[gpg]
-	format = ssh
-
 [user]
 	signingKey = $SIGNING_KEY_PATH
+
+[gpg]
+	format = ssh
 
 [commit]
 	gpgsign = true
@@ -107,10 +107,10 @@ else
     echo "       it as a signing key on GitHub, then re-run this script."
     CONFIG_CONTENT+="
 # Uncomment to enable file-based SSH commit signing:
-# [gpg]
-# 	format = ssh
 # [user]
 # 	signingKey = $HOME_DIR/.ssh/id_ed25519_signing
+# [gpg]
+# 	format = ssh
 # [commit]
 # 	gpgsign = true
 "
