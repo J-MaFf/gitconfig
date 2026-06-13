@@ -193,8 +193,26 @@ PLIST
     echo ""
 fi
 
-# STEP 6: Verify setup
-echo "[STEP 6] Verifying setup..."
+# STEP 6: Install Python dependencies
+echo "[STEP 6] Installing Python dependencies..."
+echo "-----"
+if command -v pip3 &>/dev/null; then
+    if pip3 show rich &>/dev/null 2>&1; then
+        echo "[OK] Python 'rich' already installed"
+    elif pip3 install rich --quiet 2>/dev/null; then
+        echo "[OK] Installed Python 'rich'"
+    elif pip3 install rich --quiet --break-system-packages 2>/dev/null; then
+        echo "[OK] Installed Python 'rich' (--break-system-packages)"
+    else
+        echo "[WARN] Could not install 'rich' — run manually: pip3 install rich"
+    fi
+else
+    echo "[WARN] pip3 not found — install Python 3 via Homebrew: brew install python"
+fi
+echo ""
+
+# STEP 7: Verify setup
+echo "[STEP 7] Verifying setup..."
 echo "-----"
 
 ERRORS=0
@@ -209,6 +227,8 @@ if [ "$NO_LAUNCHD" = false ]; then
     [ -f "$PLIST_PATH" ] && echo "[OK] launchd agent verified" || echo "[WARN] launchd agent plist not found (setup may have been skipped)"
 fi
 
+python3 -c "import rich" &>/dev/null && echo "[OK] Python 'rich' importable" || echo "[WARN] Python 'rich' not importable"
+
 git config --list > /dev/null 2>&1 && echo "[OK] Git configuration accessible" || echo "[WARN] Could not verify git configuration"
 
 echo ""
@@ -217,10 +237,7 @@ echo "====================================="
 echo ""
 
 if [ $ERRORS -eq 0 ]; then
-    echo "Next step: install the Python dependency if not already done:"
-    echo "  pip3 install rich"
-    echo ""
-    echo "Then verify your git aliases:"
+    echo "Verify your git aliases:"
     echo "  git alias"
 else
     echo "Setup completed with $ERRORS error(s). Review the output above."
