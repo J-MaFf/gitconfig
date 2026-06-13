@@ -1,7 +1,7 @@
 BeforeAll {
     # Setup variables
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
-    $script:scriptPath = Join-Path $script:repoRoot "scripts\Setup-GitConfig.ps1"
+    $script:scriptPath = Join-Path $script:repoRoot "scripts\install.ps1"
     $script:testHome = $env:USERPROFILE
     if (-not $script:testHome) {
         $script:testHome = $env:HOME  # Unix/Linux fallback
@@ -31,12 +31,12 @@ BeforeAll {
 
     # Run setup if in interactive mode
     if ($script:isAdmin -and [System.Environment]::UserInteractive) {
-        Write-Host "Running Setup-GitConfig.ps1 for testing..." -ForegroundColor Cyan
+        Write-Host "Running install.ps1 for testing..." -ForegroundColor Cyan
         & $script:scriptPath -Force -ErrorAction SilentlyContinue | Out-Null
     }
 }
 
-Describe "Setup-GitConfig.ps1" {
+Describe "install.ps1" {
 
     Context "Script Parameters" {
         It "Should accept -Force parameter" {
@@ -183,7 +183,7 @@ Describe "Setup-GitConfig.ps1" {
     Context "Scheduled Task Creation" {
         It "Should create Update-GitConfig scheduled task" -Skip:(-not $script:platformIsWindows) {
             # Note: This test is skipped when setup runs with -NoTask (which it does for testing)
-            # To fully test task creation, run Setup-GitConfig.ps1 -Force (without -NoTask)
+            # To fully test task creation, run install.ps1 -Force (without -NoTask)
             # Scheduled tasks are Windows-only
             $task = Get-ScheduledTask -TaskName "Update-GitConfig" -ErrorAction SilentlyContinue
             if ($task) {

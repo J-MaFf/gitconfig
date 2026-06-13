@@ -618,7 +618,7 @@ cmd /c dir "$env:USERPROFILE\gitconfig_helper.py" /L
 ```powershell
 # Run setup script
 cd ~\Documents\Scripts\gitconfig
-.\scripts\Setup-GitConfig.ps1 -Force
+.\scripts\install.ps1 -Force
 ```
 
 ---
@@ -637,7 +637,7 @@ git config --get-all alias.alias
 Get-Command gitconfig_helper.py
 
 # Re-run setup
-.\scripts\Setup-GitConfig.ps1 -Force
+.\scripts\install.ps1 -Force
 ```
 
 ---
@@ -674,7 +674,7 @@ Get-Content "~\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 10
 
 ```powershell
 .\scripts\Cleanup-GitConfig.ps1 -Force
-.\scripts\Setup-GitConfig.ps1 -Force
+.\scripts\install.ps1 -Force
 ```
 
 ---
@@ -696,7 +696,7 @@ python "~\Documents\Scripts\gitconfig\gitconfig_helper.py"
 pip install --upgrade rich
 
 # Re-run setup
-.\scripts\Setup-GitConfig.ps1 -Force
+.\scripts\install.ps1 -Force
 ```
 
 ---
@@ -712,7 +712,7 @@ The setup scripts automatically request admin elevation. If you still get permis
 ```powershell
 # Run PowerShell as Administrator
 # Then run setup again
-.\scripts\Setup-GitConfig.ps1 -Force
+.\scripts\install.ps1 -Force
 ```
 
 ---
@@ -778,7 +778,7 @@ Get-Content "~\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 5
 **If something fails** ❌ - Run the setup script:
 
 ```powershell
-.\scripts\Setup-GitConfig.ps1 -Force
+.\scripts\install.ps1 -Force
 ```
 
 ---

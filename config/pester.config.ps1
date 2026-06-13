@@ -14,7 +14,7 @@ $PesterConfig = @{
     CodeCoverage = @{
         Enabled = $true
         Path    = @(
-            './scripts/Setup-GitConfig.ps1',
+            './scripts/install.ps1',
             './scripts/Cleanup-GitConfig.ps1'
         )
     }

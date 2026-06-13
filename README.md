@@ -31,7 +31,7 @@ bash scripts/mac\ version/setup-gitconfig.sh --force
 ```powershell
 git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
 cd ~/Documents/Scripts/gitconfig
-.\scripts\Setup-GitConfig.ps1 -Force
+.\scripts\install.ps1 -Force
 python -m pip install rich
 ```
 
@@ -62,8 +62,8 @@ git main           # Switch to main with fetch, pull, and branch cleanup
 ### Setup Script Options (Windows)
 
 ```powershell
-.\scripts\Setup-GitConfig.ps1 -Force           # Full setup
-.\scripts\Setup-GitConfig.ps1 -Force -NoTask   # Skip scheduled task
+.\scripts\install.ps1 -Force           # Full setup
+.\scripts\install.ps1 -Force -NoTask   # Skip scheduled task
 .\scripts\Initialize-GitConfig.ps1 -Force      # Regenerate .gitconfig from template
 .\scripts\Initialize-Symlinks.ps1 -Force       # Recreate symlinks
 .\scripts\Initialize-LocalConfig.ps1 -Force    # Regenerate local config
