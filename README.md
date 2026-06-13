@@ -13,7 +13,7 @@ Personal Git configuration and utilities for cross-machine synchronization.
 ```bash
 git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
 cd ~/Documents/Scripts/gitconfig
-bash scripts/mac\ version/setup-gitconfig.sh --force
+bash scripts/mac\ version/install.sh --force
 pip3 install rich
 ```
 
@@ -21,7 +21,7 @@ pip3 install rich
 
 ```bash
 brew install 1password-cli
-bash scripts/mac\ version/setup-gitconfig.sh --force
+bash scripts/mac\ version/install.sh --force
 ```
 
 ### Windows (PowerShell)
@@ -42,7 +42,7 @@ python -m pip install rich
 ```bash
 git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
 cd ~/Documents/Scripts/gitconfig
-bash scripts/linux\ version/setup-gitconfig.sh --force
+bash scripts/linux\ version/install.sh --force
 pip install rich
 ```
 

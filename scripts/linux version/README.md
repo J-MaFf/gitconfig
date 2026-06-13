@@ -16,7 +16,7 @@ This directory provides a complete Linux/Unix version of the gitconfig setup sys
 
 ### Main Scripts
 
-- **setup-gitconfig.sh** - Main setup wrapper orchestrates complete installation
+- **install.sh** - Main setup wrapper orchestrates complete installation
   - Cleans previous installation
   - Generates .gitconfig from template
   - Creates symlinks
@@ -60,18 +60,18 @@ chmod +x *.sh
 Run the main setup script:
 
 ```bash
-./setup-gitconfig.sh
+./install.sh
 ```
 
 ### Options
 
-**setup-gitconfig.sh**
+**install.sh**
 
 ```bash
-./setup-gitconfig.sh                # Interactive mode
-./setup-gitconfig.sh --force        # Overwrite without prompting
-./setup-gitconfig.sh --no-cron      # Skip cron job setup
-./setup-gitconfig.sh --help         # Show help
+./install.sh                # Interactive mode
+./install.sh --force        # Overwrite without prompting
+./install.sh --no-cron      # Skip cron job setup
+./install.sh --help         # Show help
 ```
 
 **cleanup-gitconfig.sh**
@@ -112,13 +112,13 @@ Run the main setup script:
 1. **Execution** - Make scripts executable
 
    ```bash
-   chmod +x setup-gitconfig.sh cleanup-gitconfig.sh
+   chmod +x install.sh cleanup-gitconfig.sh
    ```
 
 2. **Run Setup** - Execute main setup script
 
    ```bash
-   ./setup-gitconfig.sh
+   ./install.sh
    ```
 
 3. **Verify** - Check that symlinks and config are in place
@@ -207,7 +207,7 @@ All files are backed up to `~/*.bak` before removal.
 
 ### Custom Cron Schedule
 
-Edit the cron entry in `setup-gitconfig.sh` before running:
+Edit the cron entry in `install.sh` before running:
 
 ```bash
 # Change this line:
@@ -237,7 +237,7 @@ To test the setup without making permanent changes:
 
 ```bash
 # Setup in test mode
-./setup-gitconfig.sh --force
+./install.sh --force
 
 # Verify
 git config --list
