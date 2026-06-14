@@ -29,7 +29,8 @@
     cleanup = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\" || python {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\""
     # Switch to main with error handling: fetch, check for uncommitted changes,
     # checkout main, and pull. Detects and reports merge conflicts.
-    main = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py switch_to_main || python {{REPO_PATH}}/gitconfig_helper.py switch_to_main"
+    # Pass --all (or -a) to run this for every git repo in immediate subdirectories.
+    main = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\" || python {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\""
     # Manage machine-specific git configuration
     localconfig = !git config --file ~/.gitconfig.local
 

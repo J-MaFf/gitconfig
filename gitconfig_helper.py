@@ -5,6 +5,7 @@
 # This script is machine-agnostic and designed to work from any installation directory.
 # It dynamically locates git configuration and operates on the current repository.
 
+import os
 import sys
 import subprocess
 import re
@@ -191,6 +192,7 @@ def get_git_aliases():
         "alias": "List all git aliases in a formatted table",
         "branches": "Download all remote branches and create local tracking branches",
         "cleanup": "Delete branches with deleted remotes (merged). Use --force to also delete local-only branches",
+        "main": "Switch to main (fetch, pull, cleanup). Use --all/-a for every repo in immediate subdirectories",
     }
 
     try:
@@ -325,6 +327,68 @@ def switch_to_main():
         return 1
 
 
+def update_all_main():
+    """Run the switch-to-main flow for every git repo in immediate subdirectories.
+
+    Scans the direct child directories of the current working directory, and for
+    each one that is a git repository, runs switch_to_main() (fetch, switch to
+    main, pull, branch cleanup). Repos with uncommitted changes are skipped by
+    switch_to_main itself. Prints a per-repo header and a final summary table.
+
+    Returns 0 if every repo succeeded, 1 if any repo failed (or none were found).
+    """
+    console = Console()
+
+    original_cwd = os.getcwd()
+
+    # Collect immediate subdirectories that are git repositories (a .git entry
+    # may be a directory or a file, the latter for worktrees/submodules).
+    repos = []
+    for entry in sorted(os.scandir("."), key=lambda e: e.name):
+        if entry.is_dir() and os.path.exists(os.path.join(entry.path, ".git")):
+            repos.append(entry.name)
+
+    if not repos:
+        console.print(
+            "[yellow]No git repositories found in immediate subdirectories.[/yellow]"
+        )
+        return 1
+
+    results = []  # (repo_name, succeeded)
+    for repo in repos:
+        console.print(f"\n[bold]── {repo} ──[/bold]")
+        try:
+            os.chdir(repo)
+            succeeded = switch_to_main() == 0
+        except Exception as e:
+            # Don't let one repo abort the whole sweep
+            console.print(f"[red]Error updating '{repo}': {e}[/red]")
+            succeeded = False
+        finally:
+            os.chdir(original_cwd)
+        results.append((repo, succeeded))
+
+    # Summary table
+    table = Table(
+        title="Update Summary", show_lines=True, header_style="bold yellow"
+    )
+    table.add_column("Repository", justify="left", style="cyan")
+    table.add_column("Result", justify="left")
+
+    for repo, succeeded in results:
+        status = "[green]OK[/green]" if succeeded else "[red]Failed / skipped[/red]"
+        table.add_row(repo, status)
+
+    succeeded_count = sum(1 for _, ok in results if ok)
+    console.print()
+    console.print(table)
+    console.print(
+        f"\n[dim]Updated {succeeded_count} of {len(results)} repositories[/dim]"
+    )
+
+    return 0 if succeeded_count == len(results) else 1
+
+
 def print_aliases():
     console = Console()
     table = Table(title="Git Aliases", show_lines=True, header_style="bold yellow")
@@ -351,8 +415,12 @@ if __name__ == "__main__":
             force = "--force" in sys.argv or "-f" in sys.argv
             cleanup_branches(force=force)
         elif function_name == "switch_to_main":
-            exit_code = switch_to_main()
-            sys.exit(exit_code)
+            # `git main --all` / `-a` updates every repo in immediate subdirectories
+            if "--all" in sys.argv or "-a" in sys.argv:
+                sys.exit(update_all_main())
+            sys.exit(switch_to_main())
+        elif function_name == "update_all_main":
+            sys.exit(update_all_main())
         else:
             print(f"Function {function_name} not found.")
     else:

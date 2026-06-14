@@ -82,6 +82,7 @@ git alias          # Show all aliases
 git branches       # Track all remote branches
 git cleanup        # Clean up merged local branches
 git main           # Switch to main with fetch, pull, and branch cleanup
+git main --all     # Run the above for every git repo in immediate subdirectories (alias: -a)
 ```
 
 ### Setup Script Options (Windows)
