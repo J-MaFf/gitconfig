@@ -192,8 +192,7 @@ def get_git_aliases():
         "alias": "List all git aliases in a formatted table",
         "branches": "Download all remote branches and create local tracking branches",
         "cleanup": "Delete branches with deleted remotes (merged). Use --force to also delete local-only branches",
-        "main": "Switch to main with fetch, pull, and branch cleanup",
-        "mainall": "Update main in every git repo in immediate subdirectories",
+        "main": "Switch to main (fetch, pull, cleanup). Use --all/-a for every repo in immediate subdirectories",
     }
 
     try:
@@ -412,8 +411,10 @@ if __name__ == "__main__":
             force = "--force" in sys.argv or "-f" in sys.argv
             cleanup_branches(force=force)
         elif function_name == "switch_to_main":
-            exit_code = switch_to_main()
-            sys.exit(exit_code)
+            # `git main --all` / `-a` updates every repo in immediate subdirectories
+            if "--all" in sys.argv or "-a" in sys.argv:
+                sys.exit(update_all_main())
+            sys.exit(switch_to_main())
         elif function_name == "update_all_main":
             sys.exit(update_all_main())
         else:
