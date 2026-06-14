@@ -359,10 +359,14 @@ def update_all_main():
         console.print(f"\n[bold]── {repo} ──[/bold]")
         try:
             os.chdir(repo)
-            exit_code = switch_to_main()
+            succeeded = switch_to_main() == 0
+        except Exception as e:
+            # Don't let one repo abort the whole sweep
+            console.print(f"[red]Error updating '{repo}': {e}[/red]")
+            succeeded = False
         finally:
             os.chdir(original_cwd)
-        results.append((repo, exit_code == 0))
+        results.append((repo, succeeded))
 
     # Summary table
     table = Table(
