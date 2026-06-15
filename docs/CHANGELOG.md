@@ -14,8 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (PowerShell on Windows, bash on macOS/Linux) ([#78](https://github.com/J-MaFf/gitconfig/issues/78))
 - `git skill-sync` alias — on-demand `pull --ff-only` of the claude-skills repo
   (`~/.claude/skills`), mirroring the auto-sync's fast-forward-only safety ([#83](https://github.com/J-MaFf/gitconfig/issues/83))
-- `git skill-push "msg"` alias — commit (signed) and push the claude-skills repo
-  (`~/.claude/skills`) from any directory; a clean working tree is a graceful no-op ([#82](https://github.com/J-MaFf/gitconfig/issues/82))
+- `git skill-publish` alias — publish new/edited skills in the claude-skills repo
+  (`~/.claude/skills`) from any directory via a PR. Delegates to that repo's
+  `publish-skill` script (branch → signed commit → PR → squash auto-merge), since its
+  `main` is now branch-protected and can't be pushed to directly. Dispatches by OS
+  like `selfupdate` ([#82](https://github.com/J-MaFf/gitconfig/issues/82))
 
 ### Fixed
 
