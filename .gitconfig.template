@@ -33,6 +33,9 @@
     main = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\" || python {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\""
     # Manage machine-specific git configuration
     localconfig = !git config --file ~/.gitconfig.local
+    # Pull the latest gitconfig repo and reinstall ~/.gitconfig from the template
+    # on demand. Dispatches by OS: Git-for-Windows reports MINGW/MSYS/CYGWIN.
+    selfupdate = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -File '{{REPO_PATH}}/scripts/windows version/Update-GitConfig.ps1' -RepoPath '{{REPO_PATH}}' ;; *) bash '{{REPO_PATH}}/scripts/shared/update-gitconfig.sh' '{{REPO_PATH}}' ;; esac; }; f"
 
 [init]
 	defaultBranch = main
