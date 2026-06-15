@@ -1,4 +1,4 @@
-# GitConfig Setup Wrapper
+﻿# GitConfig Setup Wrapper
 # Orchestrates complete setup of portable git configuration
 # Requires administrator privileges
 
@@ -172,16 +172,16 @@ if ($pipCmd) {
                 Write-Host "[OK] Installed Python 'rich'" -ForegroundColor Green
             }
             else {
-                Write-Host "[WARN] Could not install 'rich' — run manually: pip install rich" -ForegroundColor Yellow
+                Write-Host "[WARN] Could not install 'rich' - run manually: pip install rich" -ForegroundColor Yellow
             }
         }
         catch {
-            Write-Host "[WARN] Could not install 'rich' — run manually: pip install rich" -ForegroundColor Yellow
+            Write-Host "[WARN] Could not install 'rich' - run manually: pip install rich" -ForegroundColor Yellow
         }
     }
 }
 else {
-    Write-Host "[WARN] pip not found — install Python 3 from https://python.org" -ForegroundColor Yellow
+    Write-Host "[WARN] pip not found - install Python 3 from https://python.org" -ForegroundColor Yellow
 }
 Write-Host ""
 
@@ -212,7 +212,7 @@ if ($pyCmd) {
     }
 }
 else {
-    Write-Host "[WARN] Python not found — cannot verify 'rich'" -ForegroundColor Yellow
+    Write-Host "[WARN] Python not found - cannot verify 'rich'" -ForegroundColor Yellow
 }
 
 try {
