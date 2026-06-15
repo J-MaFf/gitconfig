@@ -1,7 +1,7 @@
 BeforeAll {
     # Setup variables
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
-    $script:scriptPath = Join-Path $script:repoRoot "scripts\Initialize-GitConfig.ps1"
+    $script:scriptPath = Join-Path $script:repoRoot "scripts\windows version\Initialize-GitConfig.ps1"
     $script:templatePath = Join-Path $script:repoRoot ".gitconfig.template"
     $script:testHome = $env:USERPROFILE
     if (-not $script:testHome) {

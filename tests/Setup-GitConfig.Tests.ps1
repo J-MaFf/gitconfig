@@ -1,7 +1,7 @@
 BeforeAll {
     # Setup variables
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
-    $script:scriptPath = Join-Path $script:repoRoot "scripts\install.ps1"
+    $script:scriptPath = Join-Path $script:repoRoot "scripts\windows version\install.ps1"
     $script:testHome = $env:USERPROFILE
     if (-not $script:testHome) {
         $script:testHome = $env:HOME  # Unix/Linux fallback
