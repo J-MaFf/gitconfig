@@ -45,7 +45,7 @@ bash scripts/linux\ version/install.sh --force
 
 The setup script handles generating `~/.gitconfig` from the template, creating symlinks, installing the `rich` Python dependency, and registering an auto-update job (launchd on macOS, Task Scheduler on Windows, cron on Linux).
 
-The auto-update job is **pull + install**: at each login it pulls the latest commits and, if `.gitconfig.template` changed in that pull, regenerates `~/.gitconfig` so template changes take effect without a manual re-run. Your existing `~/.gitconfig` is backed up to `~/.gitconfig.bak` first, and `~/.gitconfig.local` is never modified. Run the same pull-and-install on demand any time with `git selfupdate`.
+The auto-update job is **pull + install + prune**: at each login it pulls the latest commits and, if `.gitconfig.template` changed in that pull, regenerates `~/.gitconfig` so template changes take effect without a manual re-run. It also prunes merged branches in the gitconfig repo — dropping stale remote-tracking refs (`fetch --prune`) and deleting local branches whose remote has been deleted — so old feature branches don't pile up. Your existing `~/.gitconfig` is backed up to `~/.gitconfig.bak` first, and `~/.gitconfig.local` is never modified. Run the same pull-install-prune on demand any time with `git selfupdate`.
 
 ## Uninstall
 

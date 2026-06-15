@@ -1,6 +1,7 @@
 #!/bin/bash
 # Shared git repository auto-update script for mac and linux.
-# Runs 'git pull' in the gitconfig repo; triggered by launchd/cron at login.
+# Pulls the gitconfig repo, reinstalls ~/.gitconfig if the template changed, and
+# prunes merged branches; triggered by launchd/cron at login.
 
 REPO_PATH="${1:-$HOME/Documents/Scripts/gitconfig}"
 LOG_FILE="$REPO_PATH/docs/update-gitconfig.log"
@@ -62,28 +63,31 @@ mkdir -p "$(dirname "$LOG_FILE")"
         log_message "No .gitconfig.template changes; skipping regeneration"
     fi
 
-    log_message "Synchronizing remote tracking branches..."
-    FETCH_RESULT=$(git fetch 2>&1)
+    # Prune merged branches: drop stale remote-tracking refs, then delete local
+    # branches whose upstream remote has been deleted (": gone]"). Mirrors the
+    # `git cleanup` alias. We don't recreate local branches for every remote here;
+    # the on-demand `git branches` alias covers that when wanted.
+    log_message "Pruning merged branches..."
+    FETCH_RESULT=$(git fetch --prune 2>&1)
     if [ $? -eq 0 ]; then
-        log_message "SUCCESS: git fetch completed"
-        while IFS= read -r branch; do
-            if [[ ! "$branch" =~ "HEAD" ]]; then
-                LOCAL_BRANCH="${branch#origin/}"
-                if git show-ref --verify --quiet "refs/heads/$LOCAL_BRANCH"; then
-                    log_message "Tracking branch already exists: $LOCAL_BRANCH"
-                else
-                    TRACK_RESULT=$(git branch --track "$LOCAL_BRANCH" "$branch" 2>&1)
-                    if [ $? -eq 0 ]; then
-                        log_message "Created tracking branch: $LOCAL_BRANCH"
-                    else
-                        log_message "WARNING: Failed to create tracking branch: $LOCAL_BRANCH"
-                    fi
-                fi
+        log_message "SUCCESS: git fetch --prune completed"
+        while IFS= read -r line; do
+            # Skip the current branch (marked with a leading '*').
+            [[ "$line" == \** ]] && continue
+            # Only delete branches whose upstream remote is gone.
+            [[ "$line" == *": gone]"* ]] || continue
+            GONE_BRANCH=$(awk '{print $1}' <<< "$line")
+            DELETE_RESULT=$(git branch -D "$GONE_BRANCH" 2>&1)
+            if [ $? -eq 0 ]; then
+                log_message "Deleted merged branch: $GONE_BRANCH"
+            else
+                log_message "WARNING: Failed to delete branch: $GONE_BRANCH"
+                log_message "Output: $DELETE_RESULT"
             fi
-        done < <(git for-each-ref --format='%(refname:short)' refs/remotes/origin/)
-        log_message "SUCCESS: Remote tracking branches synchronized"
+        done < <(git branch -vv)
+        log_message "SUCCESS: Merged branches pruned"
     else
-        log_message "ERROR: git fetch failed"
+        log_message "ERROR: git fetch --prune failed"
         log_message "Output: $FETCH_RESULT"
         exit 1
     fi

@@ -20,6 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `main` is now branch-protected and can't be pushed to directly. Dispatches by OS
   like `selfupdate` ([#82](https://github.com/J-MaFf/gitconfig/issues/82))
 
+### Changed
+
+- The auto-update job (`git selfupdate` and the login-triggered run) now **prunes
+  merged branches** instead of recreating them. It fetches with `--prune` to drop
+  stale remote-tracking refs and deletes local branches whose upstream remote was
+  deleted (`: gone]`), mirroring the `git cleanup` alias. The previous behavior
+  recreated a local tracking branch for every remote on every run, so merged
+  branches accumulated and deleted branches were resurrected. Creating tracking
+  branches for all remotes is still available on demand via `git branches`
+  ([#93](https://github.com/J-MaFf/gitconfig/issues/93))
+
 ### Fixed
 
 - `git alias`, `git cleanup`, and `git main` no longer print a spurious

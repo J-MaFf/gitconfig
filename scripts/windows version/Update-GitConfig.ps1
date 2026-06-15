@@ -1,5 +1,6 @@
 # Git Repository Auto-Update Script
-# This script runs 'git pull' in the gitconfig repository
+# Pulls the gitconfig repository, reinstalls ~/.gitconfig if the template changed,
+# and prunes merged branches.
 # Scheduled to run at user login via Windows Task Scheduler
 
 param(
@@ -75,36 +76,35 @@ try {
         Write-Log "No new commits pulled; skipping regeneration"
     }
 
-    # Step 3: Sync all remote tracking branches
-    Write-Log "Synchronizing remote tracking branches..."
-    $branchesResult = git fetch 2>&1
+    # Step 3: Prune merged branches. Drop stale remote-tracking refs, then delete
+    # local branches whose upstream remote has been deleted (": gone]"). Mirrors
+    # the `git cleanup` alias. We don't recreate local branches for every remote
+    # here; the on-demand `git branches` alias covers that when wanted.
+    Write-Log "Pruning merged branches..."
+    $fetchResult = git fetch --prune 2>&1
     if ($LASTEXITCODE -eq 0) {
-        Write-Log "SUCCESS: git fetch completed"
-        # Create local tracking branches for all remotes
-        $remoteBranches = git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | Where-Object { $_ -notmatch '^origin/HEAD' }
-        foreach ($branch in $remoteBranches) {
-            $localBranch = $branch -replace '^origin/', ''
-            # Check if the local branch already exists
-            git show-ref --verify --quiet "refs/heads/$localBranch"
+        Write-Log "SUCCESS: git fetch --prune completed"
+        $branchLines = git branch -vv
+        foreach ($line in $branchLines) {
+            # Skip the current branch (marked with a leading '*').
+            if ($line -match '^\*') { continue }
+            # Only delete branches whose upstream remote is gone.
+            if ($line -notmatch ': gone\]') { continue }
+            $goneBranch = ($line.Trim() -split '\s+')[0]
+            $deleteResult = git branch -D $goneBranch 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Write-Log "Tracking branch already exists: $localBranch"
+                Write-Log "Deleted merged branch: $goneBranch"
             }
             else {
-                $trackingCheck = git branch --track $localBranch $branch 2>&1
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Log "Created tracking branch: $localBranch"
-                }
-                else {
-                    Write-Log "WARNING: Failed to create tracking branch: $localBranch"
-                    Write-Log "Output: $trackingCheck"
-                }
+                Write-Log "WARNING: Failed to delete branch: $goneBranch"
+                Write-Log "Output: $deleteResult"
             }
         }
-        Write-Log "SUCCESS: Remote tracking branches synchronized"
+        Write-Log "SUCCESS: Merged branches pruned"
     }
     else {
-        Write-Log "ERROR: git fetch failed with exit code $LASTEXITCODE"
-        Write-Log "Output: $branchesResult"
+        Write-Log "ERROR: git fetch --prune failed with exit code $LASTEXITCODE"
+        Write-Log "Output: $fetchResult"
     }
 
     Write-Log "Repository synchronization process completed"
