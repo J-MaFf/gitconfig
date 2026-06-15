@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Setup now generates `~/.ssh/allowed_signers` and points `gpg.ssh.allowedSignersFile`
+  at it (in `~/.gitconfig.local`) so git can verify SSH commit signatures locally —
+  `git log --show-signature` and `git verify-commit` no longer report "No signature" on
+  signed commits. Works across Windows (1Password), macOS (1Password), and Linux
+  (file-based key); the entry is idempotent and preserves other identities. Shared bash
+  logic lives in `scripts/shared/functions.sh` (`update_allowed_signers`); added a Pester
+  guard (`tests/Initialize-LocalConfig.Tests.ps1`)
+  ([#97](https://github.com/J-MaFf/gitconfig/issues/97))
 - `git selfupdate` alias — pulls the gitconfig repo and reinstalls `~/.gitconfig` from
   the template on demand, dispatching to the correct platform script
   (PowerShell on Windows, bash on macOS/Linux) ([#78](https://github.com/J-MaFf/gitconfig/issues/78))

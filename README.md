@@ -120,6 +120,13 @@ python -m pip install rich
 
 **Aliases not working:** Verify the symlink exists and `.gitconfig` includes the helper path.
 
+**`git log --show-signature` says "No signature" on a signed commit:** Install writes a
+`~/.ssh/allowed_signers` entry for your signing key and points
+`gpg.ssh.allowedSignersFile` at it (in `~/.gitconfig.local`) so git can verify SSH
+signatures locally. If you signed before this was set up, re-run install (or
+`git selfupdate`) to regenerate it. GitHub verifies signatures independently, so commits
+show as Verified there regardless.
+
 ## License
 
 Personal configuration repository.

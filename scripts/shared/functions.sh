@@ -129,6 +129,63 @@ create_symlink() {
     fi
 }
 
+# Upsert the current signing identity into an allowed_signers file so git can
+# verify SSH commit signatures locally. Without it, `git log --show-signature`
+# and `git verify-commit` report "No signature" even though commits are signed.
+# Reads the signing key and email from git config. Idempotent: re-running does not
+# duplicate the line, and entries for other identities are preserved.
+# Usage: update_allowed_signers ALLOWED_SIGNERS_PATH
+update_allowed_signers() {
+    local allowed_signers_path="$1"
+    local signing_key signer_email raw_key pub_key candidate ssh_dir line
+
+    # `|| true` keeps `set -e` from aborting when a key is unset (git config
+    # --get exits non-zero); the empty-check below handles it gracefully.
+    signing_key="$(git config --get user.signingkey 2>/dev/null || true)"
+    signer_email="$(git config --get user.email 2>/dev/null || true)"
+
+    if [ -z "$signing_key" ] || [ -z "$signer_email" ]; then
+        echo "[WARN] No user.signingkey/user.email configured; skipped allowed_signers"
+        return 0
+    fi
+
+    # Resolve the public key: either the literal key (1Password) or a *.pub file
+    # (file-based signing key path).
+    case "$signing_key" in
+        ssh-*|sk-ssh-*|ecdsa-*)
+            raw_key="$signing_key"
+            ;;
+        *)
+            candidate="$signing_key"
+            case "$candidate" in
+                *.pub) ;;
+                *) candidate="$candidate.pub" ;;
+            esac
+            [ -f "$candidate" ] && raw_key="$(cat "$candidate")"
+            ;;
+    esac
+
+    if [ -z "$raw_key" ]; then
+        echo "[WARN] Could not resolve signing public key; skipped allowed_signers"
+        return 0
+    fi
+
+    # Normalize to "<keytype> <base64>" — drop any trailing comment.
+    pub_key="$(printf '%s' "$raw_key" | awk '{print $1" "$2}')"
+
+    ssh_dir="$(dirname "$allowed_signers_path")"
+    [ -d "$ssh_dir" ] || mkdir -p "$ssh_dir"
+    chmod 700 "$ssh_dir" 2>/dev/null || true
+
+    line="$signer_email namespaces=\"git\" $pub_key"
+    if [ -f "$allowed_signers_path" ] && grep -qF -- "$line" "$allowed_signers_path"; then
+        echo "[OK] allowed_signers already up to date"
+    else
+        printf '%s\n' "$line" >> "$allowed_signers_path"
+        echo "[OK] Updated $allowed_signers_path"
+    fi
+}
+
 # Set git global core.excludesfile to HOME_DIR/.gitignore_global
 # Usage: configure_global_gitignore HOME_DIR
 configure_global_gitignore() {
