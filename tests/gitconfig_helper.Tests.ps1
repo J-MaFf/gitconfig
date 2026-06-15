@@ -16,6 +16,18 @@ Describe "gitconfig_helper.py" {
             $LASTEXITCODE | Should -Be 0
         }
 
+        It "Script contains only ASCII characters" {
+            # rich falls back to the cp1252 renderer on the legacy Windows
+            # console, which raises UnicodeEncodeError on non-ASCII glyphs
+            # (e.g. checkmarks, box-drawing). Keep the helper ASCII-only.
+            $text = [System.IO.File]::ReadAllText($script:helperScript)
+            $nonAscii = [regex]::Matches($text, '[^\x00-\x7F]')
+            $detail = ($nonAscii |
+                ForEach-Object { 'U+{0:X4}' -f [int][char]$_.Value } |
+                Select-Object -Unique) -join ', '
+            $nonAscii.Count | Should -Be 0 -Because "non-ASCII glyphs crash rich on the legacy Windows console (found: $detail)"
+        }
+
         It "Script can be imported without errors" {
             $repoRootForward = $script:repoRoot -replace '\\', '/'
             $pythonCode = @"
