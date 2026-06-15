@@ -329,15 +329,64 @@ def switch_to_main():
         return 1
 
 
+def _dirty_triage_lines(default_branch):
+    """Build a triage summary for the current repo's dirty working tree.
+
+    Assumes the caller has already fetched, so origin/<default_branch> is current.
+    Returns formatted lines describing the current branch's position relative to
+    origin/<default_branch>, its last-commit age, and a breakdown of working-tree
+    changes -- enough for the user to judge stale-vs-active without the tool
+    guessing intent.
+    """
+    branch_result = run_git("rev-parse", "--abbrev-ref", "HEAD")
+    branch = branch_result.stdout.strip() or "(detached HEAD)"
+
+    # Working-tree breakdown: untracked files start with '??', everything else
+    # is a tracked modification (staged or unstaged).
+    status_result = run_git("status", "--porcelain")
+    modified = untracked = 0
+    for line in status_result.stdout.splitlines():
+        if not line.strip():
+            continue
+        if line.startswith("??"):
+            untracked += 1
+        else:
+            modified += 1
+
+    # Ahead/behind relative to origin/<default_branch>. `rev-list --left-right
+    # --count A...B` prints "<left>\t<right>" = behind, ahead for A=origin, B=HEAD.
+    ref = f"origin/{default_branch}"
+    position = f"position vs {ref} unknown"
+    rev = run_git("rev-list", "--left-right", "--count", f"{ref}...HEAD")
+    if rev.returncode == 0 and rev.stdout.strip():
+        try:
+            behind, ahead = (int(n) for n in rev.stdout.split())
+            position = f"ahead {ahead} / behind {behind} of {ref}"
+        except ValueError:
+            pass
+
+    age_result = run_git("log", "-1", "--format=%cr")
+    last_commit = age_result.stdout.strip() if age_result.returncode == 0 and age_result.stdout.strip() else "unknown"
+
+    return [
+        f"   [cyan]branch:[/cyan] {branch}  ({position}, last commit {last_commit})",
+        f"   [cyan]working tree:[/cyan] {modified} modified, {untracked} untracked",
+    ]
+
+
 def update_all_main():
     """Run the switch-to-main flow for every git repo in immediate subdirectories.
 
-    Scans the direct child directories of the current working directory, and for
-    each one that is a git repository, runs switch_to_main() (fetch, switch to
-    main, pull, branch cleanup). Repos with uncommitted changes are skipped by
-    switch_to_main itself. Prints a per-repo header and a final summary table.
+    Scans the direct child directories of the current working directory. For each
+    git repo that is clean, runs switch_to_main() (fetch, switch to main, pull,
+    branch cleanup). Repos with a dirty working tree are NOT switched -- instead a
+    triage report (branch position vs origin/main, last-commit age, working-tree
+    breakdown) is printed so the user can judge stale-vs-active themselves. The
+    working tree is never mutated.
 
-    Returns 0 if every repo succeeded, 1 if any repo failed (or none were found).
+    Prints a per-repo header and a final summary table classifying each repo as
+    OK, Skipped (dirty), or Failed. Returns 0 if no repo failed (skips don't
+    count as failures), 1 if any repo failed or none were found.
     """
     console = Console()
 
@@ -356,19 +405,31 @@ def update_all_main():
         )
         return 1
 
-    results = []  # (repo_name, succeeded)
+    results = []  # (repo_name, outcome) where outcome in {"ok", "skipped", "failed"}
     for repo in repos:
         console.print(f"\n[bold]-- {repo} --[/bold]")
         try:
             os.chdir(repo)
-            succeeded = switch_to_main() == 0
+            # Detect a dirty working tree up front (no fetch needed for status).
+            # If dirty, skip the switch and print a triage report instead of
+            # touching the working tree; otherwise hand off to switch_to_main.
+            status_result = run_git("status", "--porcelain")
+            if status_result.returncode == 0 and status_result.stdout.strip():
+                console.print("[yellow]SKIPPED: uncommitted changes[/yellow]")
+                # Fetch so the ahead/behind report reflects the current remote.
+                run_git("fetch", "-p")
+                for line in _dirty_triage_lines(_default_branch()):
+                    console.print(line)
+                outcome = "skipped"
+            else:
+                outcome = "ok" if switch_to_main() == 0 else "failed"
         except Exception as e:
             # Don't let one repo abort the whole sweep
             console.print(f"[red]Error updating '{repo}': {e}[/red]")
-            succeeded = False
+            outcome = "failed"
         finally:
             os.chdir(original_cwd)
-        results.append((repo, succeeded))
+        results.append((repo, outcome))
 
     # Summary table
     table = Table(
@@ -377,18 +438,25 @@ def update_all_main():
     table.add_column("Repository", justify="left", style="cyan")
     table.add_column("Result", justify="left")
 
-    for repo, succeeded in results:
-        status = "[green]OK[/green]" if succeeded else "[red]Failed / skipped[/red]"
-        table.add_row(repo, status)
+    status_label = {
+        "ok": "[green]OK[/green]",
+        "skipped": "[yellow]Skipped (dirty)[/yellow]",
+        "failed": "[red]Failed[/red]",
+    }
+    for repo, outcome in results:
+        table.add_row(repo, status_label[outcome])
 
-    succeeded_count = sum(1 for _, ok in results if ok)
+    ok_count = sum(1 for _, o in results if o == "ok")
+    skipped_count = sum(1 for _, o in results if o == "skipped")
+    failed_count = sum(1 for _, o in results if o == "failed")
     console.print()
     console.print(table)
     console.print(
-        f"\n[dim]Updated {succeeded_count} of {len(results)} repositories[/dim]"
+        f"\n[dim]Updated {ok_count}, skipped {skipped_count}, failed {failed_count} "
+        f"of {len(results)} repositories[/dim]"
     )
 
-    return 0 if succeeded_count == len(results) else 1
+    return 0 if failed_count == 0 else 1
 
 
 def print_aliases():
