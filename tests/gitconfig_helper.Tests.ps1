@@ -341,4 +341,78 @@ import gitconfig_helper
             $LASTEXITCODE | Should -Be 1
         }
     }
+
+    Context "update_all_main Function (git main --all)" {
+        BeforeEach {
+            # Parent directory that holds the child repos the sweep scans.
+            $script:parentDir = New-Item -ItemType Directory -Path "$env:TEMP\git_all_$(Get-Random)" -Force
+
+            # Clean child repo on main, wired to a bare remote so the
+            # switch-to-main flow (fetch/pull/cleanup) succeeds.
+            $script:cleanRepo = Join-Path $script:parentDir "clean"
+            New-Item -ItemType Directory -Path $script:cleanRepo | Out-Null
+            Push-Location $script:cleanRepo
+            & git init 2>&1 | Out-Null
+            & git checkout -b main 2>&1 | Out-Null
+            & git config user.email "test@example.com" 2>&1 | Out-Null
+            & git config user.name "Test User" 2>&1 | Out-Null
+            & git config commit.gpgsign false 2>&1 | Out-Null
+            New-Item -Path "a.txt" -Value "a" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "init" 2>&1 | Out-Null
+            $bare = Join-Path $script:parentDir "clean_remote.git"
+            & git init --bare $bare 2>&1 | Out-Null
+            & git remote add origin $bare 2>&1 | Out-Null
+            & git push -u origin main 2>&1 | Out-Null
+            Pop-Location
+
+            # Dirty child repo: on a feature branch with an uncommitted file.
+            $script:dirtyRepo = Join-Path $script:parentDir "dirty"
+            New-Item -ItemType Directory -Path $script:dirtyRepo | Out-Null
+            Push-Location $script:dirtyRepo
+            & git init 2>&1 | Out-Null
+            & git checkout -b main 2>&1 | Out-Null
+            & git config user.email "test@example.com" 2>&1 | Out-Null
+            & git config user.name "Test User" 2>&1 | Out-Null
+            & git config commit.gpgsign false 2>&1 | Out-Null
+            New-Item -Path "a.txt" -Value "a" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "init" 2>&1 | Out-Null
+            & git checkout -b feature-x 2>&1 | Out-Null
+            Set-Content -Path "wip.txt" -Value "work in progress"   # untracked change
+            Pop-Location
+        }
+
+        AfterEach {
+            Remove-Item -Path $script:parentDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        It "Should skip dirty repos with a triage report instead of switching them" {
+            Push-Location $script:parentDir
+            $result = & python $script:helperScript switch_to_main --all 2>&1
+            $output = $result -join "`n"
+            Pop-Location
+
+            # Dirty repo is reported as skipped with triage detail, not switched.
+            $output | Should -Match "SKIPPED: uncommitted changes"
+            $output | Should -Match "Skipped \(dirty\)"
+            $output | Should -Match "working tree:"
+
+            # The dirty repo's working tree was never touched: still on feature-x.
+            (& git -C $script:dirtyRepo rev-parse --abbrev-ref HEAD).Trim() | Should -Be "feature-x"
+        }
+
+        It "Should classify outcomes separately and not count skips as failures" {
+            Push-Location $script:parentDir
+            $result = & python $script:helperScript switch_to_main --all 2>&1
+            $output = $result -join "`n"
+            $exitCode = $LASTEXITCODE
+            Pop-Location
+
+            # Clean repo updated, dirty repo skipped, nothing failed.
+            $output | Should -Match "Updated 1, skipped 1, failed 0"
+            # Skips alone must not produce a non-zero exit code.
+            $exitCode | Should -Be 0
+        }
+    }
 }
