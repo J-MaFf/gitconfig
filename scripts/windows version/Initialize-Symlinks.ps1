@@ -36,7 +36,6 @@ EXAMPLE:
     .\Initialize-Symlinks.ps1 -Force
 
 FILES LINKED:
-    - .gitconfig
     - .gitignore_global
     - gitconfig_helper.py
 
@@ -66,8 +65,8 @@ Write-Host "Home Directory: $homeDir" -ForegroundColor Green
 Write-Host ""
 
 # Define files to symlink
+# .gitconfig is generated from .gitconfig.template into ~/ and must NOT be symlinked
 $filesToLink = @(
-    ".gitconfig",
     ".gitignore_global",
     "gitconfig_helper.py"
 )
@@ -112,7 +111,7 @@ function Register-LoginTask {
     )
 
     $taskName = "GitConfig Pull at Login"
-    $scriptPath = Join-Path $repoRoot "scripts\Update-GitConfig.ps1"
+    $scriptPath = Join-Path $repoRoot "scripts\windows version\Update-GitConfig.ps1"
 
     # Check if script exists
     if (-not (Test-Path $scriptPath)) {
@@ -215,7 +214,7 @@ if ($taskResponse -eq "y") {
     Write-Host ""
 }
 
-Write-Host "Your .gitconfig and gitconfig_helper.py are now symlinked from the repository." -ForegroundColor Cyan
+Write-Host "Your .gitignore_global and gitconfig_helper.py are now symlinked from the repository." -ForegroundColor Cyan
 Write-Host "Any changes pushed to the repository will be reflected in your home directory." -ForegroundColor Cyan
 Write-Host ""
 
