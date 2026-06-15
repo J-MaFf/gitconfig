@@ -1,7 +1,7 @@
 BeforeAll {
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
-    $script:setupScript = Join-Path $script:repoRoot "scripts\install.ps1"
-    $script:cleanupScript = Join-Path $script:repoRoot "scripts\Cleanup-GitConfig.ps1"
+    $script:setupScript = Join-Path $script:repoRoot "scripts\windows version\install.ps1"
+    $script:cleanupScript = Join-Path $script:repoRoot "scripts\windows version\Cleanup-GitConfig.ps1"
     $script:testHome = $env:USERPROFILE
     if (-not $script:testHome) {
         $script:testHome = $env:HOME  # Unix/Linux fallback

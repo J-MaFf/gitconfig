@@ -1,7 +1,7 @@
 BeforeAll {
     # Import the script
     $repoRoot = Split-Path -Parent $PSScriptRoot
-    $scriptPath = Join-Path $repoRoot "scripts\Cleanup-GitConfig.ps1"
+    $scriptPath = Join-Path $repoRoot "scripts\windows version\Cleanup-GitConfig.ps1"
 
     # Test variables
     $testHome = $env:USERPROFILE
