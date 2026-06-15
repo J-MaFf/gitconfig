@@ -174,7 +174,7 @@ def cleanup_branches(force=False):
 
             console.print(table)
             console.print(
-                f"[green]✓ Successfully deleted {len(deleted_branches)} branch(es)[/green]\n"
+                f"[green][OK] Successfully deleted {len(deleted_branches)} branch(es)[/green]\n"
             )
         else:
             console.print(
@@ -358,7 +358,7 @@ def update_all_main():
 
     results = []  # (repo_name, succeeded)
     for repo in repos:
-        console.print(f"\n[bold]── {repo} ──[/bold]")
+        console.print(f"\n[bold]-- {repo} --[/bold]")
         try:
             os.chdir(repo)
             succeeded = switch_to_main() == 0

@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `git cleanup` (and `git main`) no longer crash with `UnicodeEncodeError` on the
+  legacy Windows console. `gitconfig_helper.py` printed a `✓` checkmark and `──`
+  box-drawing characters via `rich`, which fall back to the cp1252 renderer and cannot
+  encode those glyphs. Replaced them with ASCII equivalents (`[OK]`, `--`) matching the
+  `[OK]`/`[WARN]` convention, and added a Pester guard asserting the helper is ASCII-only
+  ([#87](https://github.com/J-MaFf/gitconfig/issues/87))
 - `install.ps1` no longer fails to parse under Windows PowerShell 5.1. The script
   contained em dash characters (`—`) and lacked a UTF-8 BOM, so the legacy ANSI-codepage
   reader mangled them into smart-quotes that broke string literals. Em dashes are now
