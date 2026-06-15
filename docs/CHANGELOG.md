@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `git alias`, `git cleanup`, and `git main` no longer print a spurious
+  "Python was not found" line on Windows. The aliases resolved Python with
+  `command -v python3`, which matches the Microsoft Store app-execution-alias stub;
+  the stub ran first, emitted the message, and exited before the real `python` fallback.
+  The aliases now resolve `py -> python3 -> python` and verify each interpreter actually
+  runs (`-c ''`) before using it, skipping the stub. Apply on an installed machine with
+  `git selfupdate`. Added a Pester guard (`tests/GitconfigTemplate.Tests.ps1`)
+  ([#91](https://github.com/J-MaFf/gitconfig/issues/91))
 - `git cleanup` (and `git main`) no longer crash with `UnicodeEncodeError` on the
   legacy Windows console. `gitconfig_helper.py` printed a `✓` checkmark and `──`
   box-drawing characters via `rich`, which fall back to the cp1252 renderer and cannot

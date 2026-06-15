@@ -23,14 +23,14 @@
 
 [alias]
     # List all aliases
-    alias = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py print_aliases || python {{REPO_PATH}}/gitconfig_helper.py print_aliases"
+    alias = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py print_aliases; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
     # Download all remote branches creating local counterparts
     branches = "!git fetch && git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -v -e '^origin/HEAD$' -e '^origin$' | while read ref; do git branch --track \"${ref#origin/}\" \"$ref\" 2>/dev/null || true; done"
-    cleanup = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\" || python {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\""
+    cleanup = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
     # Switch to main with error handling: fetch, check for uncommitted changes,
     # checkout main, and pull. Detects and reports merge conflicts.
     # Pass --all (or -a) to run this for every git repo in immediate subdirectories.
-    main = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\" || python {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\""
+    main = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
     # Manage machine-specific git configuration
     localconfig = !git config --file ~/.gitconfig.local
     # Sync the claude-skills repo (~/.claude/skills) on demand, mirroring the
