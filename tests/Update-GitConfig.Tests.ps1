@@ -286,10 +286,16 @@ Describe "Update-GitConfig.ps1" {
         }
     }
 
-    Context "Step 3: Sync Remote Tracking Branches" {
+    Context "Step 3: Prune Merged Branches" {
         BeforeEach {
-            # Create remote and local repositories
-            $remoteRepo = Join-Path $TestDrive "remote-repo"
+            # Use a unique repo path per test. The script's early-exit paths can
+            # leave the process CWD inside the repo, which blocks directory cleanup
+            # on Windows; a unique path keeps a locked leftover from polluting the
+            # next test (which asserts on exact branch state).
+            $suffix = [guid]::NewGuid().ToString("N")
+            $script:testRepo = Join-Path $TestDrive "test-repo-$suffix"
+            $script:logFile = Join-Path $script:testRepo "docs\update-gitconfig.log"
+            $remoteRepo = Join-Path $TestDrive "remote-repo-$suffix"
             New-RemoteRepository -Path $remoteRepo
 
             # Create local test repository
@@ -301,32 +307,36 @@ Describe "Update-GitConfig.ps1" {
                 git clone $remoteRepo . 2>&1 | Out-Null
                 git config user.email "test@example.com"
                 git config user.name "Test User"
+                git config commit.gpgsign false
 
-                # Create initial commit on main
+                # Create initial commit on main with an upstream
                 New-Item -Path "docs" -ItemType Directory -Force | Out-Null
                 "# Test" | Out-File -FilePath "README.md" -Encoding utf8
                 git add .
                 git commit -m "Initial" 2>&1 | Out-Null
                 git push origin HEAD:main 2>&1 | Out-Null
+                git checkout -b main 2>&1 | Out-Null
+                git branch --set-upstream-to=origin/main main 2>&1 | Out-Null
 
-                # Create additional remote branches
-                git checkout -b feature-1 2>&1 | Out-Null
-                "Feature 1" | Out-File -FilePath "feature1.txt" -Encoding utf8
+                # feature-gone: tracks a remote branch that we then delete on the
+                # remote (simulates a squash-merged PR branch). Should be pruned.
+                git checkout -b feature-gone 2>&1 | Out-Null
+                "Gone" | Out-File -FilePath "gone.txt" -Encoding utf8
                 git add .
-                git commit -m "Feature 1" 2>&1 | Out-Null
-                git push origin feature-1 2>&1 | Out-Null
+                git commit -m "Feature gone" 2>&1 | Out-Null
+                git push -u origin feature-gone 2>&1 | Out-Null
 
+                # feature-live: tracks a remote branch that still exists. Should be kept.
                 git checkout main 2>&1 | Out-Null
-                git checkout -b feature-2 2>&1 | Out-Null
-                "Feature 2" | Out-File -FilePath "feature2.txt" -Encoding utf8
+                git checkout -b feature-live 2>&1 | Out-Null
+                "Live" | Out-File -FilePath "live.txt" -Encoding utf8
                 git add .
-                git commit -m "Feature 2" 2>&1 | Out-Null
-                git push origin feature-2 2>&1 | Out-Null
+                git commit -m "Feature live" 2>&1 | Out-Null
+                git push -u origin feature-live 2>&1 | Out-Null
 
-                # Switch back to main and delete local feature branches
+                # Back on main; delete feature-gone on the remote.
                 git checkout main 2>&1 | Out-Null
-                git branch -D feature-1 2>&1 | Out-Null
-                git branch -D feature-2 2>&1 | Out-Null
+                git push origin --delete feature-gone 2>&1 | Out-Null
             }
             finally {
                 Pop-Location
@@ -348,58 +358,49 @@ Describe "Update-GitConfig.ps1" {
             }
         }
 
-        It "Should fetch remote branches successfully" {
+        It "Should fetch with prune successfully" {
             # Run script
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
 
             # Read log content
             $logContent = Get-Content $script:logFile -Raw
 
-            # Verify fetch was attempted
-            $logContent | Should -Match "Synchronizing remote tracking branches"
-            $logContent | Should -Match "SUCCESS: git fetch completed"
+            # Verify prune step ran
+            $logContent | Should -Match "Pruning merged branches"
+            $logContent | Should -Match "SUCCESS: git fetch --prune completed"
         }
 
-        It "Should create local tracking branches for remote branches" {
-            # Verify feature branches don't exist locally
+        It "Should delete local branches whose remote was deleted" {
+            # Verify feature-gone exists locally before the run
             Push-Location $script:testRepo
-            $branches = git branch --list 2>&1
+            $branches = git branch --format='%(refname:short)'
             Pop-Location
-            $branches | Should -Not -Match "feature-1"
-            $branches | Should -Not -Match "feature-2"
+            $branches | Should -Contain "feature-gone"
 
             # Run script
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
 
-            # Verify feature branches now exist locally
+            # feature-gone should be deleted; feature-live should remain
             Push-Location $script:testRepo
-            $branches = git branch --list 2>&1
+            $branches = git branch --format='%(refname:short)'
             Pop-Location
-
-            # Note: The script attempts to create tracking branches but git branch --track
-            # will fail silently if the branch already exists. The test verifies that
-            # the sync process completes without error rather than checking if branches
-            # were created (since they may already exist).
-            # This is acceptable behavior as the script focuses on syncing remote refs.
-
-            # Read log to verify sync was attempted
-            $logContent = Get-Content $script:logFile -Raw
-            $logContent | Should -Match "SUCCESS: Remote tracking branches synchronized"
+            $branches | Should -Not -Contain "feature-gone"
+            $branches | Should -Contain "feature-live"
         }
 
-        It "Should log tracking branch creation" {
+        It "Should log the deleted merged branch" {
             # Run script
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
 
             # Read log content
             $logContent = Get-Content $script:logFile -Raw
 
-            # Verify tracking branch messages
-            $logContent | Should -Match "Created tracking branch: feature-1"
-            $logContent | Should -Match "Created tracking branch: feature-2"
+            # Verify the gone branch was logged as deleted, the live one was not
+            $logContent | Should -Match "Deleted merged branch: feature-gone"
+            $logContent | Should -Not -Match "Deleted merged branch: feature-live"
         }
 
-        It "Should log successful synchronization" {
+        It "Should log successful prune" {
             # Run script
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
 
@@ -407,22 +408,32 @@ Describe "Update-GitConfig.ps1" {
             $logContent = Get-Content $script:logFile -Raw
 
             # Verify success message
-            $logContent | Should -Match "SUCCESS: Remote tracking branches synchronized"
+            $logContent | Should -Match "SUCCESS: Merged branches pruned"
         }
 
-        It "Should handle fetch failure gracefully" {
-            # Note: Removing the remote doesn't make fetch fail (it succeeds with no changes)
-            # Instead, we'll verify the script can handle the scenario where fetch works
-            # but there are no remote branches to sync
+        It "Should not delete branches whose remote still exists" {
+            # Run script
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
 
-            # Run script (should not throw)
+            # feature-live tracks an existing remote, so it must survive
+            Push-Location $script:testRepo
+            $branches = git branch --format='%(refname:short)'
+            Pop-Location
+            $branches | Should -Contain "feature-live"
+        }
+
+        It "Should handle a repo with no branches to prune gracefully" {
+            # Prune once so feature-gone is already removed; a second run has nothing to do
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+            if (Test-Path $script:logFile) {
+                Remove-Item $script:logFile -Force
+            }
+
             { & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null } | Should -Not -Throw
 
             # Read log content
             $logContent = Get-Content $script:logFile -Raw
-
-            # Verify sync was attempted (even if no remotes exist, fetch succeeds locally)
-            $logContent | Should -Match "Synchronizing remote tracking branches"
+            $logContent | Should -Match "SUCCESS: Merged branches pruned"
         }
     }
 
@@ -463,8 +474,12 @@ Describe "Update-GitConfig.ps1" {
 
     Context "Integration: Complete Workflow" {
         BeforeEach {
-            # Create remote and local repositories
-            $remoteRepo = Join-Path $TestDrive "remote-repo"
+            # Unique repo path per test (see Step 3 note) so a locked leftover from
+            # an earlier test never pollutes this one's branch-state assertions.
+            $suffix = [guid]::NewGuid().ToString("N")
+            $script:testRepo = Join-Path $TestDrive "test-repo-$suffix"
+            $script:logFile = Join-Path $script:testRepo "docs\update-gitconfig.log"
+            $remoteRepo = Join-Path $TestDrive "remote-repo-$suffix"
             New-RemoteRepository -Path $remoteRepo
 
             # Create local test repository
@@ -476,6 +491,7 @@ Describe "Update-GitConfig.ps1" {
                 git clone $remoteRepo . 2>&1 | Out-Null
                 git config user.email "test@example.com"
                 git config user.name "Test User"
+                git config commit.gpgsign false
 
                 # Create initial structure
                 New-Item -Path "docs" -ItemType Directory -Force | Out-Null
@@ -484,21 +500,25 @@ Describe "Update-GitConfig.ps1" {
                 git commit -m "Initial" 2>&1 | Out-Null
                 git push origin HEAD:main 2>&1 | Out-Null
 
-                # Create a remote branch
-                git checkout -b remote-feature 2>&1 | Out-Null
-                "Remote Feature" | Out-File -FilePath "remote.txt" -Encoding utf8
-                git add .
-                git commit -m "Remote feature" 2>&1 | Out-Null
-                git push origin remote-feature 2>&1 | Out-Null
+                git checkout -b main 2>&1 | Out-Null
+                git branch --set-upstream-to=origin/main main 2>&1 | Out-Null
 
-                # Create a local-only branch and switch to it
+                # merged-feature: tracks a remote branch deleted on the remote.
+                # Should be pruned by the run.
+                git checkout -b merged-feature 2>&1 | Out-Null
+                "Merged Feature" | Out-File -FilePath "merged.txt" -Encoding utf8
+                git add .
+                git commit -m "Merged feature" 2>&1 | Out-Null
+                git push -u origin merged-feature 2>&1 | Out-Null
+                git checkout main 2>&1 | Out-Null
+                git push origin --delete merged-feature 2>&1 | Out-Null
+
+                # local-feature: local-only branch (no upstream). Should be kept,
+                # and is the branch we're sitting on when the script runs.
                 git checkout -b local-feature 2>&1 | Out-Null
                 "Local Feature" | Out-File -FilePath "local.txt" -Encoding utf8
                 git add .
                 git commit -m "Local feature" 2>&1 | Out-Null
-
-                # Delete remote tracking branch locally to test sync
-                git branch -D remote-feature 2>&1 | Out-Null
             }
             finally {
                 Pop-Location
@@ -521,13 +541,13 @@ Describe "Update-GitConfig.ps1" {
         }
 
         It "Should complete all synchronization steps successfully" {
-            # Verify initial state: on local-feature branch, remote-feature doesn't exist locally
+            # Verify initial state: on local-feature, merged-feature still exists locally
             Push-Location $script:testRepo
             $currentBranch = git branch --show-current
-            $branches = git branch --list 2>&1
+            $branches = git branch --format='%(refname:short)'
             Pop-Location
             $currentBranch | Should -Be "local-feature"
-            $branches | Should -Not -Match "remote-feature"
+            $branches | Should -Contain "merged-feature"
 
             # Run script
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
@@ -535,15 +555,15 @@ Describe "Update-GitConfig.ps1" {
             # Verify final state
             Push-Location $script:testRepo
             $currentBranch = git branch --show-current
-            $branches = git branch --list 2>&1
+            $branches = git branch --format='%(refname:short)'
             Pop-Location
 
             # Should be on main
             $currentBranch | Should -Be "main"
 
-            # Note: The script attempts to create tracking branches, but if they already
-            # exist or if there are issues, it continues gracefully. The main verification
-            # is that all sync steps completed.
+            # merged-feature pruned (remote gone); local-only branch preserved
+            $branches | Should -Not -Contain "merged-feature"
+            $branches | Should -Contain "local-feature"
 
             # Read log content
             $logContent = Get-Content $script:logFile -Raw
@@ -552,10 +572,10 @@ Describe "Update-GitConfig.ps1" {
             $logContent | Should -Match "Starting git repository synchronization"
             $logContent | Should -Match "Switching to main branch"
             $logContent | Should -Match "Pulling latest changes from main"
-            $logContent | Should -Match "Synchronizing remote tracking branches"
-            $logContent | Should -Match "SUCCESS: git fetch completed"
-            # Note: Branch creation may or may not log depending on whether it already exists
-            $logContent | Should -Match "SUCCESS: Remote tracking branches synchronized"
+            $logContent | Should -Match "Pruning merged branches"
+            $logContent | Should -Match "SUCCESS: git fetch --prune completed"
+            $logContent | Should -Match "Deleted merged branch: merged-feature"
+            $logContent | Should -Match "SUCCESS: Merged branches pruned"
             $logContent | Should -Match "Repository synchronization process completed"
         }
     }
