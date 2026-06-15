@@ -85,6 +85,21 @@ import gitconfig_helper
         }
     }
 
+    Context "skill aliases" {
+        It "skill-publish should be described in alias_descriptions" {
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match '"skill-publish"'
+        }
+
+        It "should no longer define the obsolete skill_push helper" {
+            # skill publishing now lives in the claude-skills publish-skill script,
+            # which opens a PR (its main is branch-protected); the helper must not
+            # push straight to main any more.
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Not -Match "def skill_push"
+        }
+    }
+
     Context "get_git_aliases Function" {
         It "Should be defined in the script" {
             $scriptContent = Get-Content $helperScript -Raw

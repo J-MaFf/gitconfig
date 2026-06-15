@@ -193,6 +193,8 @@ def get_git_aliases():
         "branches": "Download all remote branches and create local tracking branches",
         "cleanup": "Delete branches with deleted remotes (merged). Use --force to also delete local-only branches",
         "main": "Switch to main (fetch, pull, cleanup). Use --all/-a for every repo in immediate subdirectories",
+        "skill-sync": "Sync the claude-skills repo (~/.claude/skills): pull --ff-only",
+        "skill-publish": "Publish new/edited skills (~/.claude/skills) via a PR with auto-merge",
     }
 
     try:
