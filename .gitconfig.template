@@ -33,6 +33,12 @@
     main = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\" || python {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\""
     # Manage machine-specific git configuration
     localconfig = !git config --file ~/.gitconfig.local
+    # Sync the claude-skills repo (~/.claude/skills) on demand, mirroring the
+    # auto-sync's --ff-only safety. Read-only; runs from any directory.
+    skill-sync = !git -C ~/.claude/skills pull --ff-only
+    # Commit (signed) and push the claude-skills repo (~/.claude/skills) from any
+    # directory: git skill-push "your message". A clean tree is a no-op.
+    skill-push = !"command -v python3 >/dev/null && python3 {{REPO_PATH}}/gitconfig_helper.py skill_push \"$@\" || python {{REPO_PATH}}/gitconfig_helper.py skill_push \"$@\""
     # Pull the latest gitconfig repo and reinstall ~/.gitconfig from the template
     # on demand. Dispatches by OS: Git-for-Windows reports MINGW/MSYS/CYGWIN.
     selfupdate = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -File '{{REPO_PATH}}/scripts/windows version/Update-GitConfig.ps1' -RepoPath '{{REPO_PATH}}' ;; *) bash '{{REPO_PATH}}/scripts/shared/update-gitconfig.sh' '{{REPO_PATH}}' ;; esac; }; f"

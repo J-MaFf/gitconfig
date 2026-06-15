@@ -86,6 +86,8 @@ git cleanup        # Clean up merged local branches
 git main           # Switch to main with fetch, pull, and branch cleanup
 git main --all     # Run the above for every git repo in immediate subdirectories (alias: -a)
 git selfupdate     # Pull this repo and reinstall ~/.gitconfig from the template
+git skill-sync           # Sync the claude-skills repo (~/.claude/skills) with pull --ff-only
+git skill-push "msg"     # Commit (signed) and push the claude-skills repo from any directory
 ```
 
 ### Setup Script Options (Windows)

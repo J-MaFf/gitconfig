@@ -185,6 +185,66 @@ def cleanup_branches(force=False):
         console.print(f"[red]Error running git cleanup: {e}[/red]")
 
 
+SKILLS_REPO = os.path.expanduser("~/.claude/skills")
+
+
+def skill_push(message):
+    """Commit and push all changes in the claude-skills repo (~/.claude/skills).
+
+    Runs add -A, commit (signed, via the repo's commit.gpgsign config), and push,
+    targeting ~/.claude/skills regardless of the current working directory.
+    A clean working tree is handled gracefully (no error, nothing to push).
+
+    Args:
+        message: Commit message. Passed through argv so it is quote-safe and is
+                 never re-parsed by a shell.
+
+    Returns 0 on success (including the nothing-to-commit case), 1 on failure.
+    """
+    console = Console()
+
+    if not message or not message.strip():
+        console.print("[red]Error: a commit message is required[/red]")
+        console.print('[yellow]Usage: git skill-push "your message"[/yellow]')
+        return 1
+
+    if not os.path.isdir(SKILLS_REPO):
+        console.print(f"[red]Error: skills repo not found at {SKILLS_REPO}[/red]")
+        return 1
+
+    # Stage everything (additions, modifications, deletions).
+    result = run_git("-C", SKILLS_REPO, "add", "-A")
+    if result.returncode != 0:
+        console.print("[red]Error: failed to stage changes[/red]")
+        console.print(f"[red]{result.stderr.strip()}[/red]")
+        return 1
+
+    # If nothing is staged, there is nothing to commit or push — exit cleanly.
+    status = run_git("-C", SKILLS_REPO, "status", "--porcelain")
+    if not status.stdout.strip():
+        console.print("[dim]Nothing to commit — skills repo is already clean.[/dim]")
+        return 0
+
+    # Commit. Signing is governed by the repo's commit.gpgsign config; we do not
+    # pass --no-gpg-sign, so signed commits stay signed.
+    console.print("[cyan]Committing changes in skills repo...[/cyan]")
+    commit = run_git("-C", SKILLS_REPO, "commit", "-m", message)
+    if commit.returncode != 0:
+        console.print("[red]Error: commit failed[/red]")
+        console.print(f"[red]{(commit.stderr or commit.stdout).strip()}[/red]")
+        return 1
+
+    console.print("[cyan]Pushing to remote...[/cyan]")
+    push = run_git("-C", SKILLS_REPO, "push")
+    if push.returncode != 0:
+        console.print("[red]Error: push failed[/red]")
+        console.print(f"[red]{(push.stderr or push.stdout).strip()}[/red]")
+        return 1
+
+    console.print("[green]OK Skills repo committed and pushed.[/green]")
+    return 0
+
+
 def get_git_aliases():
     """Dynamically fetch all git aliases from git config."""
     # Human-readable descriptions for known aliases
@@ -193,6 +253,8 @@ def get_git_aliases():
         "branches": "Download all remote branches and create local tracking branches",
         "cleanup": "Delete branches with deleted remotes (merged). Use --force to also delete local-only branches",
         "main": "Switch to main (fetch, pull, cleanup). Use --all/-a for every repo in immediate subdirectories",
+        "skill-sync": "Sync the claude-skills repo (~/.claude/skills): pull --ff-only",
+        "skill-push": "Commit and push the claude-skills repo (~/.claude/skills): git skill-push \"msg\"",
     }
 
     try:
@@ -421,6 +483,11 @@ if __name__ == "__main__":
             sys.exit(switch_to_main())
         elif function_name == "update_all_main":
             sys.exit(update_all_main())
+        elif function_name == "skill_push":
+            # The commit message is everything after the subcommand. Joining the
+            # remaining argv keeps it quote-safe and tolerant of unquoted messages.
+            message = " ".join(sys.argv[2:])
+            sys.exit(skill_push(message))
         else:
             print(f"Function {function_name} not found.")
     else:

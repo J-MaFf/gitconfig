@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `git selfupdate` alias — pulls the gitconfig repo and reinstalls `~/.gitconfig` from
   the template on demand, dispatching to the correct platform script
   (PowerShell on Windows, bash on macOS/Linux) ([#78](https://github.com/J-MaFf/gitconfig/issues/78))
+- `git skill-sync` alias — on-demand `pull --ff-only` of the claude-skills repo
+  (`~/.claude/skills`), mirroring the auto-sync's fast-forward-only safety ([#83](https://github.com/J-MaFf/gitconfig/issues/83))
+- `git skill-push "msg"` alias — commit (signed) and push the claude-skills repo
+  (`~/.claude/skills`) from any directory; a clean working tree is a graceful no-op ([#82](https://github.com/J-MaFf/gitconfig/issues/82))
 
 ### Fixed
 

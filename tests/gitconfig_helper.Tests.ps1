@@ -85,6 +85,37 @@ import gitconfig_helper
         }
     }
 
+    Context "skill_push Function" {
+        It "Should be defined in the script" {
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match "def skill_push"
+        }
+
+        It "Should target the ~/.claude/skills repo" {
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match "\.claude/skills"
+        }
+
+        It "Should require a commit message" {
+            # No message provided -> error and non-zero exit
+            $result = & python $helperScript skill_push 2>&1
+            $output = $result -join "`n"
+            $output | Should -Match "commit message is required"
+            $LASTEXITCODE | Should -Be 1
+        }
+
+        It "Should not bypass commit signing" {
+            # Must never pass --no-gpg-sign; signing is governed by repo config
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Not -Match "no-gpg-sign"
+        }
+
+        It "Should handle a clean working tree gracefully (nothing to commit)" {
+            $scriptContent = Get-Content $helperScript -Raw
+            ($scriptContent -match "Nothing to commit" -or $scriptContent -match "status.*porcelain") | Should -Be $true
+        }
+    }
+
     Context "get_git_aliases Function" {
         It "Should be defined in the script" {
             $scriptContent = Get-Content $helperScript -Raw
