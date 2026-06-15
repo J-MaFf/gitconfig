@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pester tests in the "Step 2b: Regenerate ~/.gitconfig on Template Change" context
+  no longer fail with `The term 'Push-RemoteChange' is not recognized`. The
+  `Push-RemoteChange` helper was defined directly in the `Context` body, which is not
+  visible inside `It` blocks under Pester v5; it's now declared in a `BeforeAll` so the
+  two affected tests run. No production code changed
+  ([#95](https://github.com/J-MaFf/gitconfig/issues/95))
 - `git alias`, `git cleanup`, and `git main` no longer print a spurious
   "Python was not found" line on Windows. The aliases resolved Python with
   `command -v python3`, which matches the Microsoft Store app-execution-alias stub;

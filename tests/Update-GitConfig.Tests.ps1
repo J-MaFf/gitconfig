@@ -630,25 +630,29 @@ Describe "Update-GitConfig.ps1" {
         }
 
         # Push a change to the remote from a throwaway clone so the test repo's
-        # pull produces a real before/after diff.
-        function Push-RemoteChange {
-            param([string]$File, [string]$Content, [string]$Message)
-            $work = Join-Path $TestDrive ("work-" + [guid]::NewGuid().ToString("N"))
-            git clone $script:remoteRepo $work 2>&1 | Out-Null
-            Push-Location $work
-            try {
-                git config user.email "test@example.com"
-                git config user.name "Test User"
-                git config commit.gpgsign false
-                $Content | Out-File -FilePath $File -Encoding utf8
-                git add . 2>&1 | Out-Null
-                git commit -m $Message 2>&1 | Out-Null
-                git push origin HEAD:main 2>&1 | Out-Null
+        # pull produces a real before/after diff. Defined in BeforeAll so the
+        # function is visible inside the It blocks under Pester v5 (functions
+        # declared directly in a Context body are not).
+        BeforeAll {
+            function Push-RemoteChange {
+                param([string]$File, [string]$Content, [string]$Message)
+                $work = Join-Path $TestDrive ("work-" + [guid]::NewGuid().ToString("N"))
+                git clone $script:remoteRepo $work 2>&1 | Out-Null
+                Push-Location $work
+                try {
+                    git config user.email "test@example.com"
+                    git config user.name "Test User"
+                    git config commit.gpgsign false
+                    $Content | Out-File -FilePath $File -Encoding utf8
+                    git add . 2>&1 | Out-Null
+                    git commit -m $Message 2>&1 | Out-Null
+                    git push origin HEAD:main 2>&1 | Out-Null
+                }
+                finally {
+                    Pop-Location
+                }
+                Remove-Item $work -Recurse -Force
             }
-            finally {
-                Pop-Location
-            }
-            Remove-Item $work -Recurse -Force
         }
 
         It "Should regenerate ~/.gitconfig when the template changed" {
