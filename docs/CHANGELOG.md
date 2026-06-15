@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `git selfupdate` alias — pulls the gitconfig repo and reinstalls `~/.gitconfig` from
+  the template on demand, dispatching to the correct platform script
+  (PowerShell on Windows, bash on macOS/Linux) ([#78](https://github.com/J-MaFf/gitconfig/issues/78))
+
+### Fixed
+
+- Login auto-update now reinstalls `~/.gitconfig` when `.gitconfig.template` changed
+  during the pull, instead of only pulling. Template changes (new aliases, signing/push
+  tweaks) take effect automatically with no manual re-run. The existing `~/.gitconfig`
+  is backed up to `~/.gitconfig.bak` first; `~/.gitconfig.local` is never touched
+  ([#78](https://github.com/J-MaFf/gitconfig/issues/78))
+
 ## [0.1.0-pre] - 2025-12-15
 
 ### Added

@@ -4,6 +4,7 @@
 
 REPO_PATH="${1:-$HOME/Documents/Scripts/gitconfig}"
 LOG_FILE="$REPO_PATH/docs/update-gitconfig.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log_message() {
     local timestamp
@@ -32,6 +33,7 @@ mkdir -p "$(dirname "$LOG_FILE")"
     fi
 
     log_message "Pulling latest changes from main..."
+    HEAD_BEFORE=$(git rev-parse HEAD 2>/dev/null)
     PULL_RESULT=$(git pull 2>&1)
     if [ $? -eq 0 ]; then
         log_message "SUCCESS: git pull completed"
@@ -40,6 +42,24 @@ mkdir -p "$(dirname "$LOG_FILE")"
         log_message "ERROR: git pull failed"
         log_message "Output: $PULL_RESULT"
         exit 1
+    fi
+    HEAD_AFTER=$(git rev-parse HEAD 2>/dev/null)
+
+    # Reinstall ~/.gitconfig if the template changed during this pull.
+    # ~/.gitconfig is rendered from .gitconfig.template, so template changes
+    # download on pull but only take effect after regeneration.
+    if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ] && \
+       [ -n "$(git diff --name-only "$HEAD_BEFORE" "$HEAD_AFTER" -- .gitconfig.template)" ]; then
+        log_message ".gitconfig.template changed; regenerating ~/.gitconfig..."
+        # shellcheck source=functions.sh
+        source "$SCRIPT_DIR/functions.sh"
+        if generate_gitconfig "$REPO_PATH" "$HOME" true; then
+            log_message "SUCCESS: ~/.gitconfig regenerated from template (previous saved to ~/.gitconfig.bak)"
+        else
+            log_message "ERROR: Failed to regenerate ~/.gitconfig from template"
+        fi
+    else
+        log_message "No .gitconfig.template changes; skipping regeneration"
     fi
 
     log_message "Synchronizing remote tracking branches..."

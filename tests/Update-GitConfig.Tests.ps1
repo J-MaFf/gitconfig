@@ -1,7 +1,7 @@
 BeforeAll {
     # Setup variables
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
-    $script:scriptPath = Join-Path $script:repoRoot "scripts\Update-GitConfig.ps1"
+    $script:scriptPath = Join-Path $script:repoRoot "scripts\windows version\Update-GitConfig.ps1"
     $script:testRepo = Join-Path $TestDrive "test-repo"
     $script:logFile = Join-Path $script:testRepo "docs\update-gitconfig.log"
 
@@ -557,6 +557,98 @@ Describe "Update-GitConfig.ps1" {
             # Note: Branch creation may or may not log depending on whether it already exists
             $logContent | Should -Match "SUCCESS: Remote tracking branches synchronized"
             $logContent | Should -Match "Repository synchronization process completed"
+        }
+    }
+
+    Context "Step 2b: Regenerate ~/.gitconfig on Template Change" {
+        BeforeEach {
+            $script:remoteRepo = Join-Path $TestDrive "remote-repo"
+            $script:fakeHome = Join-Path $TestDrive "fake-home"
+            New-RemoteRepository -Path $script:remoteRepo
+            New-Item -Path $script:fakeHome -ItemType Directory -Force | Out-Null
+
+            # Local clone laid out like the gitconfig repo, tracking main
+            New-Item -Path $script:testRepo -ItemType Directory -Force | Out-Null
+            Push-Location $script:testRepo
+            try {
+                git clone $script:remoteRepo . 2>&1 | Out-Null
+                git config user.email "test@example.com"
+                git config user.name "Test User"
+                git config commit.gpgsign false
+                New-Item -Path "docs" -ItemType Directory -Force | Out-Null
+                "[core]`n`teditor = nano`n" | Out-File -FilePath ".gitconfig.template" -Encoding utf8
+                "# readme" | Out-File -FilePath "README.md" -Encoding utf8
+                git add . 2>&1 | Out-Null
+                git commit -m "Initial" 2>&1 | Out-Null
+                git push origin HEAD:main 2>&1 | Out-Null
+                git checkout -b main 2>&1 | Out-Null
+                git branch --set-upstream-to=origin/main main 2>&1 | Out-Null
+            }
+            finally {
+                Pop-Location
+            }
+
+            # Redirect home so regeneration never touches the real ~/.gitconfig
+            $script:savedUserProfile = $env:USERPROFILE
+            $script:savedHomeEnv = $env:HOME
+            $env:USERPROFILE = $script:fakeHome
+            $env:HOME = $script:fakeHome
+
+            if (Test-Path $script:logFile) {
+                Remove-Item $script:logFile -Force
+            }
+        }
+
+        AfterEach {
+            $env:USERPROFILE = $script:savedUserProfile
+            $env:HOME = $script:savedHomeEnv
+            foreach ($p in @($script:testRepo, $script:remoteRepo, $script:fakeHome)) {
+                if ($p -and (Test-Path $p)) {
+                    Remove-Item $p -Recurse -Force
+                }
+            }
+        }
+
+        # Push a change to the remote from a throwaway clone so the test repo's
+        # pull produces a real before/after diff.
+        function Push-RemoteChange {
+            param([string]$File, [string]$Content, [string]$Message)
+            $work = Join-Path $TestDrive ("work-" + [guid]::NewGuid().ToString("N"))
+            git clone $script:remoteRepo $work 2>&1 | Out-Null
+            Push-Location $work
+            try {
+                git config user.email "test@example.com"
+                git config user.name "Test User"
+                git config commit.gpgsign false
+                $Content | Out-File -FilePath $File -Encoding utf8
+                git add . 2>&1 | Out-Null
+                git commit -m $Message 2>&1 | Out-Null
+                git push origin HEAD:main 2>&1 | Out-Null
+            }
+            finally {
+                Pop-Location
+            }
+            Remove-Item $work -Recurse -Force
+        }
+
+        It "Should regenerate ~/.gitconfig when the template changed" {
+            Push-RemoteChange -File ".gitconfig.template" -Content "[core]`n`teditor = vim`n" -Message "Change template"
+
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            $logContent = Get-Content $script:logFile -Raw
+            $logContent | Should -Match "regenerating ~/.gitconfig"
+            (Join-Path $script:fakeHome ".gitconfig") | Should -Exist
+        }
+
+        It "Should not regenerate when no template change occurred" {
+            Push-RemoteChange -File "README.md" -Content "# updated readme" -Message "Docs only"
+
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            $logContent = Get-Content $script:logFile -Raw
+            $logContent | Should -Match "skipping regeneration"
+            (Join-Path $script:fakeHome ".gitconfig") | Should -Not -Exist
         }
     }
 }

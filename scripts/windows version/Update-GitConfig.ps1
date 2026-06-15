@@ -39,6 +39,7 @@ try {
 
     # Step 2: Pull latest changes on main
     Write-Log "Pulling latest changes from main..."
+    $headBefore = (git rev-parse HEAD 2>$null)
     $pullResult = git pull 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Log "SUCCESS: git pull completed on main"
@@ -47,6 +48,31 @@ try {
     else {
         Write-Log "ERROR: git pull failed with exit code $LASTEXITCODE"
         Write-Log "Output: $pullResult"
+    }
+    $headAfter = (git rev-parse HEAD 2>$null)
+
+    # Step 2b: Reinstall ~/.gitconfig if the template changed during this pull.
+    # ~/.gitconfig is rendered from .gitconfig.template, so template changes
+    # download on pull but only take effect after regeneration.
+    if ($headBefore -ne $headAfter) {
+        $templateChanged = git diff --name-only $headBefore $headAfter -- .gitconfig.template
+        if ($templateChanged) {
+            Write-Log ".gitconfig.template changed; regenerating ~/.gitconfig..."
+            $initScript = Join-Path $PSScriptRoot "Initialize-GitConfig.ps1"
+            & $initScript -Force 2>&1 | ForEach-Object { Write-Log $_ }
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "SUCCESS: ~/.gitconfig regenerated from template (previous saved to ~/.gitconfig.bak)"
+            }
+            else {
+                Write-Log "ERROR: Failed to regenerate ~/.gitconfig from template (exit code $LASTEXITCODE)"
+            }
+        }
+        else {
+            Write-Log "No .gitconfig.template changes; skipping regeneration"
+        }
+    }
+    else {
+        Write-Log "No new commits pulled; skipping regeneration"
     }
 
     # Step 3: Sync all remote tracking branches
