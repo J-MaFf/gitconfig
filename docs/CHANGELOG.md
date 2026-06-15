@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `install.ps1` no longer fails to parse under Windows PowerShell 5.1. The script
+  contained em dash characters (`—`) and lacked a UTF-8 BOM, so the legacy ANSI-codepage
+  reader mangled them into smart-quotes that broke string literals. Em dashes are now
+  ASCII hyphens and the file carries a BOM. Added a Pester guard test
+  (`tests/Encoding.Tests.ps1`) asserting every `scripts/windows version/*.ps1` is
+  ASCII-only and parses cleanly ([#85](https://github.com/J-MaFf/gitconfig/issues/85))
 - Login auto-update now reinstalls `~/.gitconfig` when `.gitconfig.template` changed
   during the pull, instead of only pulling. Template changes (new aliases, signing/push
   tweaks) take effect automatically with no manual re-run. The existing `~/.gitconfig`
