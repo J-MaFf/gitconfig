@@ -5,6 +5,10 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../shared/functions.sh
+source "$SCRIPT_DIR/../shared/functions.sh"
+
 FORCE=false
 HELP=false
 
@@ -73,14 +77,18 @@ CONFIG_CONTENT="# Machine-Specific Git Configuration (macOS)
 	excludesfile = $HOME_DIR/.gitignore_global
 "
 
+SIGNING_ENABLED=false
 if [ -n "$OP_SSH_SIGN" ]; then
     echo "[INFO] Detected 1Password SSH signing helper: $OP_SSH_SIGN"
+    SIGNING_ENABLED=true
     CONFIG_CONTENT+="
 [gpg]
 	format = ssh
 
 [gpg \"ssh\"]
 	program = $OP_SSH_SIGN
+	# Lets git verify SSH commit signatures locally (git log --show-signature)
+	allowedSignersFile = $HOME_DIR/.ssh/allowed_signers
 
 [commit]
 	gpgsign = true
@@ -110,5 +118,13 @@ CONFIG_CONTENT+="
 printf '%s\n' "$CONFIG_CONTENT" > "$LOCAL_CONFIG_PATH"
 echo "[OK] Created .gitconfig.local"
 echo ""
+
+# When signing is enabled, register the signing identity so git can verify
+# SSH commit signatures locally.
+if [ "$SIGNING_ENABLED" = true ]; then
+    update_allowed_signers "$HOME_DIR/.ssh/allowed_signers"
+    echo ""
+fi
+
 echo "To add safe directories, edit: $LOCAL_CONFIG_PATH"
 echo ""

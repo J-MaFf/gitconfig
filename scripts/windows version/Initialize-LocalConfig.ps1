@@ -39,6 +39,64 @@ SAFE DIRECTORIES:
     exit 0
 }
 
+function Update-AllowedSigners {
+    # Upserts the current signing identity into ~/.ssh/allowed_signers so git can
+    # verify SSH commit signatures locally. Reads the signing key and email from
+    # the already-generated ~/.gitconfig (git config). Idempotent: re-running does
+    # not duplicate the line, and existing entries for other identities are kept.
+    param([Parameter(Mandatory)][string]$AllowedSignersPath)
+
+    $signingKey = (& git config --get user.signingkey 2>$null)
+    $signerEmail = (& git config --get user.email 2>$null)
+
+    if ([string]::IsNullOrWhiteSpace($signingKey) -or [string]::IsNullOrWhiteSpace($signerEmail)) {
+        Write-Host "[WARN] No user.signingkey/user.email configured; skipped allowed_signers" -ForegroundColor Yellow
+        return
+    }
+
+    # Resolve the public key: either the literal key (1Password) or a *.pub file.
+    $pubKey = $null
+    if ($signingKey -match '^(ssh-|sk-ssh-|ecdsa-)') {
+        $pubKey = $signingKey.Trim()
+    }
+    else {
+        $candidate = if ($signingKey -match '\.pub$') { $signingKey } else { "$signingKey.pub" }
+        if (Test-Path $candidate) {
+            $pubKey = (Get-Content $candidate -Raw).Trim()
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($pubKey)) {
+        Write-Host "[WARN] Could not resolve signing public key; skipped allowed_signers" -ForegroundColor Yellow
+        return
+    }
+
+    # Normalize to "<keytype> <base64>" - drop any trailing comment so the line is
+    # valid allowed_signers syntax.
+    $parts = $pubKey -split '\s+'
+    if ($parts.Count -ge 2) {
+        $pubKey = "$($parts[0]) $($parts[1])"
+    }
+
+    $sshDir = Split-Path -Parent $AllowedSignersPath
+    if (-not (Test-Path $sshDir)) {
+        New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+    }
+
+    $line = "$signerEmail namespaces=`"git`" $pubKey"
+    $existing = @()
+    if (Test-Path $AllowedSignersPath) {
+        $existing = @(Get-Content $AllowedSignersPath)
+    }
+    if ($existing -contains $line) {
+        Write-Host "[OK] allowed_signers already up to date" -ForegroundColor Green
+    }
+    else {
+        Add-Content -Path $AllowedSignersPath -Value $line
+        Write-Host "[OK] Updated $AllowedSignersPath" -ForegroundColor Green
+    }
+}
+
 $homeDir = $env:USERPROFILE
 $localConfigPath = "$homeDir\.gitconfig.local"
 
@@ -70,6 +128,8 @@ try {
 [gpg "ssh"]
 	# Machine-specific SSH signing program path
 	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe
+	# Lets git verify SSH commit signatures locally (git log --show-signature, verify-commit)
+	allowedSignersFile = $($homeDir -replace '\\', '/')/.ssh/allowed_signers
 
 [safe]
 	# Network locations (make sure these paths exist on this machine)
@@ -86,8 +146,17 @@ try {
     Set-Content -Path $localConfigPath -Value $configContent -Force
     Write-Host "[OK] Created .gitconfig.local" -ForegroundColor Green
     Write-Host ""
+
+    # Build ~/.ssh/allowed_signers so git can verify SSH commit signatures locally.
+    # Without this file, `git log --show-signature` and `git verify-commit` report
+    # "No signature" even though commits are signed (and GitHub shows Verified).
+    $allowedSignersPath = Join-Path $homeDir ".ssh\allowed_signers"
+    Update-AllowedSigners -AllowedSignersPath $allowedSignersPath
+
+    Write-Host ""
     Write-Host "Local configuration includes:" -ForegroundColor Cyan
     Write-Host "  - SSH signing program path (op-ssh-sign.exe)" -ForegroundColor Gray
+    Write-Host "  - Allowed signers file for local signature verification" -ForegroundColor Gray
     Write-Host "  - Network safe directories (10.210.3.10, KFWS9BDC01)" -ForegroundColor Gray
     Write-Host "  - Local development directories" -ForegroundColor Gray
     Write-Host ""
