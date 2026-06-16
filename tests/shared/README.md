@@ -7,6 +7,7 @@ linux setup scripts depend on. They complement the Windows-only Pester suite in
 | Suite | Runner | Covers |
 | --- | --- | --- |
 | `functions.bats` | [bats-core](https://github.com/bats-core/bats-core) | `scripts/shared/functions.sh` — `backup_file`, `create_symlink`, `update_allowed_signers`, `generate_gitconfig`, git-alias widget enable/disable |
+| `mac-initialize-local-config.bats` | bats-core | `scripts/mac version/initialize-local-config.sh` — always writes `allowedSignersFile` when signing is enabled ([#116](https://github.com/J-MaFf/gitconfig/issues/116)) |
 | `test_gitconfig_helper.py` | [pytest](https://docs.pytest.org/) | `gitconfig_helper.py` — `_slugify`, `LABEL_PREFIX` selection, `_have`, `_default_branch`, `get_git_aliases` |
 
 ## Running
@@ -18,7 +19,7 @@ linux setup scripts depend on. They complement the Windows-only Pester suite in
 #   brew install bats-core            # macOS
 #   sudo apt-get install bats         # Debian/Ubuntu
 #   git clone https://github.com/bats-core/bats-core && ./bats-core/install.sh ~/.local
-bats tests/shared/functions.bats
+bats tests/shared/        # runs every *.bats in this directory
 ```
 
 The suite redirects `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` and works inside a
