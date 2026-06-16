@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `.gitconfig.template` — normalized indentation to tabs throughout. The `[push]` and
+  `[alias]` sections used four-space indentation while every other section used tabs; git
+  accepts both but the inconsistency is fragile for any future formatter/validator. All
+  value/comment lines are now tab-indented ([#113](https://github.com/J-MaFf/gitconfig/issues/113))
+
 - `.gitconfig.template` — moved the `[include] path = ~/.gitconfig.local` directive to the
   **bottom** of the template. Git applies includes inline and the last declaration of a key
   wins, so with the include at the top the template's hardcoded literal `signingkey` silently
