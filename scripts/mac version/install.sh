@@ -43,7 +43,7 @@ REQUIREMENTS:
     - macOS 12+ (Monterey or later recommended)
     - bash 4.0+  (use: brew install bash)
     - git
-    - Python 3 + rich library  (brew install python && pip3 install rich)
+    - Python 3 + rich library  (brew install python && pip3 install rich); textual is optional for the interactive 'git alias' browser
     - 1Password CLI (optional, for SSH commit signing): brew install 1password-cli
 EOF
     exit 0
@@ -196,15 +196,20 @@ fi
 # STEP 6: Install Python dependencies
 echo "[STEP 6] Installing Python dependencies..."
 echo "-----"
+# 'rich' is required for the helper's tables; 'textual' is optional and only
+# powers the interactive 'git alias' browser (the helper falls back to a static
+# table without it), so a failed textual install is a warning, not an error.
 if command -v pip3 &>/dev/null; then
-    if pip3 show rich &>/dev/null 2>&1; then
-        echo "[OK] Python 'rich' already installed"
-    elif pip3 install rich --quiet 2>/dev/null; then
-        echo "[OK] Installed Python 'rich'"
-    elif pip3 install rich --quiet --break-system-packages 2>/dev/null; then
-        echo "[OK] Installed Python 'rich' (--break-system-packages)"
+    if pip3 show rich &>/dev/null 2>&1 && pip3 show textual &>/dev/null 2>&1; then
+        echo "[OK] Python 'rich' and 'textual' already installed"
+    elif pip3 install rich textual --quiet 2>/dev/null; then
+        echo "[OK] Installed Python 'rich' and 'textual'"
+    elif pip3 install rich textual --quiet --break-system-packages 2>/dev/null; then
+        echo "[OK] Installed Python 'rich' and 'textual' (--break-system-packages)"
+    elif pip3 install rich --quiet 2>/dev/null || pip3 install rich --quiet --break-system-packages 2>/dev/null; then
+        echo "[OK] Installed Python 'rich' (textual unavailable; 'git alias' uses the static table)"
     else
-        echo "[WARN] Could not install 'rich' — run manually: pip3 install rich"
+        echo "[WARN] Could not install 'rich' — run manually: pip3 install rich textual"
     fi
 else
     echo "[WARN] pip3 not found — install Python 3 via Homebrew: brew install python"
@@ -228,6 +233,7 @@ if [ "$NO_LAUNCHD" = false ]; then
 fi
 
 python3 -c "import rich" &>/dev/null && echo "[OK] Python 'rich' importable" || echo "[WARN] Python 'rich' not importable"
+python3 -c "import textual" &>/dev/null && echo "[OK] Python 'textual' importable" || echo "[WARN] Python 'textual' not importable ('git alias' uses the static table)"
 
 git config --list > /dev/null 2>&1 && echo "[OK] Git configuration accessible" || echo "[WARN] Could not verify git configuration"
 

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Interactive `git alias` browser — running `git alias` in a terminal now opens a
+  categorized, searchable table (built with `textual`): one tab per category with
+  arrow-key/clickable navigation and a search box that filters by alias name **or**
+  description. Falls back to a static grouped table when piped, in CI, when `textual`
+  is absent, or with `git alias --plain`. `textual` is an optional dependency added to
+  the install scripts (best-effort; the helper works without it)
+  ([#102](https://github.com/J-MaFf/gitconfig/issues/102))
+- New git aliases ([#102](https://github.com/J-MaFf/gitconfig/issues/102)):
+  - **Inspect:** `s` (short status), `lg` (graph log), `last` (last commit + diffstat),
+    `recent` (branches by last commit), `find` (`log -S`)
+  - **Commit:** `amend`, `reword`, `undo` (soft reset), `unstage`, `wip`
+  - **Branch & Sync:** `nb` (`switch -c`), `pushf` (`push --force-with-lease`),
+    `sync` (`pull --rebase --autostash`)
+  - **GitHub:** `pr` (open the branch's PR), `prs` (PR status)
+- `git start <issue#>` — reads a GitHub issue's title and labels via `gh` and creates a
+  conventionally named branch (`fix/`, `feat/`, or `docs/` + slugified title) from the
+  up-to-date default branch ([#102](https://github.com/J-MaFf/gitconfig/issues/102))
 - Setup now generates `~/.ssh/allowed_signers` and points `gpg.ssh.allowedSignersFile`
   at it (in `~/.gitconfig.local`) so git can verify SSH commit signatures locally —
   `git log --show-signature` and `git verify-commit` no longer report "No signature" on
@@ -30,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The static `git alias` table is now grouped by category (Inspect, Commit, Branch &
+  Sync, GitHub, Maintenance) with a dedicated Category column, and curated descriptions
+  for every built-in alias ([#102](https://github.com/J-MaFf/gitconfig/issues/102))
 - The auto-update job (`git selfupdate` and the login-triggered run) now **prunes
   merged branches** instead of recreating them. It fetches with `--prune` to drop
   stale remote-tracking refs and deletes local branches whose upstream remote was

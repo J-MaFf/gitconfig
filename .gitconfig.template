@@ -22,8 +22,9 @@
     autoSetupRemote = true
 
 [alias]
-    # List all aliases
-    alias = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py print_aliases; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
+    # Browse all aliases: an interactive, categorized, searchable table when run
+    # in a terminal; pass --plain for a static grouped list (for piping/scripts).
+    alias = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py print_aliases \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
     # Download all remote branches creating local counterparts
     branches = "!git fetch && git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -v -e '^origin/HEAD$' -e '^origin$' | while read ref; do git branch --track \"${ref#origin/}\" \"$ref\" 2>/dev/null || true; done"
     cleanup = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
@@ -44,6 +45,44 @@
     # Pull the latest gitconfig repo and reinstall ~/.gitconfig from the template
     # on demand. Dispatches by OS: Git-for-Windows reports MINGW/MSYS/CYGWIN.
     selfupdate = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -File '{{REPO_PATH}}/scripts/windows version/Update-GitConfig.ps1' -RepoPath '{{REPO_PATH}}' ;; *) bash '{{REPO_PATH}}/scripts/shared/update-gitconfig.sh' '{{REPO_PATH}}' ;; esac; }; f"
+
+    # --- Inspect ---
+    # Short, branch-aware working-tree status
+    s = status -sb
+    # Pretty, decorated commit graph across all branches
+    lg = log --graph --oneline --decorate --all
+    # Show the most recent commit with its diffstat
+    last = log -1 HEAD --stat
+    # List local branches ordered by most recent commit
+    recent = for-each-ref --sort=-committerdate --count=15 --format='%(refname:short)' refs/heads/
+    # Find commits that added or removed a string: git find <string>
+    find = log -S
+    # --- Commit ---
+    # Fold staged changes into the last commit, keeping its message
+    amend = commit --amend --no-edit
+    # Edit the last commit's message (opens the editor)
+    reword = commit --amend
+    # Undo the last commit but keep its changes staged
+    undo = reset --soft HEAD~1
+    # Unstage files while keeping working-tree changes
+    unstage = reset HEAD --
+    # Park all current work as a WIP commit (skips hooks)
+    wip = !git add -A && git commit -m 'WIP' --no-verify
+    # --- Branch & Sync ---
+    # Create and switch to a new branch: git nb <name>
+    nb = switch -c
+    # Force-push the current branch safely (refuses to clobber others' work)
+    pushf = push --force-with-lease
+    # Update the current branch with rebase, stashing/restoring local changes
+    sync = pull --rebase --autostash
+    # Start work on a GitHub issue: create a conventionally named branch from its
+    # title (git start <issue-number>). Dispatches to the Python helper.
+    start = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py start \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
+    # --- GitHub ---
+    # Open the current branch's pull request in the browser
+    pr = !gh pr view --web
+    # Show the status of your pull requests
+    prs = !gh pr status
 
 [init]
 	defaultBranch = main
