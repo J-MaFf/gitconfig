@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `git alias` browser — **row navigation and prompt insertion**. Move through the
+  results with up/down; press Enter (or click a row) to pick an alias. A `Ctrl-G` shell
+  keybinding (bash `bind -x`, zsh ZLE widget, PowerShell PSReadLine) opens the browser
+  and inserts the chosen `git <alias>` onto your command line, fzf-style: the browser
+  emits the selection via `git alias --out <file>` and the keybinding inserts it (a
+  git-alias subprocess can't type at the prompt itself). Install scripts source the
+  matching widget (`scripts/shell/git-alias-widget.{bash,zsh,ps1}`) from your shell rc /
+  `$PROFILE` (idempotent, guarded block); cleanup scripts remove it
+  ([#106](https://github.com/J-MaFf/gitconfig/issues/106))
 - Interactive `git alias` browser — running `git alias` in a terminal now opens a
   categorized, searchable table (built with `textual`): one tab per category with
   arrow-key/clickable navigation and a search box that filters by alias name **or**

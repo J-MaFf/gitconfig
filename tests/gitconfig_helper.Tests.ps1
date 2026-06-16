@@ -476,6 +476,67 @@ import gitconfig_helper
         It "Falls back to the static table when the browser is unavailable" {
             $script:src | Should -Match "def _print_aliases_table"
         }
+
+        It "Binds row navigation and selection keys" {
+            $script:src | Should -Match '\("enter", "select"'
+            $script:src | Should -Match '\("up", "cursor_up"'
+            $script:src | Should -Match '\("down", "cursor_down"'
+        }
+
+        It "Selects via Enter, a table row click, and emits a git command" {
+            $script:src | Should -Match "def _selected_command"
+            $script:src | Should -Match "def on_input_submitted"
+            $script:src | Should -Match "def on_data_table_row_selected"
+            $script:src | Should -Match 'return f"git \{row\[0\]\}"'
+        }
+
+        It "Supports --select output via --out wired through __main__" {
+            $script:src | Should -Match "select_out"
+            $script:src | Should -Match '"--out" in sys\.argv'
+        }
+
+        It "Stays silent in selection mode (no static table dumped to the tty)" {
+            # --out is the keybinding path; with no TTY the browser is skipped and
+            # nothing should be printed (so the shell inserts an empty selection).
+            $tmp = [System.IO.Path]::GetTempFileName()
+            try {
+                $result = & python $script:helperScript print_aliases --out $tmp 2>&1
+                $output = ($result -join "`n").Trim()
+                $output | Should -Not -Match "Git Aliases"
+                $LASTEXITCODE | Should -Be 0
+            }
+            finally {
+                Remove-Item $tmp -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Context "Ctrl-G shell keybinding widgets" {
+        It "Ships bash, zsh, and PowerShell widget files" {
+            foreach ($ext in @("bash", "zsh", "ps1")) {
+                Join-Path $script:repoRoot "scripts/shell/git-alias-widget.$ext" | Should -Exist
+            }
+        }
+
+        It "Widgets run the browser with --out and insert the result" {
+            $bash = Get-Content (Join-Path $script:repoRoot "scripts/shell/git-alias-widget.bash") -Raw
+            $bash | Should -Match 'git alias --out'
+            $bash | Should -Match 'READLINE_LINE'
+            $zsh = Get-Content (Join-Path $script:repoRoot "scripts/shell/git-alias-widget.zsh") -Raw
+            $zsh | Should -Match 'git alias --out'
+            $zsh | Should -Match 'LBUFFER'
+            $ps = Get-Content (Join-Path $script:repoRoot "scripts/shell/git-alias-widget.ps1") -Raw
+            $ps | Should -Match 'git alias --out'
+            $ps | Should -Match 'PSConsoleReadLine'
+        }
+
+        It "Install and cleanup wire the keybinding idempotently" {
+            $functions = Get-Content (Join-Path $script:repoRoot "scripts/shared/functions.sh") -Raw
+            $functions | Should -Match "enable_git_alias_widget"
+            $functions | Should -Match "disable_git_alias_widget"
+            $macInstall = Get-Content (Join-Path $script:repoRoot "scripts/mac version/install.sh") -Raw
+            $macInstall | Should -Match "enable_git_alias_widget"
+        }
     }
 
     Context "start Function (git start)" {
