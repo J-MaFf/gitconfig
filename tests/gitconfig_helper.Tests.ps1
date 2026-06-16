@@ -523,6 +523,38 @@ import gitconfig_helper
         }
     }
 
+    Context "Browser fallback diagnostics" {
+        BeforeAll { $script:src = Get-Content $script:helperScript -Raw }
+
+        It "Explains the fallback on stderr (only when stderr is a TTY)" {
+            $script:src | Should -Match "def _note_browser_fallback"
+            $script:src | Should -Match "sys\.stderr\.isatty\(\)"
+            # The note always points users at --plain to silence it.
+            $script:src | Should -Match "git alias --plain"
+        }
+
+        It "Reports a reason (textual missing / UI error) from the launcher" {
+            # _launch_alias_browser now returns (ran, reason) and names textual.
+            $script:src | Should -Match "is not installed for"
+            $script:src | Should -Match "the interactive browser failed"
+        }
+
+        It "Draws the browser on /dev/tty, guarded for Windows" {
+            $script:src | Should -Match "def _run_app_on_tty"
+            $script:src | Should -Match '/dev/tty'
+            $script:src | Should -Match 'os\.name != "nt"'
+        }
+
+        It "Stays quiet (no reason) when piped, and still shows the table" {
+            # stdout+stderr both captured (not TTYs) -> static table, no note.
+            $result = & python $script:helperScript print_aliases 2>&1
+            $output = $result -join "`n"
+            $output | Should -Match "Git Aliases"
+            $output | Should -Not -Match "git alias:"
+            $LASTEXITCODE | Should -Be 0
+        }
+    }
+
     Context "Ctrl-G shell keybinding widgets" {
         It "Ships bash, zsh, and PowerShell widget files" {
             foreach ($ext in @("bash", "zsh", "ps1")) {

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `git alias` browser — when the interactive browser can't launch it no longer falls back
+  to the static table **silently**: it prints a one-line reason to stderr (only when stderr
+  is a TTY, so pipes/CI stay clean) — e.g. `textual` not installed, stdout not a TTY, or a
+  UI error. It also now draws the browser on `/dev/tty` (mirroring the Ctrl-G widget's
+  `2>/dev/tty`), so the UI renders even when the alias's stderr isn't the terminal. `--plain`
+  and the Ctrl-G path stay silent ([#110](https://github.com/J-MaFf/gitconfig/issues/110))
 - `git alias` browser — selecting an alias when launched by **typing `git alias`** now
   copies `git <alias>` to the clipboard (`pbcopy` / `clip` / `wl-copy` / `xclip` / `xsel`,
   with a printed fallback), so the command is one paste away. A typed `git alias` runs as

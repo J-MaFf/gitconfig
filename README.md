@@ -205,7 +205,10 @@ python -m pip install rich textual
 **`git alias` shows a static table instead of the interactive browser:** install
 `textual` (`pip install textual`) and run `git alias` directly in a terminal —
 the interactive UI is skipped when output is piped/redirected or when stdout is
-not a TTY.
+not a TTY. `git alias` prints a one-line reason to stderr when it skips the
+browser, so the cause is visible. If a crashed TUI ever leaves the terminal in a
+weird state (the browser looks broken or the keybinding stops responding), run
+`reset` or open a fresh tab to restore it.
 
 **Aliases not working:** Verify the symlink exists and `.gitconfig` includes the helper path.
 

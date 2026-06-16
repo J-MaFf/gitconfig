@@ -819,11 +819,44 @@ def _copy_to_clipboard(text):
     return False
 
 
+def _run_app_on_tty(app):
+    """Run a Textual app, drawing it on the controlling terminal.
+
+    Textual renders to stderr; if the alias's stderr was not wired to the
+    terminal the UI would be misrouted. When stderr is not a TTY (and we're not
+    on Windows), route stdin/stdout/stderr through /dev/tty for the duration of
+    the run -- the same trick as the Ctrl-G widget's `</dev/tty >/dev/tty
+    2>/dev/tty` -- then restore the original descriptors. Returns app.run()'s
+    value (the chosen command, or None).
+    """
+    saved = tty_fd = None
+    if os.name != "nt" and not sys.stderr.isatty():
+        try:
+            tty_fd = os.open("/dev/tty", os.O_RDWR)
+        except OSError:
+            tty_fd = None
+    try:
+        if tty_fd is not None:
+            saved = (os.dup(0), os.dup(1), os.dup(2))
+            for target in (0, 1, 2):
+                os.dup2(tty_fd, target)
+        return app.run()
+    finally:
+        if saved is not None:
+            for src, target in zip(saved, (0, 1, 2)):
+                os.dup2(src, target)
+            for fd in saved:
+                os.close(fd)
+        if tty_fd is not None:
+            os.close(tty_fd)
+
+
 def _launch_alias_browser(aliases, select_out=None):
     """Launch the interactive Textual alias browser.
 
-    Returns True if the browser ran, False if Textual is unavailable or the UI
-    could not start -- the caller then prints the static table instead.
+    Returns (ran, reason): (True, None) if the browser ran; (False, reason) if it
+    could not, where reason is a short human-readable explanation the caller can
+    surface before falling back to the static table.
 
     On selection the app returns the chosen command (e.g. "git pr"). When
     select_out is a path, that command is written there (for the Ctrl-G shell
@@ -831,35 +864,50 @@ def _launch_alias_browser(aliases, select_out=None):
     launched by typing `git alias` -- the subprocess can't reach the prompt, so
     the command is copied to the clipboard (with a printed fallback).
     """
+    app = _build_alias_app(aliases)
+    if app is None:
+        return False, (
+            f"the 'textual' package is not installed for {sys.executable} "
+            f"(install it with 'pip install textual')"
+        )
     try:
-        app = _build_alias_app(aliases)
-        if app is None:
-            return False
-        choice = app.run()
-        if choice:
-            if select_out:
-                try:
-                    with open(select_out, "w", encoding="utf-8") as handle:
-                        handle.write(choice)
-                except OSError:
-                    pass
+        choice = _run_app_on_tty(app)
+    except Exception as exc:
+        return False, f"the interactive browser failed ({type(exc).__name__}: {exc})"
+
+    if choice:
+        if select_out:
+            try:
+                with open(select_out, "w", encoding="utf-8") as handle:
+                    handle.write(choice)
+            except OSError:
+                pass
+        else:
+            console = Console()
+            if _copy_to_clipboard(choice):
+                console.print(
+                    f"[green]Copied to clipboard:[/green] [bold]{choice}[/bold]  "
+                    f"[dim](paste with Cmd/Ctrl-V; Ctrl-G inserts at the prompt)[/dim]"
+                )
             else:
-                console = Console()
-                if _copy_to_clipboard(choice):
-                    console.print(
-                        f"[green]Copied to clipboard:[/green] [bold]{choice}[/bold]  "
-                        f"[dim](paste with Cmd/Ctrl-V; Ctrl-G inserts at the prompt)[/dim]"
-                    )
-                else:
-                    console.print(
-                        f"[cyan]{choice}[/cyan]  "
-                        f"[dim](copy it, or use Ctrl-G to insert at the prompt)[/dim]"
-                    )
-        return True
-    except Exception:
-        # An incompatible terminal (or any UI error) falls back to the static
-        # table rather than leaving the user with no output.
-        return False
+                console.print(
+                    f"[cyan]{choice}[/cyan]  "
+                    f"[dim](copy it, or use Ctrl-G to insert at the prompt)[/dim]"
+                )
+    return True, None
+
+
+def _note_browser_fallback(reason):
+    """Explain (once, on stderr) why the interactive browser was skipped.
+
+    Printed only when stderr is a TTY, so piping and CI stay clean. The note
+    always points at 'git alias --plain' to silence it.
+    """
+    if reason and sys.stderr.isatty():
+        Console(stderr=True).print(
+            f"[dim]git alias: {reason}. Showing the static list "
+            f"('git alias --plain' to silence this).[/dim]"
+        )
 
 
 def print_aliases(force_plain=False, select_out=None):
@@ -872,13 +920,32 @@ def print_aliases(force_plain=False, select_out=None):
     When output is piped, in CI, with --plain, or without Textual it falls back
     to a static grouped table so 'git alias | grep ...' and scripts keep working
     -- except in selection mode (select_out set), where it stays silent so the
-    keybinding inserts nothing.
+    keybinding inserts nothing. When the browser is skipped for an unexpected
+    reason, a one-line explanation is printed to stderr (if stderr is a TTY).
     """
     aliases = get_git_aliases()
-    if not force_plain and sys.stdout.isatty() and _launch_alias_browser(
-        aliases, select_out=select_out
-    ):
+
+    if force_plain:
+        if select_out is None:
+            _print_aliases_table(aliases)
         return
+
+    if sys.stdout.isatty():
+        ran, reason = _launch_alias_browser(aliases, select_out=select_out)
+        if ran:
+            return
+        # The browser couldn't start (no Textual, a UI error, ...): say why,
+        # then fall through to the static table. Stay silent for Ctrl-G.
+        if select_out is None:
+            _note_browser_fallback(reason)
+    elif select_out is None:
+        # stdout is redirected/piped: the static table is the right output, but
+        # explain it for someone who expected the browser at a real terminal.
+        _note_browser_fallback(
+            "stdout is not a TTY (piped or redirected), so the browser was "
+            "skipped (use Ctrl-G for the interactive browser)"
+        )
+
     if select_out is None:
         _print_aliases_table(aliases)
 
