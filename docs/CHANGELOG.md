@@ -53,8 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on their next update without a manual `pip install`
   ([#102](https://github.com/J-MaFf/gitconfig/issues/102))
 - The static `git alias` table is now grouped by category (Inspect, Commit, Branch &
-  Sync, GitHub, Maintenance) with a dedicated Category column, and curated descriptions
-  for every built-in alias ([#102](https://github.com/J-MaFf/gitconfig/issues/102))
+  Sync, GitHub, Maintenance, Claude Skills) with a dedicated Category column, and
+  curated descriptions for every built-in alias. The claude-skills aliases
+  (`skill-sync`, `skill-publish`) get their own "Claude Skills" category
+  ([#102](https://github.com/J-MaFf/gitconfig/issues/102))
 - The auto-update job (`git selfupdate` and the login-triggered run) now **prunes
   merged branches** instead of recreating them. It fetches with `--prune` to drop
   stale remote-tracking refs and deletes local branches whose upstream remote was
