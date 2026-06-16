@@ -160,23 +160,34 @@ $pip = Get-Command pip -ErrorAction SilentlyContinue
 $pip3 = Get-Command pip3 -ErrorAction SilentlyContinue
 $pipCmd = if ($pip3) { "pip3" } elseif ($pip) { "pip" } else { $null }
 
+# 'rich' is required for the helper's tables; 'textual' is optional and only
+# powers the interactive 'git alias' browser (the helper falls back to a static
+# table without it), so a failed textual install is a warning, not an error.
 if ($pipCmd) {
     $richCheck = & $pipCmd show rich 2>$null
-    if ($richCheck) {
-        Write-Host "[OK] Python 'rich' already installed" -ForegroundColor Green
+    $textualCheck = & $pipCmd show textual 2>$null
+    if ($richCheck -and $textualCheck) {
+        Write-Host "[OK] Python 'rich' and 'textual' already installed" -ForegroundColor Green
     }
     else {
         try {
-            & $pipCmd install rich --quiet 2>$null
+            & $pipCmd install rich textual --quiet 2>$null
             if ($LASTEXITCODE -eq 0) {
-                Write-Host "[OK] Installed Python 'rich'" -ForegroundColor Green
+                Write-Host "[OK] Installed Python 'rich' and 'textual'" -ForegroundColor Green
             }
             else {
-                Write-Host "[WARN] Could not install 'rich' - run manually: pip install rich" -ForegroundColor Yellow
+                # textual is optional; make sure the required 'rich' still lands.
+                & $pipCmd install rich --quiet 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "[OK] Installed Python 'rich' (textual unavailable; 'git alias' uses the static table)" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "[WARN] Could not install 'rich' - run manually: pip install rich textual" -ForegroundColor Yellow
+                }
             }
         }
         catch {
-            Write-Host "[WARN] Could not install 'rich' - run manually: pip install rich" -ForegroundColor Yellow
+            Write-Host "[WARN] Could not install 'rich' - run manually: pip install rich textual" -ForegroundColor Yellow
         }
     }
 }
@@ -206,6 +217,9 @@ if ($pyCmd) {
         & $pyCmd -c "import rich" 2>$null
         if ($LASTEXITCODE -eq 0) { Write-Host "[OK] Python 'rich' importable" -ForegroundColor Green }
         else                     { Write-Host "[WARN] Python 'rich' not importable" -ForegroundColor Yellow }
+        & $pyCmd -c "import textual" 2>$null
+        if ($LASTEXITCODE -eq 0) { Write-Host "[OK] Python 'textual' importable" -ForegroundColor Green }
+        else                     { Write-Host "[WARN] Python 'textual' not importable ('git alias' uses the static table)" -ForegroundColor Yellow }
     }
     catch {
         Write-Host "[WARN] Could not verify Python 'rich'" -ForegroundColor Yellow

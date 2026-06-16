@@ -415,4 +415,96 @@ import gitconfig_helper
             $exitCode | Should -Be 0
         }
     }
+
+    Context "Alias categorization" {
+        BeforeAll { $script:src = Get-Content $script:helperScript -Raw }
+
+        It "Defines CATEGORY_ORDER and ALIAS_METADATA" {
+            $script:src | Should -Match "CATEGORY_ORDER"
+            $script:src | Should -Match "ALIAS_METADATA"
+        }
+
+        It "Categorizes the new aliases" {
+            $script:src | Should -Match '"pushf":\s*\("Branch & Sync"'
+            $script:src | Should -Match '"pr":\s*\("GitHub"'
+            $script:src | Should -Match '"amend":\s*\("Commit"'
+            $script:src | Should -Match '"s":\s*\("Inspect"'
+        }
+
+        It "get_git_aliases returns (name, description, category) tuples" {
+            $script:src | Should -Match "aliases\.append\(\(alias_name, description, category\)\)"
+        }
+    }
+
+    Context "print_aliases plain/interactive modes" {
+        BeforeAll { $script:src = Get-Content $script:helperScript -Raw }
+
+        It "Gates the interactive browser on an interactive TTY" {
+            $script:src | Should -Match "sys\.stdout\.isatty\(\)"
+        }
+
+        It "Supports a --plain flag wired through __main__" {
+            $script:src | Should -Match "force_plain"
+            $script:src | Should -Match '"--plain" in sys\.argv'
+        }
+
+        It "Renders a grouped table with a Category column when plain" {
+            $result = & python $script:helperScript print_aliases --plain 2>&1
+            $output = $result -join "`n"
+            $output | Should -Match "Git Aliases"
+            $output | Should -Match "Category"
+            $LASTEXITCODE | Should -Be 0
+        }
+    }
+
+    Context "Interactive browser (Textual)" {
+        BeforeAll { $script:src = Get-Content $script:helperScript -Raw }
+
+        It "Defines the browser builder and launcher" {
+            $script:src | Should -Match "def _build_alias_app"
+            $script:src | Should -Match "def _launch_alias_browser"
+        }
+
+        It "Imports textual lazily so the module loads without it" {
+            # The textual import must live inside a function (indented), not at
+            # module top level, so 'import gitconfig_helper' works without textual.
+            $script:src | Should -Match "from textual\.app import App"
+            $script:src | Should -Not -Match "(?m)^from textual"
+            $script:src | Should -Not -Match "(?m)^import textual"
+        }
+
+        It "Falls back to the static table when the browser is unavailable" {
+            $script:src | Should -Match "def _print_aliases_table"
+        }
+    }
+
+    Context "start Function (git start)" {
+        BeforeAll { $script:src = Get-Content $script:helperScript -Raw }
+
+        It "Is defined and dispatched from __main__" {
+            $script:src | Should -Match "def start_branch"
+            $script:src | Should -Match 'function_name == "start"'
+        }
+
+        It "Maps issue labels to branch-name prefixes" {
+            $script:src | Should -Match "LABEL_PREFIX"
+            $script:src | Should -Match '"bug":\s*"fix"'
+            $script:src | Should -Match '"enhancement":\s*"feat"'
+            $script:src | Should -Match '"documentation":\s*"docs"'
+        }
+
+        It "Rejects a missing issue number" {
+            $result = & python $script:helperScript start 2>&1
+            $output = $result -join "`n"
+            $output | Should -Match "Usage: git start"
+            $LASTEXITCODE | Should -Be 1
+        }
+
+        It "Rejects a non-numeric issue number" {
+            $result = & python $script:helperScript start abc 2>&1
+            $output = $result -join "`n"
+            $output | Should -Match "Usage: git start"
+            $LASTEXITCODE | Should -Be 1
+        }
+    }
 }

@@ -63,6 +63,31 @@ mkdir -p "$(dirname "$LOG_FILE")"
         log_message "No .gitconfig.template changes; skipping regeneration"
     fi
 
+    # Ensure the optional 'textual' dependency (for the interactive `git alias`
+    # browser) is present. Best-effort and idempotent: resolves the interpreter
+    # py -> python3 -> python like the aliases, only installs when textual is
+    # missing, and never fails the update if the install does not succeed.
+    PYTHON_BIN=""
+    for p in py python3 python; do
+        if command -v "$p" >/dev/null 2>&1 && "$p" -c '' >/dev/null 2>&1; then
+            PYTHON_BIN="$p"
+            break
+        fi
+    done
+    if [ -z "$PYTHON_BIN" ]; then
+        log_message "Skipping 'textual' check: no working Python interpreter found"
+    elif "$PYTHON_BIN" -c "import textual" >/dev/null 2>&1; then
+        log_message "Optional dependency 'textual' already present"
+    else
+        log_message "Installing optional dependency 'textual' for the interactive 'git alias' browser..."
+        if "$PYTHON_BIN" -m pip install textual --quiet >/dev/null 2>&1 || \
+           "$PYTHON_BIN" -m pip install textual --quiet --break-system-packages >/dev/null 2>&1; then
+            log_message "SUCCESS: installed 'textual'"
+        else
+            log_message "WARNING: could not install 'textual'; 'git alias' will use the static table (install manually: pip3 install textual)"
+        fi
+    fi
+
     # Prune merged branches: drop stale remote-tracking refs, then delete local
     # branches whose upstream remote has been deleted (": gone]"). Mirrors the
     # `git cleanup` alias. We don't recreate local branches for every remote here;

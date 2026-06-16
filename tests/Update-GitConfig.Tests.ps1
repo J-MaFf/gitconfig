@@ -66,6 +66,13 @@ Describe "Update-GitConfig.ps1" {
             $scriptContent = Get-Content $script:scriptPath -Raw
             $scriptContent | Should -Match 'param\s*\(\s*\[string\]\s*\$RepoPath'
         }
+
+        It "Should ensure the optional 'textual' dependency (idempotent, best-effort)" {
+            $scriptContent = Get-Content $script:scriptPath -Raw
+            # Checks presence before installing so repeat runs are a no-op.
+            $scriptContent | Should -Match 'import textual'
+            $scriptContent | Should -Match 'pip install textual'
+        }
     }
 
     Context "Logging Functionality" {

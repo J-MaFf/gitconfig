@@ -76,6 +76,34 @@ try {
         Write-Log "No new commits pulled; skipping regeneration"
     }
 
+    # Step 2c: Ensure the optional 'textual' dependency (for the interactive
+    # `git alias` browser) is present. Best-effort and idempotent: resolves the
+    # interpreter py -> python3 -> python (avoiding the Microsoft Store stub),
+    # only installs when missing, and never fails the update if it cannot.
+    $pyCmd = if (Get-Command py -ErrorAction SilentlyContinue)          { "py" }
+             elseif (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" }
+             elseif (Get-Command python -ErrorAction SilentlyContinue)  { "python" }
+             else { $null }
+    if (-not $pyCmd) {
+        Write-Log "Skipping 'textual' check: no Python interpreter found"
+    }
+    else {
+        & $pyCmd -c "import textual" 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log "Optional dependency 'textual' already present"
+        }
+        else {
+            Write-Log "Installing optional dependency 'textual' for the interactive 'git alias' browser..."
+            & $pyCmd -m pip install textual --quiet 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "SUCCESS: installed 'textual'"
+            }
+            else {
+                Write-Log "WARNING: could not install 'textual'; 'git alias' will use the static table (install manually: pip install textual)"
+            }
+        }
+    }
+
     # Step 3: Prune merged branches. Drop stale remote-tracking refs, then delete
     # local branches whose upstream remote has been deleted (": gone]"). Mirrors
     # the `git cleanup` alias. We don't recreate local branches for every remote

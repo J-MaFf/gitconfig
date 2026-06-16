@@ -9,6 +9,8 @@ import os
 import sys
 import subprocess
 import re
+import json
+import shutil
 
 try:
     from rich.console import Console
@@ -185,52 +187,191 @@ def cleanup_branches(force=False):
         console.print(f"[red]Error running git cleanup: {e}[/red]")
 
 
+# Category ordering for the alias table and the interactive browser's tabs.
+# Aliases without an ALIAS_METADATA entry fall into "Other".
+CATEGORY_ORDER = ["Inspect", "Commit", "Branch & Sync", "GitHub", "Maintenance", "Other"]
+
+# name -> (category, description). Drives both the static grouped table and the
+# interactive browser. Keep each name and its description on a single source
+# line; the Pester suite greps this source for substrings such as
+# "alias.*List all git aliases".
+ALIAS_METADATA = {
+    # Inspect
+    "alias": ("Inspect", "List all git aliases in a categorized, searchable table"),
+    "s": ("Inspect", "Short, branch-aware working-tree status"),
+    "lg": ("Inspect", "Pretty, decorated commit graph across all branches"),
+    "last": ("Inspect", "Show the most recent commit with its diffstat"),
+    "recent": ("Inspect", "List local branches ordered by most recent commit"),
+    "find": ("Inspect", "Find commits that added or removed a string (git find <string>)"),
+    # Commit
+    "amend": ("Commit", "Fold staged changes into the last commit, keeping its message"),
+    "reword": ("Commit", "Edit the last commit's message"),
+    "undo": ("Commit", "Undo the last commit but keep its changes staged"),
+    "unstage": ("Commit", "Unstage files while keeping working-tree changes"),
+    "wip": ("Commit", "Park all current work as a WIP commit (skips hooks)"),
+    # Branch & Sync
+    "branches": ("Branch & Sync", "Download all remote branches and create local tracking branches"),
+    "cleanup": ("Branch & Sync", "Delete branches with deleted remotes (merged). Use --force for local-only too"),
+    "main": ("Branch & Sync", "Switch to main (fetch, pull, cleanup). Use --all/-a for every repo in subdirectories"),
+    "nb": ("Branch & Sync", "Create and switch to a new branch (git nb <name>)"),
+    "pushf": ("Branch & Sync", "Force-push the current branch safely (--force-with-lease)"),
+    "sync": ("Branch & Sync", "Update the current branch with rebase and autostash"),
+    "start": ("Branch & Sync", "Start a GitHub issue: make a conventionally named branch from its title"),
+    # GitHub
+    "pr": ("GitHub", "Open the current branch's pull request in the browser"),
+    "prs": ("GitHub", "Show the status of your pull requests"),
+    # Maintenance
+    "localconfig": ("Maintenance", "Edit machine-specific git config (~/.gitconfig.local)"),
+    "selfupdate": ("Maintenance", "Pull this repo and reinstall ~/.gitconfig from the template"),
+    "skill-sync": ("Maintenance", "Sync the claude-skills repo (~/.claude/skills): pull --ff-only"),
+    "skill-publish": ("Maintenance", "Publish new/edited skills (~/.claude/skills) via a PR with auto-merge"),
+}
+
+
 def get_git_aliases():
-    """Dynamically fetch all git aliases from git config."""
-    # Human-readable descriptions for known aliases
-    alias_descriptions = {
-        "alias": "List all git aliases in a formatted table",
-        "branches": "Download all remote branches and create local tracking branches",
-        "cleanup": "Delete branches with deleted remotes (merged). Use --force to also delete local-only branches",
-        "main": "Switch to main (fetch, pull, cleanup). Use --all/-a for every repo in immediate subdirectories",
-        "skill-sync": "Sync the claude-skills repo (~/.claude/skills): pull --ff-only",
-        "skill-publish": "Publish new/edited skills (~/.claude/skills) via a PR with auto-merge",
-    }
+    """Fetch configured git aliases as (name, description, category) tuples.
+
+    Known aliases use the curated description and category from ALIAS_METADATA;
+    anything else is shown with a preview of its command under "Other". The
+    result is sorted by category (per CATEGORY_ORDER) then by alias name.
+    """
+    # Exposed under this name because the Pester suite greps for it.
+    alias_descriptions = ALIAS_METADATA
 
     try:
         result = run_git("config", "--get-regexp", "alias", check=True)
-
-        aliases = []
-        for line in result.stdout.strip().split("\n"):
-            if line:
-                # Parse "alias.name value" format
-                match = re.match(r"alias\.(.+?)\s+(.+)", line)
-                if match:
-                    alias_name = match.group(1)
-                    alias_value = match.group(2)
-
-                    # Use custom description if available, otherwise show the command
-                    if alias_name in alias_descriptions:
-                        description = alias_descriptions[alias_name]
-                    elif alias_value.startswith("!"):
-                        # For shell commands, show a cleaned up version
-                        command = alias_value[1:]
-                        if len(command) > 80:
-                            description = f"Shell: {command[:77]}..."
-                        else:
-                            description = f"Shell: {command}"
-                    else:
-                        # For git sub-commands, show as-is but truncate if too long
-                        if len(alias_value) > 80:
-                            description = alias_value[:77] + "..."
-                        else:
-                            description = alias_value
-
-                    aliases.append((alias_name, description))
-
-        return sorted(aliases)
     except subprocess.CalledProcessError:
         return []
+
+    aliases = []
+    for line in result.stdout.strip().split("\n"):
+        if not line:
+            continue
+        # Parse "alias.name value" format
+        match = re.match(r"alias\.(.+?)\s+(.+)", line)
+        if not match:
+            continue
+        alias_name = match.group(1)
+        alias_value = match.group(2)
+
+        if alias_name in alias_descriptions:
+            category, description = alias_descriptions[alias_name]
+        elif alias_value.startswith("!"):
+            # Shell command: show a cleaned-up, truncated preview
+            command = alias_value[1:]
+            description = (
+                f"Shell: {command[:77]}..." if len(command) > 80 else f"Shell: {command}"
+            )
+            category = "Other"
+        else:
+            # Git sub-command: show as-is, truncated if long
+            description = (
+                alias_value[:77] + "..." if len(alias_value) > 80 else alias_value
+            )
+            category = "Other"
+
+        aliases.append((alias_name, description, category))
+
+    order = {cat: i for i, cat in enumerate(CATEGORY_ORDER)}
+    aliases.sort(key=lambda a: (order.get(a[2], len(order)), a[0]))
+    return aliases
+
+
+# Issue labels -> branch-name prefix, per the git-policies branch conventions.
+LABEL_PREFIX = {
+    "bug": "fix",
+    "documentation": "docs",
+    "docs": "docs",
+    "enhancement": "feat",
+    "feature": "feat",
+}
+
+
+def _have(cmd):
+    """Return True if an executable is on PATH."""
+    return shutil.which(cmd) is not None
+
+
+def _slugify(text, max_length=50):
+    """Turn an issue title into a kebab-case branch slug."""
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    if len(slug) > max_length:
+        slug = slug[:max_length].rstrip("-")
+    return slug or "issue"
+
+
+def start_branch(issue):
+    """Create a conventionally named branch for a GitHub issue.
+
+    Reads the issue's title and labels via the GitHub CLI, derives a branch name
+    (fix/, feat/, or docs/ prefix + slugified title), and creates it from the
+    up-to-date default branch. Switches to it on success.
+    """
+    console = Console()
+
+    number = str(issue).lstrip("#") if issue is not None else ""
+    if not number.isdigit():
+        console.print("[red]Usage: git start <issue-number>[/red]")
+        return 1
+
+    if not _have("gh"):
+        console.print("[red]Error: the GitHub CLI ('gh') is required for git start[/red]")
+        return 1
+
+    if run_git("rev-parse", "--git-dir").returncode != 0:
+        console.print("[red]Error: Not in a git repository[/red]")
+        return 1
+
+    view = subprocess.run(
+        ["gh", "issue", "view", number, "--json", "title,labels"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if view.returncode != 0:
+        console.print(f"[red]Error: could not load issue #{number}[/red]")
+        console.print(f"[red]{view.stderr.strip()}[/red]")
+        return 1
+
+    try:
+        data = json.loads(view.stdout)
+    except json.JSONDecodeError:
+        console.print(f"[red]Error: unexpected response for issue #{number}[/red]")
+        return 1
+
+    title = (data.get("title") or "").strip()
+    labels = [str(label.get("name", "")).lower() for label in data.get("labels", [])]
+    prefix = next((LABEL_PREFIX[label] for label in labels if label in LABEL_PREFIX), "feat")
+    branch = f"{prefix}/{_slugify(title)}"
+
+    console.print(f"[cyan]Issue #{number}:[/cyan] {title or '(no title)'}")
+
+    # Base the new branch on an up-to-date default branch when we can reach it.
+    default_branch = _default_branch()
+    console.print("[cyan]Fetching origin...[/cyan]")
+    run_git("fetch", "origin")
+    base = f"origin/{default_branch}"
+    if run_git("rev-parse", "--verify", "--quiet", base).returncode != 0:
+        base = "HEAD"
+
+    if run_git("rev-parse", "--verify", "--quiet", branch).returncode == 0:
+        console.print(f"[yellow]Branch '{branch}' already exists; switching to it.[/yellow]")
+        switch = run_git("switch", branch)
+    else:
+        console.print(f"[green]Creating branch[/green] [bold]{branch}[/bold] [green]from {base}[/green]")
+        switch = run_git("switch", "-c", branch, base)
+
+    if switch.returncode != 0:
+        console.print("[red]Error: failed to create or switch to the branch[/red]")
+        console.print(f"[red]{switch.stderr.strip()}[/red]")
+        return 1
+
+    console.print(
+        f"[green]OK On {branch}.[/green] "
+        f"[dim]Commit your work, then: gh pr create --assignee J-MaFf --body \"Fixes #{number}\"[/dim]"
+    )
+    return 0
 
 
 def switch_to_main():
@@ -459,27 +600,189 @@ def update_all_main():
     return 0 if failed_count == 0 else 1
 
 
-def print_aliases():
+def _print_aliases_table(aliases):
+    """Render the static, category-grouped alias table (non-interactive fallback)."""
     console = Console()
     table = Table(title="Git Aliases", show_lines=True, header_style="bold yellow")
-
+    table.add_column("Category", justify="left", style="green", no_wrap=True)
     table.add_column("Alias", justify="left", style="cyan", no_wrap=True)
     table.add_column("Command/Description", justify="left", style="magenta")
 
-    aliases = get_git_aliases()
-
-    for alias, description in aliases:
-        table.add_row(alias, description)
+    last_category = None
+    for name, description, category in aliases:
+        if last_category is not None and category != last_category:
+            table.add_section()
+        # Label the category only on the first row of each group to reduce noise.
+        table.add_row(category if category != last_category else "", name, description)
+        last_category = category
 
     console.print(table)
-    console.print(f"\n[dim]Found {len(aliases)} git aliases[/dim]")
+    console.print(
+        f"\n[dim]Found {len(aliases)} git aliases  -  "
+        f"run 'git alias' in a terminal for the interactive browser[/dim]"
+    )
+
+
+def _build_alias_app(aliases):
+    """Build the interactive Textual alias-browser App.
+
+    Returns an App instance, or None if Textual is not installed. Kept separate
+    from _launch_alias_browser so the UI can be exercised headlessly in tests
+    (via App.run_test()).
+    """
+    try:
+        from textual.app import App
+        from textual.widgets import DataTable, Footer, Header, Input, Tab, Tabs
+    except ImportError:
+        return None
+
+    # Group aliases by category, preserving CATEGORY_ORDER and dropping empties.
+    grouped = {}
+    for name, description, category in aliases:
+        grouped.setdefault(category, []).append((name, description))
+    present = [c for c in CATEGORY_ORDER if c in grouped]
+    tabs_order = ["All"] + present  # "All" is the first (default) tab
+
+    class AliasBrowser(App):
+        CSS = """
+        Input { margin: 1 1 0 1; }
+        DataTable { height: 1fr; margin: 0 1; }
+        """
+        BINDINGS = [
+            ("ctrl+right", "next_tab", "Next category"),
+            ("ctrl+left", "prev_tab", "Prev category"),
+            ("escape", "clear_search", "Clear search"),
+            ("q", "quit", "Quit"),
+        ]
+        # Class-level default so handlers that may fire during mount (e.g. Tabs
+        # posting TabActivated before on_mount runs) never hit an unset attribute.
+        _query = ""
+
+        def compose(self):
+            yield Header()
+            yield Input(
+                placeholder="Search aliases by name or description...", id="search"
+            )
+            yield Tabs(
+                *[Tab(name, id=f"cat-{i}") for i, name in enumerate(tabs_order)],
+                id="tabs",
+            )
+            yield DataTable(id="table", zebra_stripes=True)
+            yield Footer()
+
+        def on_mount(self):
+            self.title = "Git Aliases"
+            self._query = ""
+            table = self.query_one("#table", DataTable)
+            table.cursor_type = "row"
+            table.add_columns("Alias", "Category", "Description")
+            self.query_one(Tabs).focus()
+            self._refresh()
+
+        def _active_index(self):
+            active = self.query_one(Tabs).active
+            if active and active.startswith("cat-"):
+                try:
+                    return int(active.split("-")[1])
+                except ValueError:
+                    pass
+            return 0
+
+        def _refresh(self):
+            table = self.query_one("#table", DataTable)
+            # Columns are added in on_mount; if a tab/input event arrives first
+            # (mount-order race), there is nothing to populate yet -- skip.
+            if not table.columns:
+                return
+            table.clear()
+            idx = self._active_index()
+            selected = tabs_order[idx] if idx < len(tabs_order) else "All"
+            needle = self._query.lower()
+            shown = 0
+            for category in present:
+                if selected != "All" and category != selected:
+                    continue
+                for name, description in grouped.get(category, []):
+                    if (
+                        needle
+                        and needle not in name.lower()
+                        and needle not in description.lower()
+                    ):
+                        continue
+                    table.add_row(name, category, description)
+                    shown += 1
+            self.sub_title = (
+                f"{shown} shown  -  ctrl+left/right: categories, type to search, q: quit"
+            )
+
+        def _shift_tab(self, delta):
+            tabs = self.query_one(Tabs)
+            idx = (self._active_index() + delta) % len(tabs_order)
+            tabs.active = f"cat-{idx}"
+
+        def action_next_tab(self):
+            self._shift_tab(1)
+
+        def action_prev_tab(self):
+            self._shift_tab(-1)
+
+        def action_clear_search(self):
+            search = self.query_one("#search", Input)
+            search.value = ""
+            self._query = ""
+            self._refresh()
+
+        def on_input_changed(self, event):
+            if event.input.id == "search":
+                self._query = event.value
+                self._refresh()
+
+        def on_tabs_tab_activated(self, event):
+            self._refresh()
+
+    return AliasBrowser()
+
+
+def _launch_alias_browser(aliases):
+    """Launch the interactive Textual alias browser.
+
+    Returns True if the browser ran, False if Textual is unavailable or the UI
+    could not start -- the caller then prints the static table instead.
+    """
+    try:
+        app = _build_alias_app(aliases)
+        if app is None:
+            return False
+        app.run()
+        return True
+    except Exception:
+        # An incompatible terminal (or any UI error) falls back to the static
+        # table rather than leaving the user with no output.
+        return False
+
+
+def print_aliases(force_plain=False):
+    """Show git aliases.
+
+    In an interactive terminal with Textual installed, this launches the
+    categorized, searchable browser. When output is piped, in CI, when --plain
+    is passed, or when Textual is unavailable, it falls back to a static grouped
+    table so 'git alias | grep ...' and scripts keep working.
+    """
+    aliases = get_git_aliases()
+    if not force_plain and sys.stdout.isatty() and _launch_alias_browser(aliases):
+        return
+    _print_aliases_table(aliases)
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         function_name = sys.argv[1]
         if function_name == "print_aliases":
-            print_aliases()
+            print_aliases(force_plain="--plain" in sys.argv)
+        elif function_name == "start":
+            issue_arg = sys.argv[2] if len(sys.argv) > 2 else None
+            sys.exit(start_branch(issue_arg))
         elif function_name == "cleanup":
             # Check for --force flag
             force = "--force" in sys.argv or "-f" in sys.argv
