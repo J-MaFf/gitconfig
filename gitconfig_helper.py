@@ -654,6 +654,9 @@ def _build_alias_app(aliases):
             ("escape", "clear_search", "Clear search"),
             ("q", "quit", "Quit"),
         ]
+        # Class-level default so handlers that may fire during mount (e.g. Tabs
+        # posting TabActivated before on_mount runs) never hit an unset attribute.
+        _query = ""
 
         def compose(self):
             yield Header()
@@ -687,6 +690,10 @@ def _build_alias_app(aliases):
 
         def _refresh(self):
             table = self.query_one("#table", DataTable)
+            # Columns are added in on_mount; if a tab/input event arrives first
+            # (mount-order race), there is nothing to populate yet -- skip.
+            if not table.columns:
+                return
             table.clear()
             idx = self._active_index()
             selected = tabs_order[idx] if idx < len(tabs_order) else "All"
