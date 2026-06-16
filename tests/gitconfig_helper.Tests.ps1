@@ -497,6 +497,16 @@ import gitconfig_helper
             $script:src | Should -Match '"--out" in sys\.argv'
         }
 
+        It "Copies the selection to the clipboard when typed (no --out)" {
+            $script:src | Should -Match "def _copy_to_clipboard"
+            # Per-platform clipboard tools.
+            $script:src | Should -Match "pbcopy"
+            $script:src | Should -Match '"clip"'
+            $script:src | Should -Match "xclip"
+            # The typed-`git alias` path copies the choice rather than just printing it.
+            $script:src | Should -Match "_copy_to_clipboard\(choice\)"
+        }
+
         It "Stays silent in selection mode (no static table dumped to the tty)" {
             # --out is the keybinding path; with no TTY the browser is skipped and
             # nothing should be printed (so the shell inserts an empty selection).

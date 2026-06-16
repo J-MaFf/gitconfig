@@ -94,6 +94,11 @@ git alias --plain  # Static grouped table (good for piping: git alias --plain | 
 In the browser: type to search, up/down to move, Enter/click to select, Ctrl+Left/Right
 to switch category, Esc to clear the search (or quit), Ctrl+C to quit.
 
+When you open the browser by **typing `git alias`**, selecting an alias copies `git <alias>`
+to your clipboard (paste with Cmd/Ctrl-V) — a typed `git alias` runs as a subprocess and
+can't type at your prompt. To have it inserted at the prompt directly, open the browser
+with the **`Ctrl-G`** keybinding instead.
+
 **Insert an alias at your prompt — `Ctrl-G`**
 
 The installer adds a `Ctrl-G` keybinding to your shell (bash/zsh) and PowerShell profile.

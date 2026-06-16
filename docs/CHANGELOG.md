@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `git alias` browser — selecting an alias when launched by **typing `git alias`** now
+  copies `git <alias>` to the clipboard (`pbcopy` / `clip` / `wl-copy` / `xclip` / `xsel`,
+  with a printed fallback), so the command is one paste away. A typed `git alias` runs as
+  a subprocess and can't insert at the prompt; the `Ctrl-G` keybinding still does direct
+  insertion ([#108](https://github.com/J-MaFf/gitconfig/issues/108))
 - `git alias` browser — **row navigation and prompt insertion**. Move through the
   results with up/down; press Enter (or click a row) to pick an alias. A `Ctrl-G` shell
   keybinding (bash `bind -x`, zsh ZLE widget, PowerShell PSReadLine) opens the browser
