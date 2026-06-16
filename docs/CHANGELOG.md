@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `.gitconfig.template` — moved the `[include] path = ~/.gitconfig.local` directive to the
+  **bottom** of the template. Git applies includes inline and the last declaration of a key
+  wins, so with the include at the top the template's hardcoded literal `signingkey` silently
+  overrode whatever the local config set (e.g. the file-based key on Linux). The include now
+  runs last, so `~/.gitconfig.local` overrides take effect
+  ([#112](https://github.com/J-MaFf/gitconfig/issues/112))
+
 ### Added
 
 - `git alias` browser — when the interactive browser can't launch it no longer falls back
