@@ -189,7 +189,7 @@ def cleanup_branches(force=False):
 
 # Category ordering for the alias table and the interactive browser's tabs.
 # Aliases without an ALIAS_METADATA entry fall into "Other".
-CATEGORY_ORDER = ["Inspect", "Commit", "Branch & Sync", "GitHub", "Maintenance", "Other"]
+CATEGORY_ORDER = ["Inspect", "Commit", "Branch & Sync", "GitHub", "Maintenance", "Claude Skills", "Other"]
 
 # name -> (category, description). Drives both the static grouped table and the
 # interactive browser. Keep each name and its description on a single source
@@ -223,8 +223,9 @@ ALIAS_METADATA = {
     # Maintenance
     "localconfig": ("Maintenance", "Edit machine-specific git config (~/.gitconfig.local)"),
     "selfupdate": ("Maintenance", "Pull this repo and reinstall ~/.gitconfig from the template"),
-    "skill-sync": ("Maintenance", "Sync the claude-skills repo (~/.claude/skills): pull --ff-only"),
-    "skill-publish": ("Maintenance", "Publish new/edited skills (~/.claude/skills) via a PR with auto-merge"),
+    # Claude Skills
+    "skill-sync": ("Claude Skills", "Sync the claude-skills repo (~/.claude/skills): pull --ff-only"),
+    "skill-publish": ("Claude Skills", "Publish new/edited skills (~/.claude/skills) via a PR with auto-merge"),
 }
 
 

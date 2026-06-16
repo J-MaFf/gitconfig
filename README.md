@@ -135,6 +135,11 @@ git prs            # Show the status of your pull requests
 ```bash
 git localconfig          # Edit machine-specific git config (~/.gitconfig.local)
 git selfupdate           # Pull this repo and reinstall ~/.gitconfig from the template
+```
+
+**Claude Skills**
+
+```bash
 git skill-sync           # Sync the claude-skills repo (~/.claude/skills) with pull --ff-only
 git skill-publish        # Publish new/edited skills via a PR (prompts for a message, auto-merges)
 ```
