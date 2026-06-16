@@ -2,10 +2,6 @@
 # This file is used to generate ~/.gitconfig during setup
 # Placeholders: {{REPO_PATH}}, {{HOME_DIR}}
 
-# Include machine-specific configuration (local paths, safe directories, etc.)
-[include]
-	path = ~/.gitconfig.local
-
 # User identification - Customize for your own use
 [user]
 	name = Joey Maffiola
@@ -89,3 +85,10 @@
 
 [core]
 	editor = code --wait
+
+# Include machine-specific configuration (local paths, safe directories, etc.).
+# Kept LAST so values in ~/.gitconfig.local override the template's defaults
+# above (e.g. a file-based signingkey): git applies includes inline and the
+# last declaration of a key wins.
+[include]
+	path = ~/.gitconfig.local
