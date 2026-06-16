@@ -77,6 +77,14 @@ CONFIG_CONTENT="# Machine-Specific Git Configuration (macOS)
 	excludesfile = $HOME_DIR/.gitignore_global
 "
 
+# A signing key may already be configured in git even without 1Password — e.g.
+# the template ships a literal signingkey with commit.gpgsign=true, or a user
+# points user.signingkey at a file-based key. In all of those cases signing is
+# active, so allowedSignersFile must be written or git reports "No signature"
+# on verification. Mirror the Linux behavior: whenever signing is enabled, write
+# the [gpg "ssh"] allowedSignersFile block.
+EXISTING_SIGNING_KEY="$(git config --get user.signingkey 2>/dev/null || true)"
+
 SIGNING_ENABLED=false
 if [ -n "$OP_SSH_SIGN" ]; then
     echo "[INFO] Detected 1Password SSH signing helper: $OP_SSH_SIGN"
@@ -93,8 +101,24 @@ if [ -n "$OP_SSH_SIGN" ]; then
 [commit]
 	gpgsign = true
 "
+elif [ -n "$EXISTING_SIGNING_KEY" ]; then
+    # op-ssh-sign isn't installed, but a signing key is already configured
+    # (file-based key or a literal public key). Still write allowedSignersFile
+    # so signatures verify locally; omit the 1Password program line.
+    echo "[INFO] op-ssh-sign not found, but a signing key is configured:"
+    echo "       $EXISTING_SIGNING_KEY"
+    echo "       Writing allowedSignersFile so signatures verify locally."
+    SIGNING_ENABLED=true
+    CONFIG_CONTENT+="
+[gpg]
+	format = ssh
+
+[gpg \"ssh\"]
+	# Lets git verify SSH commit signatures locally (git log --show-signature)
+	allowedSignersFile = $HOME_DIR/.ssh/allowed_signers
+"
 else
-    echo "[INFO] op-ssh-sign not found — skipping SSH signing config."
+    echo "[INFO] op-ssh-sign not found and no signing key configured — skipping signing config."
     echo "       Install 1Password CLI via Homebrew to enable commit signing:"
     echo "         brew install 1password-cli"
     CONFIG_CONTENT+="

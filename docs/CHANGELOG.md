@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `scripts/mac version/initialize-local-config.sh` — always write `[gpg "ssh"]
+  allowedSignersFile` when commit signing is enabled, not only when 1Password's
+  `op-ssh-sign` is detected. The template ships a literal `signingkey` with
+  `commit.gpgsign = true`, so on a macOS box without 1Password the script wrote no
+  `allowedSignersFile` and `git log --show-signature` reported "No signature" for
+  perfectly valid signatures. It now mirrors the Linux script: when `op-ssh-sign` is
+  absent but a `user.signingkey` is configured (literal key or a file-based key), it
+  writes the `allowedSignersFile` block and registers the identity via
+  `update_allowed_signers`. With no key and no 1Password it still skips, as before
+  ([#116](https://github.com/J-MaFf/gitconfig/issues/116))
+
 - `scripts/shared/update-gitconfig.sh` — fixed every log line being written **twice**.
   `log_message` piped through `tee -a "$LOG_FILE"` while the entire main block was already
   redirected with `>> "$LOG_FILE" 2>&1`, so each line landed in the log once via `tee` and
