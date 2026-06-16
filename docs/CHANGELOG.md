@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `scripts/shared/update-gitconfig.sh` — fixed every log line being written **twice**.
+  `log_message` piped through `tee -a "$LOG_FILE"` while the entire main block was already
+  redirected with `>> "$LOG_FILE" 2>&1`, so each line landed in the log once via `tee` and
+  again via the block redirect. The script runs headless under launchd/cron (no terminal),
+  so `log_message` now uses a plain `echo` and the block redirect is the single source of
+  truth ([#114](https://github.com/J-MaFf/gitconfig/issues/114))
+
 - `.gitconfig.template` — normalized indentation to tabs throughout. The `[push]` and
   `[alias]` sections used four-space indentation while every other section used tabs; git
   accepts both but the inconsistency is fragile for any future formatter/validator. All
