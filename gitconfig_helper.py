@@ -790,6 +790,35 @@ def _build_alias_app(aliases):
     return AliasBrowser()
 
 
+def _copy_to_clipboard(text):
+    """Copy text to the system clipboard.
+
+    Returns True on success, False if no clipboard tool is available or the copy
+    failed. Tries the native tool per platform: pbcopy (macOS), clip (Windows),
+    and wl-copy / xclip / xsel (Linux/Wayland/X11).
+    """
+    if sys.platform == "darwin":
+        candidates = [["pbcopy"]]
+    elif os.name == "nt":
+        candidates = [["clip"]]
+    else:
+        candidates = [
+            ["wl-copy"],
+            ["xclip", "-selection", "clipboard"],
+            ["xsel", "--clipboard", "--input"],
+        ]
+    for cmd in candidates:
+        if not _have(cmd[0]):
+            continue
+        try:
+            result = subprocess.run(cmd, input=text, text=True, capture_output=True)
+            if result.returncode == 0:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _launch_alias_browser(aliases, select_out=None):
     """Launch the interactive Textual alias browser.
 
@@ -797,8 +826,10 @@ def _launch_alias_browser(aliases, select_out=None):
     could not start -- the caller then prints the static table instead.
 
     On selection the app returns the chosen command (e.g. "git pr"). When
-    select_out is a path, that command is written there (for the shell keybinding
-    to insert at the prompt); otherwise it is printed to stdout.
+    select_out is a path, that command is written there (for the Ctrl-G shell
+    keybinding to insert at the prompt). Otherwise -- i.e. when the browser was
+    launched by typing `git alias` -- the subprocess can't reach the prompt, so
+    the command is copied to the clipboard (with a printed fallback).
     """
     try:
         app = _build_alias_app(aliases)
@@ -813,7 +844,17 @@ def _launch_alias_browser(aliases, select_out=None):
                 except OSError:
                     pass
             else:
-                print(choice)
+                console = Console()
+                if _copy_to_clipboard(choice):
+                    console.print(
+                        f"[green]Copied to clipboard:[/green] [bold]{choice}[/bold]  "
+                        f"[dim](paste with Cmd/Ctrl-V; Ctrl-G inserts at the prompt)[/dim]"
+                    )
+                else:
+                    console.print(
+                        f"[cyan]{choice}[/cyan]  "
+                        f"[dim](copy it, or use Ctrl-G to insert at the prompt)[/dim]"
+                    )
         return True
     except Exception:
         # An incompatible terminal (or any UI error) falls back to the static
@@ -826,7 +867,8 @@ def print_aliases(force_plain=False, select_out=None):
 
     In an interactive terminal with Textual installed, this launches the
     categorized, searchable browser; selecting an alias (Enter/click) yields
-    "git <alias>", written to select_out (for the shell keybinding) or printed.
+    "git <alias>", written to select_out (for the Ctrl-G keybinding) or copied
+    to the clipboard when launched by typing `git alias`.
     When output is piped, in CI, with --plain, or without Textual it falls back
     to a static grouped table so 'git alias | grep ...' and scripts keep working
     -- except in selection mode (select_out set), where it stays silent so the
