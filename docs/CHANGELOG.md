@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The auto-update job (`git selfupdate` and the login-triggered run) now also
+  ensures the optional `textual` dependency is installed — best-effort and only
+  when missing — so existing machines pick up the interactive `git alias` browser
+  on their next update without a manual `pip install`
+  ([#102](https://github.com/J-MaFf/gitconfig/issues/102))
 - The static `git alias` table is now grouped by category (Inspect, Commit, Branch &
   Sync, GitHub, Maintenance) with a dedicated Category column, and curated descriptions
   for every built-in alias ([#102](https://github.com/J-MaFf/gitconfig/issues/102))
