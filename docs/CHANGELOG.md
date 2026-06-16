@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cross-platform test coverage for the shared scripts. Until now every test was Pester
+  (Windows-only), leaving `scripts/shared/functions.sh` and `gitconfig_helper.py` untested
+  on the primary dev platforms. Added `tests/shared/functions.bats` (bats-core) covering
+  `backup_file`, `create_symlink`, `update_allowed_signers`, `generate_gitconfig`, and the
+  git-alias widget enable/disable, plus `tests/shared/test_gitconfig_helper.py` (pytest)
+  covering `_slugify`, `LABEL_PREFIX` selection, `_have`, `_default_branch`, and
+  `get_git_aliases` parsing. See `tests/shared/README.md` to run them
+  ([#115](https://github.com/J-MaFf/gitconfig/issues/115))
+
 - `git alias` browser — when the interactive browser can't launch it no longer falls back
   to the static table **silently**: it prints a one-line reason to stderr (only when stderr
   is a TTY, so pipes/CI stay clean) — e.g. `textual` not installed, stdout not a TTY, or a
