@@ -70,6 +70,12 @@ echo "-----"
 backup_file "$HOME_DIR/.gitconfig.local" && ((REMOVED++)) || true
 echo ""
 
+# STEP 2b: Remove the git-alias browser keybinding from shell rc files
+echo "[STEP 2b] Removing git-alias browser keybinding..."
+echo "-----"
+disable_git_alias_widget "$HOME_DIR"
+echo ""
+
 # STEP 3: Remove cron job (Linux-specific)
 echo "[STEP 3] Removing cron job..."
 echo "-----"

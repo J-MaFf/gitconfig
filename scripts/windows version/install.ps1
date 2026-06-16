@@ -196,6 +196,30 @@ else {
 }
 Write-Host ""
 
+# STEP 6b: Enable the interactive git-alias browser keybinding (Ctrl-G)
+Write-Host "[STEP 6b] Enabling git-alias browser keybinding..." -ForegroundColor Cyan
+Write-Host "-----" -ForegroundColor Cyan
+try {
+    $widgetPath = Join-Path $repoRoot "scripts\shell\git-alias-widget.ps1"
+    $beginMarker = "# >>> gitconfig git-alias browser (Ctrl-G) >>>"
+    $endMarker = "# <<< gitconfig git-alias browser <<<"
+    $profilePath = $PROFILE.CurrentUserAllHosts
+    $profileDir = Split-Path -Parent $profilePath
+    if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force | Out-Null }
+    $profileText = if (Test-Path $profilePath) { Get-Content -Raw $profilePath } else { "" }
+    if ($profileText -and $profileText.Contains($beginMarker)) {
+        Write-Host "[OK] git-alias keybinding already enabled in profile" -ForegroundColor Green
+    }
+    else {
+        Add-Content -Path $profilePath -Value "`r`n$beginMarker`r`n. `"$widgetPath`"`r`n$endMarker"
+        Write-Host "[OK] Enabled git-alias keybinding (Ctrl-G) in $profilePath" -ForegroundColor Green
+    }
+}
+catch {
+    Write-Host "[WARN] Could not enable git-alias keybinding: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+Write-Host ""
+
 # STEP 7: Verify setup
 Write-Host "[STEP 7] Verifying setup..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan

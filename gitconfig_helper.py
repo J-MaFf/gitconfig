@@ -650,14 +650,17 @@ def _build_alias_app(aliases):
         DataTable { height: 1fr; margin: 0 1; }
         """
         BINDINGS = [
+            ("enter", "select", "Insert at prompt"),
+            ("up", "cursor_up", "Up"),
+            ("down", "cursor_down", "Down"),
             ("ctrl+right", "next_tab", "Next category"),
             ("ctrl+left", "prev_tab", "Prev category"),
-            ("escape", "clear_search", "Clear search"),
-            ("q", "quit", "Quit"),
+            ("escape", "clear_or_quit", "Clear / quit"),
         ]
-        # Class-level default so handlers that may fire during mount (e.g. Tabs
+        # Class-level defaults so handlers that may fire during mount (e.g. Tabs
         # posting TabActivated before on_mount runs) never hit an unset attribute.
         _query = ""
+        _done = False
 
         def compose(self):
             yield Header()
@@ -677,7 +680,9 @@ def _build_alias_app(aliases):
             table = self.query_one("#table", DataTable)
             table.cursor_type = "row"
             table.add_columns("Alias", "Category", "Description")
-            self.query_one(Tabs).focus()
+            # Focus the search box so typing filters immediately; up/down still
+            # move the table's row cursor via the app-level bindings below.
+            self.query_one("#search", Input).focus()
             self._refresh()
 
         def _active_index(self):
@@ -713,7 +718,8 @@ def _build_alias_app(aliases):
                     table.add_row(name, category, description)
                     shown += 1
             self.sub_title = (
-                f"{shown} shown  -  ctrl+left/right: categories, type to search, q: quit"
+                f"{shown} shown  -  type: search  up/down: move  enter: insert  "
+                f"ctrl+left/right: category  esc: clear/quit"
             )
 
         def _shift_tab(self, delta):
@@ -727,16 +733,56 @@ def _build_alias_app(aliases):
         def action_prev_tab(self):
             self._shift_tab(-1)
 
-        def action_clear_search(self):
+        def action_cursor_down(self):
+            self.query_one("#table", DataTable).action_cursor_down()
+
+        def action_cursor_up(self):
+            self.query_one("#table", DataTable).action_cursor_up()
+
+        def action_clear_or_quit(self):
+            # Esc clears an active search; on an empty search it exits (no pick).
             search = self.query_one("#search", Input)
-            search.value = ""
-            self._query = ""
-            self._refresh()
+            if search.value:
+                search.value = ""
+                self._query = ""
+                self._refresh()
+            else:
+                self.exit(None)
+
+        def _selected_command(self):
+            table = self.query_one("#table", DataTable)
+            if table.row_count == 0:
+                return None
+            try:
+                row = table.get_row_at(table.cursor_row)
+            except Exception:
+                return None
+            # Row is [alias, category, description]; emit a runnable command.
+            return f"git {row[0]}" if row else None
+
+        def action_select(self):
+            self._choose()
+
+        def _choose(self):
+            if self._done:
+                return
+            command = self._selected_command()
+            if command:
+                self._done = True
+                self.exit(command)
 
         def on_input_changed(self, event):
             if event.input.id == "search":
                 self._query = event.value
                 self._refresh()
+
+        def on_input_submitted(self, event):
+            # Enter while the search box has focus selects the highlighted row.
+            self._choose()
+
+        def on_data_table_row_selected(self, event):
+            # Enter on the focused table, or a mouse click on a row.
+            self._choose()
 
         def on_tabs_tab_activated(self, event):
             self._refresh()
@@ -744,17 +790,30 @@ def _build_alias_app(aliases):
     return AliasBrowser()
 
 
-def _launch_alias_browser(aliases):
+def _launch_alias_browser(aliases, select_out=None):
     """Launch the interactive Textual alias browser.
 
     Returns True if the browser ran, False if Textual is unavailable or the UI
     could not start -- the caller then prints the static table instead.
+
+    On selection the app returns the chosen command (e.g. "git pr"). When
+    select_out is a path, that command is written there (for the shell keybinding
+    to insert at the prompt); otherwise it is printed to stdout.
     """
     try:
         app = _build_alias_app(aliases)
         if app is None:
             return False
-        app.run()
+        choice = app.run()
+        if choice:
+            if select_out:
+                try:
+                    with open(select_out, "w", encoding="utf-8") as handle:
+                        handle.write(choice)
+                except OSError:
+                    pass
+            else:
+                print(choice)
         return True
     except Exception:
         # An incompatible terminal (or any UI error) falls back to the static
@@ -762,25 +821,36 @@ def _launch_alias_browser(aliases):
         return False
 
 
-def print_aliases(force_plain=False):
+def print_aliases(force_plain=False, select_out=None):
     """Show git aliases.
 
     In an interactive terminal with Textual installed, this launches the
-    categorized, searchable browser. When output is piped, in CI, when --plain
-    is passed, or when Textual is unavailable, it falls back to a static grouped
-    table so 'git alias | grep ...' and scripts keep working.
+    categorized, searchable browser; selecting an alias (Enter/click) yields
+    "git <alias>", written to select_out (for the shell keybinding) or printed.
+    When output is piped, in CI, with --plain, or without Textual it falls back
+    to a static grouped table so 'git alias | grep ...' and scripts keep working
+    -- except in selection mode (select_out set), where it stays silent so the
+    keybinding inserts nothing.
     """
     aliases = get_git_aliases()
-    if not force_plain and sys.stdout.isatty() and _launch_alias_browser(aliases):
+    if not force_plain and sys.stdout.isatty() and _launch_alias_browser(
+        aliases, select_out=select_out
+    ):
         return
-    _print_aliases_table(aliases)
+    if select_out is None:
+        _print_aliases_table(aliases)
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         function_name = sys.argv[1]
         if function_name == "print_aliases":
-            print_aliases(force_plain="--plain" in sys.argv)
+            select_out = None
+            if "--out" in sys.argv:
+                idx = sys.argv.index("--out")
+                if idx + 1 < len(sys.argv):
+                    select_out = sys.argv[idx + 1]
+            print_aliases(force_plain="--plain" in sys.argv, select_out=select_out)
         elif function_name == "start":
             issue_arg = sys.argv[2] if len(sys.argv) > 2 else None
             sys.exit(start_branch(issue_arg))

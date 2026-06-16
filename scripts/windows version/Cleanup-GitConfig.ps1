@@ -131,6 +131,34 @@ else {
 
 Write-Host ""
 
+# STEP 2b: Remove the git-alias browser keybinding from the PowerShell profile
+Write-Host "[STEP 2b] Removing git-alias browser keybinding..." -ForegroundColor Cyan
+Write-Host "-----" -ForegroundColor Cyan
+try {
+    $beginMarker = "# >>> gitconfig git-alias browser (Ctrl-G) >>>"
+    $endMarker = "# <<< gitconfig git-alias browser <<<"
+    $profilePath = $PROFILE.CurrentUserAllHosts
+    if ((Test-Path $profilePath) -and ((Get-Content -Raw $profilePath).Contains($beginMarker))) {
+        $kept = New-Object System.Collections.Generic.List[string]
+        $skip = $false
+        foreach ($line in Get-Content $profilePath) {
+            if ($line -eq $beginMarker) { $skip = $true; continue }
+            if ($skip -and $line -eq $endMarker) { $skip = $false; continue }
+            if (-not $skip) { $kept.Add($line) }
+        }
+        Set-Content -Path $profilePath -Value $kept
+        Write-Host "[OK] Removed git-alias keybinding from profile" -ForegroundColor Green
+        $removed++
+    }
+    else {
+        Write-Host "[SKIP] git-alias keybinding not present" -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host "[WARN] Could not remove git-alias keybinding: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+Write-Host ""
+
 # STEP 3: Remove Scheduled Task
 Write-Host "[STEP 3] Removing scheduled task..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan

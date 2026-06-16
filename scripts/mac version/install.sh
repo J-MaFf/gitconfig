@@ -216,6 +216,12 @@ else
 fi
 echo ""
 
+# STEP 6b: Enable the interactive git-alias browser keybinding (Ctrl-G)
+echo "[STEP 6b] Enabling git-alias browser keybinding..."
+echo "-----"
+enable_git_alias_widget "$REPO_ROOT" "$HOME_DIR"
+echo ""
+
 # STEP 7: Verify setup
 echo "[STEP 7] Verifying setup..."
 echo "-----"

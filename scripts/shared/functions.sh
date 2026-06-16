@@ -202,3 +202,57 @@ configure_global_gitignore() {
         echo "[WARN] .gitignore_global not found"
     fi
 }
+
+# Markers delimiting the git-alias browser keybinding block in a shell rc file.
+# Kept in one place so enable/disable stay in sync.
+GIT_ALIAS_WIDGET_BEGIN="# >>> gitconfig git-alias browser (Ctrl-G) >>>"
+GIT_ALIAS_WIDGET_END="# <<< gitconfig git-alias browser <<<"
+
+# Source the interactive git-alias browser keybinding (Ctrl-G) from the user's
+# shell rc files (~/.zshrc, ~/.bashrc). Idempotent: a guarded marker block is
+# added once per rc file. A non-existent rc is only created when it matches the
+# login shell, so we never spawn rc files for shells the user does not use.
+# Args: repo_root, home_dir
+enable_git_alias_widget() {
+    local repo_root="$1" home_dir="$2"
+    local current_shell; current_shell="$(basename "${SHELL:-}")"
+    local rc widget kind
+    for kind in zsh bash; do
+        rc="$home_dir/.${kind}rc"
+        widget="$repo_root/scripts/shell/git-alias-widget.$kind"
+        if [ ! -f "$rc" ]; then
+            [ "$current_shell" = "$kind" ] || continue
+            : > "$rc"
+        fi
+        if grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$rc" 2>/dev/null; then
+            echo "[OK] git-alias keybinding already enabled in $rc"
+            continue
+        fi
+        {
+            echo ""
+            echo "$GIT_ALIAS_WIDGET_BEGIN"
+            echo "[ -f \"$widget\" ] && source \"$widget\""
+            echo "$GIT_ALIAS_WIDGET_END"
+        } >> "$rc"
+        echo "[OK] Enabled git-alias keybinding (Ctrl-G) in $rc"
+    done
+}
+
+# Remove the git-alias browser keybinding block from the user's shell rc files.
+# Args: home_dir
+disable_git_alias_widget() {
+    local home_dir="$1"
+    local rc tmp
+    for rc in "$home_dir/.zshrc" "$home_dir/.bashrc"; do
+        [ -f "$rc" ] || continue
+        grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$rc" 2>/dev/null || continue
+        tmp="$(mktemp)" || continue
+        awk -v b="$GIT_ALIAS_WIDGET_BEGIN" -v e="$GIT_ALIAS_WIDGET_END" '
+            $0 == b { skip = 1 }
+            skip && $0 == e { skip = 0; next }
+            !skip { print }
+        ' "$rc" > "$tmp" && cat "$tmp" > "$rc"
+        rm -f "$tmp"
+        echo "[OK] Disabled git-alias keybinding in $rc"
+    done
+}

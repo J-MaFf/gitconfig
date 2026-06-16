@@ -79,15 +79,37 @@ Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` 
 
 ### Git Aliases
 
-`git alias` opens an **interactive, categorized browser**: arrow-key/clickable tabs
-per category and a search box that filters by alias name **or** description. It
-needs a terminal and the optional `textual` package; when piped, in scripts, or
-without `textual` it falls back to a static grouped table. Force the static table
+`git alias` opens an **interactive, categorized browser**: clickable/arrow-key tabs
+per category, a search box that filters by alias name **or** description, and a result
+table you move through with **up/down**. Press **Enter** (or click a row) to pick an
+alias. It needs a terminal and the optional `textual` package; when piped, in scripts,
+or without `textual` it falls back to a static grouped table. Force the static table
 with `git alias --plain`.
 
 ```bash
 git alias          # Browse all aliases (interactive in a terminal)
 git alias --plain  # Static grouped table (good for piping: git alias --plain | grep pr)
+```
+
+In the browser: type to search, up/down to move, Enter/click to select, Ctrl+Left/Right
+to switch category, Esc to clear the search (or quit), Ctrl+C to quit.
+
+**Insert an alias at your prompt — `Ctrl-G`**
+
+The installer adds a `Ctrl-G` keybinding to your shell (bash/zsh) and PowerShell profile.
+Press `Ctrl-G` at the prompt to open the browser; the alias you pick is typed onto your
+command line, ready to run or edit. A program launched by `git alias` can't type at your
+prompt itself, so this keybinding does the insertion — like fzf's `Ctrl-T`. Enable it
+manually by sourcing the matching widget:
+
+```bash
+# bash (~/.bashrc) or zsh (~/.zshrc)
+source /path/to/gitconfig/scripts/shell/git-alias-widget.bash   # or .zsh
+```
+
+```powershell
+# PowerShell ($PROFILE)
+. "C:\path\to\gitconfig\scripts\shell\git-alias-widget.ps1"
 ```
 
 **Inspect**
