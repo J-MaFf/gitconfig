@@ -24,6 +24,19 @@ generate_gitconfig() {
         return 1
     fi
 
+    local generated_content
+    generated_content=$(cat "$template_path")
+    generated_content="${generated_content//\{\{REPO_PATH\}\}/$repo_root}"
+    generated_content="${generated_content//\{\{HOME_DIR\}\}/$home_dir}"
+
+    # Idempotent: if ~/.gitconfig already matches the rendered template, do nothing
+    # (no prompt, no backup, no write). This makes the auto-update convergent and
+    # safe to run on every login regardless of whether a pull happened.
+    if [ -f "$output_path" ] && [ "$(cat "$output_path")" = "$generated_content" ]; then
+        echo "[OK] .gitconfig already up to date (matches template)"
+        return 0
+    fi
+
     if [ -f "$output_path" ] && [ "$force" = "false" ]; then
         echo ".gitconfig already exists at: $output_path"
         read -p "Overwrite? (y/n) " -n 1 -r
@@ -38,11 +51,6 @@ generate_gitconfig() {
         cp "$output_path" "$output_path.bak"
         echo "[INFO] Backed up existing .gitconfig to .gitconfig.bak"
     fi
-
-    local generated_content
-    generated_content=$(cat "$template_path")
-    generated_content="${generated_content//\{\{REPO_PATH\}\}/$repo_root}"
-    generated_content="${generated_content//\{\{HOME_DIR\}\}/$home_dir}"
 
     echo "$generated_content" > "$output_path"
     echo "[OK] Generated .gitconfig"
