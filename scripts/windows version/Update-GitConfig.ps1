@@ -29,51 +29,42 @@ try {
     # Change to repo directory
     Push-Location $RepoPath
 
-    # Step 1: Switch to main branch
-    Write-Log "Switching to main branch..."
-    $switchResult = git checkout main 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Log "ERROR: Failed to switch to main branch"
-        Write-Log "Output: $switchResult"
-        exit 1
-    }
-
-    # Step 2: Pull latest changes on main
-    Write-Log "Pulling latest changes from main..."
-    $headBefore = (git rev-parse HEAD 2>$null)
-    $pullResult = git pull 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Log "SUCCESS: git pull completed on main"
-        Write-Log "Output: $pullResult"
+    # Step 1+2: Update the repo (best-effort; never fatal). A dirty tree, offline
+    # state, or diverged history must not stop the convergence step below.
+    # --untracked-files=no: the log we just wrote under docs/ is untracked and must
+    # not count as "dirty" (untracked files don't block a checkout or ff-only pull).
+    if (git status --porcelain --untracked-files=no 2>$null) {
+        Write-Log "WARN: working tree not clean; skipping pull (will still converge ~/.gitconfig)"
     }
     else {
-        Write-Log "ERROR: git pull failed with exit code $LASTEXITCODE"
-        Write-Log "Output: $pullResult"
-    }
-    $headAfter = (git rev-parse HEAD 2>$null)
-
-    # Step 2b: Reinstall ~/.gitconfig if the template changed during this pull.
-    # ~/.gitconfig is rendered from .gitconfig.template, so template changes
-    # download on pull but only take effect after regeneration.
-    if ($headBefore -ne $headAfter) {
-        $templateChanged = git diff --name-only $headBefore $headAfter -- .gitconfig.template
-        if ($templateChanged) {
-            Write-Log ".gitconfig.template changed; regenerating ~/.gitconfig..."
-            $initScript = Join-Path $PSScriptRoot "Initialize-GitConfig.ps1"
-            & $initScript -Force 2>&1 | ForEach-Object { Write-Log $_ }
-            if ($LASTEXITCODE -eq 0) {
-                Write-Log "SUCCESS: ~/.gitconfig regenerated from template (previous saved to ~/.gitconfig.bak)"
-            }
-            else {
-                Write-Log "ERROR: Failed to regenerate ~/.gitconfig from template (exit code $LASTEXITCODE)"
-            }
+        if ((git rev-parse --abbrev-ref HEAD 2>$null) -ne "main") {
+            git checkout main 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { Write-Log "WARN: could not switch to main; pulling current branch" }
+        }
+        Write-Log "Fetching and fast-forwarding..."
+        $pullResult = git pull --ff-only 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log "SUCCESS: repo up to date"
         }
         else {
-            Write-Log "No .gitconfig.template changes; skipping regeneration"
+            Write-Log "WARN: pull failed (offline or diverged); continuing with the local template. Output: $pullResult"
         }
     }
+
+    # Step 2b: Converge ~/.gitconfig to the template (always). Initialize-GitConfig
+    # is idempotent - it writes only when the rendered template differs from
+    # ~/.gitconfig - so this self-heals from any state (stale, hand-edited, deleted,
+    # or a no-op pull) and is safe to run on every login.
+    Write-Log "Converging ~/.gitconfig to template..."
+    $initScript = Join-Path $PSScriptRoot "Initialize-GitConfig.ps1"
+    # *>&1 (not 2>&1): Initialize-GitConfig reports via Write-Host (information
+    # stream), so capture all streams to fold its output into our log.
+    & $initScript -Force *>&1 | ForEach-Object { Write-Log $_ }
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log "SUCCESS: ~/.gitconfig converged to template"
+    }
     else {
-        Write-Log "No new commits pulled; skipping regeneration"
+        Write-Log "ERROR: convergence failed (exit code $LASTEXITCODE)"
     }
 
     # Step 2c: Ensure the optional 'textual' dependency (for the interactive

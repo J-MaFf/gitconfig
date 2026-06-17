@@ -71,6 +71,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `git selfupdate` is now **convergent and resilient** so it reliably keeps `~/.gitconfig`
+  in sync. It regenerates whenever the installed config differs from the rendered template
+  (idempotent, checked every run) instead of only when a pull happened to change the template
+  — so it self-heals from a no-op pull, an already-current clone, or a hand-edited/deleted
+  config. The repo update is now best-effort: a dirty working tree, offline state, or
+  diverged history no longer aborts the run (it still converges `~/.gitconfig`), the pull is
+  `--ff-only`, and a failed `fetch --prune` is non-fatal. `generate_gitconfig` /
+  `Initialize-GitConfig.ps1` gained an idempotent skip (no rewrite/`.bak` churn when already
+  current) ([#129](https://github.com/J-MaFf/gitconfig/issues/129))
 - `git skill-sync` now dispatches by OS to the claude-skills `skill-sync.{sh,ps1}` wrapper
   (status → `pull --ff-only` → status) instead of running the bare `pull --ff-only`, so a
   skill edited on one machine but not yet published is surfaced before and after the sync.
