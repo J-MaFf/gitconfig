@@ -67,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `git skill-sync` now dispatches by OS to the claude-skills `skill-sync.{sh,ps1}` wrapper
+  (status → `pull --ff-only` → status) instead of running the bare `pull --ff-only`, so a
+  skill edited on one machine but not yet published is surfaced before and after the sync.
+  Pointing the alias at an auto-syncing script means future changes need no further gitconfig
+  update ([#123](https://github.com/J-MaFf/gitconfig/issues/123))
 - The auto-update job (`git selfupdate` and the login-triggered run) now also
   ensures the optional `textual` dependency is installed — best-effort and only
   when missing — so existing machines pick up the interactive `git alias` browser
