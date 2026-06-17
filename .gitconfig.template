@@ -39,6 +39,9 @@
     # after. Dispatches by OS like skill-publish; runs from any directory. The wrapper
     # lives in the claude-skills repo so future tweaks sync without touching this alias.
     skill-sync = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -ExecutionPolicy Bypass -File \"$USERPROFILE\\.claude\\skills\\scripts\\skill-sync.ps1\" ;; *) bash \"$HOME/.claude/skills/scripts/skill-sync.sh\" ;; esac; }; f"
+    # Show this machine's claude-skills sync state on demand: last background sync
+    # (from ~/.claude/skills-sync.log) + any unpublished local changes. Read-only.
+    skill-sync-status = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -ExecutionPolicy Bypass -File \"$USERPROFILE\\.claude\\skills\\scripts\\skill-sync-status.ps1\" ;; *) bash \"$HOME/.claude/skills/scripts/skill-sync-status.sh\" ;; esac; }; f"
     # Publish new/edited skills in the claude-skills repo (~/.claude/skills) via a
     # PR (its main is branch-protected): branches off main, prompts for a commit
     # message, makes a signed commit, opens a PR, and enables squash auto-merge.

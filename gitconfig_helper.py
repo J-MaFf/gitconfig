@@ -225,6 +225,7 @@ ALIAS_METADATA = {
     "selfupdate": ("Maintenance", "Pull this repo and reinstall ~/.gitconfig from the template"),
     # Claude Skills
     "skill-sync": ("Claude Skills", "Sync ~/.claude/skills: status, pull --ff-only, status (flags unpublished local work)"),
+    "skill-sync-status": ("Claude Skills", "Show ~/.claude/skills sync state: last background sync + unpublished local changes"),
     "skill-publish": ("Claude Skills", "Publish new/edited skills (~/.claude/skills) via a PR with auto-merge"),
 }
 

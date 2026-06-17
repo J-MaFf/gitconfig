@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `git skill-sync-status` alias — dispatches by OS to the claude-skills
+  `skill-sync-status.{sh,ps1}` helper: shows this machine's last background sync (from
+  `~/.claude/skills-sync.log`) plus any unpublished local changes. Sibling to `skill-sync`
+  and `skill-publish` ([#127](https://github.com/J-MaFf/gitconfig/issues/127))
 - `git alias` browser — when the interactive browser can't launch it no longer falls back
   to the static table **silently**: it prints a one-line reason to stderr (only when stderr
   is a TTY, so pipes/CI stay clean) — e.g. `textual` not installed, stdout not a TTY, or a
