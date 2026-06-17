@@ -93,6 +93,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Integration.Tests.ps1` no longer fails on the `branches` alias: the assertion expected
+  `2>/dev/null; done` but the alias ends with `2>/dev/null || true; done` (the `|| true`
+  was added so a failed per-branch create doesn't abort the loop). Updated the regex to match
+  ([#125](https://github.com/J-MaFf/gitconfig/issues/125))
 - Pester tests in the "Step 2b: Regenerate ~/.gitconfig on Template Change" context
   no longer fail with `The term 'Push-RemoteChange' is not recognized`. The
   `Push-RemoteChange` helper was defined directly in the `Context` body, which is not
