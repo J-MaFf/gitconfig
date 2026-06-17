@@ -34,9 +34,11 @@
     main = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
     # Manage machine-specific git configuration
     localconfig = !git config --file ~/.gitconfig.local
-    # Sync the claude-skills repo (~/.claude/skills) on demand, mirroring the
-    # auto-sync's --ff-only safety. Read-only; runs from any directory.
-    skill-sync = !git -C ~/.claude/skills pull --ff-only
+    # Sync the claude-skills repo (~/.claude/skills) on demand: show status, pull
+    # --ff-only, show status again, so unpublished local work is surfaced before and
+    # after. Dispatches by OS like skill-publish; runs from any directory. The wrapper
+    # lives in the claude-skills repo so future tweaks sync without touching this alias.
+    skill-sync = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -ExecutionPolicy Bypass -File \"$USERPROFILE\\.claude\\skills\\scripts\\skill-sync.ps1\" ;; *) bash \"$HOME/.claude/skills/scripts/skill-sync.sh\" ;; esac; }; f"
     # Publish new/edited skills in the claude-skills repo (~/.claude/skills) via a
     # PR (its main is branch-protected): branches off main, prompts for a commit
     # message, makes a signed commit, opens a PR, and enables squash auto-merge.
