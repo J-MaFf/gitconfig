@@ -96,9 +96,11 @@ Describe "Initialize-GitConfig.ps1" {
 
         It "Generated config should contain absolute paths" {
             $generatedContent = Get-Content $script:outputPath -Raw
-            # Should have actual repository path, not relative or placeholder
-            # Matches both Unix (/path/to/gitconfig_helper.py) and Windows (C:/path/to/gitconfig_helper.py)
-            $generatedContent | Should -Match 'python\s+[A-Za-z]?:?/.*gitconfig_helper\.py'
+            # The helper is invoked as `exec "$p" <abs-path>/gitconfig_helper.py` (the
+            # py/python3/python loop), so assert an absolute path to it - placeholder
+            # substituted, not relative. Matches Unix (/path/to/gitconfig_helper.py)
+            # and Windows (C:/path/to/gitconfig_helper.py).
+            $generatedContent | Should -Match '(?:[A-Za-z]:)?/[^\s"]*gitconfig_helper\.py'
         }
 
         It "Generated config should preserve [include] section" {

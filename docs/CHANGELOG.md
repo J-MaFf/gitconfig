@@ -106,6 +106,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Initialize-GitConfig.Tests.ps1` ("Generated config should contain absolute paths") no
+  longer fails: its regex expected a literal `python <abs-path>/gitconfig_helper.py`, but the
+  helper aliases were refactored to a `for p in py python3 python; do … exec "$p" <path>`
+  loop, so the path is invoked via the `$p` variable. Updated the assertion to match an
+  absolute path to `gitconfig_helper.py` (Unix or Windows)
+  ([#130](https://github.com/J-MaFf/gitconfig/issues/130))
 - `Integration.Tests.ps1` no longer fails on the `branches` alias: the assertion expected
   `2>/dev/null; done` but the alias ends with `2>/dev/null || true; done` (the `|| true`
   was added so a failed per-branch create doesn't abort the loop). Updated the regex to match
