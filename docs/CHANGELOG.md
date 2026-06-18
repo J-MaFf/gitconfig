@@ -49,7 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   covering `_slugify`, `LABEL_PREFIX` selection, `_have`, `_default_branch`, and
   `get_git_aliases` parsing. See `tests/shared/README.md` to run them
   ([#115](https://github.com/J-MaFf/gitconfig/issues/115))
-
+- `git skill-sync-status` alias — dispatches by OS to the claude-skills
+  `skill-sync-status.{sh,ps1}` helper: shows this machine's last background sync (from
+  `~/.claude/skills-sync.log`) plus any unpublished local changes. Sibling to `skill-sync`
+  and `skill-publish` ([#127](https://github.com/J-MaFf/gitconfig/issues/127))
 - `git alias` browser — when the interactive browser can't launch it no longer falls back
   to the static table **silently**: it prints a one-line reason to stderr (only when stderr
   is a TTY, so pipes/CI stay clean) — e.g. `textual` not installed, stdout not a TTY, or a
@@ -108,6 +111,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `git selfupdate` is now **convergent and resilient** so it reliably keeps `~/.gitconfig`
+  in sync. It regenerates whenever the installed config differs from the rendered template
+  (idempotent, checked every run) instead of only when a pull happened to change the template
+  — so it self-heals from a no-op pull, an already-current clone, or a hand-edited/deleted
+  config. The repo update is now best-effort: a dirty working tree, offline state, or
+  diverged history no longer aborts the run (it still converges `~/.gitconfig`), the pull is
+  `--ff-only`, and a failed `fetch --prune` is non-fatal. `generate_gitconfig` /
+  `Initialize-GitConfig.ps1` gained an idempotent skip (no rewrite/`.bak` churn when already
+  current) ([#129](https://github.com/J-MaFf/gitconfig/issues/129))
+- `git skill-sync` now dispatches by OS to the claude-skills `skill-sync.{sh,ps1}` wrapper
+  (status → `pull --ff-only` → status) instead of running the bare `pull --ff-only`, so a
+  skill edited on one machine but not yet published is surfaced before and after the sync.
+  Pointing the alias at an auto-syncing script means future changes need no further gitconfig
+  update ([#123](https://github.com/J-MaFf/gitconfig/issues/123))
 - The auto-update job (`git selfupdate` and the login-triggered run) now also
   ensures the optional `textual` dependency is installed — best-effort and only
   when missing — so existing machines pick up the interactive `git alias` browser
@@ -129,6 +146,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Initialize-GitConfig.Tests.ps1` ("Generated config should contain absolute paths") no
+  longer fails: its regex expected a literal `python <abs-path>/gitconfig_helper.py`, but the
+  helper aliases were refactored to a `for p in py python3 python; do … exec "$p" <path>`
+  loop, so the path is invoked via the `$p` variable. Updated the assertion to match an
+  absolute path to `gitconfig_helper.py` (Unix or Windows)
+  ([#130](https://github.com/J-MaFf/gitconfig/issues/130))
+- `Integration.Tests.ps1` no longer fails on the `branches` alias: the assertion expected
+  `2>/dev/null; done` but the alias ends with `2>/dev/null || true; done` (the `|| true`
+  was added so a failed per-branch create doesn't abort the loop). Updated the regex to match
+  ([#125](https://github.com/J-MaFf/gitconfig/issues/125))
 - Pester tests in the "Step 2b: Regenerate ~/.gitconfig on Template Change" context
   no longer fail with `The term 'Push-RemoteChange' is not recognized`. The
   `Push-RemoteChange` helper was defined directly in the `Context` body, which is not

@@ -193,7 +193,7 @@ Describe "Git Aliases" {
         if ($gitconfigExists) {
             $result = & git config --get alias.branches
             $result | Should -Match "while read ref; do"
-            $result | Should -Match "2>/dev/null; done"
+            $result | Should -Match "2>/dev/null \|\| true; done"
         }
         else {
             Set-ItResult -Skipped -Because "Setup has not been run (no .gitconfig symlink found)"

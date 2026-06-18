@@ -24,6 +24,7 @@ BeforeAll {
         git init 2>&1 | Out-Null
         git config user.email "test@example.com"
         git config user.name "Test User"
+        git config commit.gpgsign false   # fake HOME has no signing key; don't sign
 
         # Create initial commit on main
         New-Item -Path "docs" -ItemType Directory -Force | Out-Null
@@ -49,6 +50,17 @@ BeforeAll {
         git init --bare 2>&1 | Out-Null
         Pop-Location
     }
+
+    # The convergence step now runs on every invocation and writes ~/.gitconfig.
+    # Redirect HOME to a throwaway dir for the whole suite so tests never touch the
+    # developer's real ~/.gitconfig. (Step 2b overrides this per-test with its own
+    # fake home using different variables, so there is no collision.)
+    $script:realUserProfile = $env:USERPROFILE
+    $script:realHome = $env:HOME
+    $script:fakeHomeGlobal = Join-Path ([System.IO.Path]::GetTempPath()) ("ugc-home-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $script:fakeHomeGlobal | Out-Null
+    $env:USERPROFILE = $script:fakeHomeGlobal
+    $env:HOME = $script:fakeHomeGlobal
 }
 
 Describe "Update-GitConfig.ps1" {
@@ -186,8 +198,8 @@ Describe "Update-GitConfig.ps1" {
             # Read log content
             $logContent = Get-Content $script:logFile -Raw
 
-            # Verify log message
-            $logContent | Should -Match "Switching to main branch"
+            # Verify the fetch/fast-forward step ran after switching to main
+            $logContent | Should -Match "Fetching and fast-forwarding"
         }
 
         It "Should handle failed branch switch gracefully" {
@@ -202,8 +214,8 @@ Describe "Update-GitConfig.ps1" {
             # Read log content
             $logContent = Get-Content $script:logFile -Raw
 
-            # Verify error was logged
-            $logContent | Should -Match "ERROR: Failed to switch to main branch"
+            # Verify the failed switch was logged as a warning (non-fatal now)
+            $logContent | Should -Match "WARN: could not switch to main"
         }
     }
 
@@ -222,6 +234,7 @@ Describe "Update-GitConfig.ps1" {
                 git clone $remoteRepo . 2>&1 | Out-Null
                 git config user.email "test@example.com"
                 git config user.name "Test User"
+                git config commit.gpgsign false   # fake HOME has no signing key
 
                 # Create initial commit
                 New-Item -Path "docs" -ItemType Directory -Force | Out-Null
@@ -261,8 +274,8 @@ Describe "Update-GitConfig.ps1" {
             # Read log content
             $logContent = Get-Content $script:logFile -Raw
 
-            # Verify pull was attempted
-            $logContent | Should -Match "Pulling latest changes from main"
+            # Verify the fetch/fast-forward step ran
+            $logContent | Should -Match "Fetching and fast-forwarding"
         }
 
         It "Should log pull success" {
@@ -272,8 +285,8 @@ Describe "Update-GitConfig.ps1" {
             # Read log content
             $logContent = Get-Content $script:logFile -Raw
 
-            # Verify success message (either "Already up to date" or "SUCCESS: git pull completed")
-            $logContent | Should -Match "(SUCCESS: git pull completed|Already up to date)"
+            # Verify success message
+            $logContent | Should -Match "SUCCESS: repo up to date"
         }
 
         It "Should handle pull failure gracefully" {
@@ -288,8 +301,8 @@ Describe "Update-GitConfig.ps1" {
             # Read log content
             $logContent = Get-Content $script:logFile -Raw
 
-            # Verify error was logged
-            $logContent | Should -Match "ERROR: git pull failed"
+            # Verify the failed pull was logged as a warning (non-fatal now)
+            $logContent | Should -Match "WARN: pull failed"
         }
     }
 
@@ -577,8 +590,8 @@ Describe "Update-GitConfig.ps1" {
 
             # Verify all steps were logged
             $logContent | Should -Match "Starting git repository synchronization"
-            $logContent | Should -Match "Switching to main branch"
-            $logContent | Should -Match "Pulling latest changes from main"
+            $logContent | Should -Match "Fetching and fast-forwarding"
+            $logContent | Should -Match "SUCCESS: ~/.gitconfig converged to template"
             $logContent | Should -Match "Pruning merged branches"
             $logContent | Should -Match "SUCCESS: git fetch --prune completed"
             $logContent | Should -Match "Deleted merged branch: merged-feature"
@@ -662,24 +675,48 @@ Describe "Update-GitConfig.ps1" {
             }
         }
 
-        It "Should regenerate ~/.gitconfig when the template changed" {
-            Push-RemoteChange -File ".gitconfig.template" -Content "[core]`n`teditor = vim`n" -Message "Change template"
-
-            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
-
-            $logContent = Get-Content $script:logFile -Raw
-            $logContent | Should -Match "regenerating ~/.gitconfig"
-            (Join-Path $script:fakeHome ".gitconfig") | Should -Exist
-        }
-
-        It "Should not regenerate when no template change occurred" {
+        It "Should converge ~/.gitconfig even when the pull brings no template change" {
+            # The classic failure mode: a no-op / docs-only pull used to skip regen,
+            # leaving ~/.gitconfig stale. Convergence now regenerates it regardless.
             Push-RemoteChange -File "README.md" -Content "# updated readme" -Message "Docs only"
 
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
 
             $logContent = Get-Content $script:logFile -Raw
-            $logContent | Should -Match "skipping regeneration"
-            (Join-Path $script:fakeHome ".gitconfig") | Should -Not -Exist
+            $logContent | Should -Match "converged to template"
+            (Join-Path $script:fakeHome ".gitconfig") | Should -Exist
         }
+
+        It "Should replace a stale ~/.gitconfig that differs from the template" {
+            $cfg = Join-Path $script:fakeHome ".gitconfig"
+            Set-Content -Path $cfg -Value "STALE-MARKER-DO-NOT-KEEP"
+
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            (Get-Content $cfg -Raw) | Should -Not -Match "STALE-MARKER-DO-NOT-KEEP"
+            "$cfg.bak" | Should -Exist   # the stale version was backed up
+        }
+
+        It "Should not rewrite ~/.gitconfig when it already matches the template" {
+            # First run creates it from the template; the second run must be a no-op.
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+            $cfg = Join-Path $script:fakeHome ".gitconfig"
+            if (Test-Path "$cfg.bak") { Remove-Item "$cfg.bak" -Force }
+            if (Test-Path $script:logFile) { Remove-Item $script:logFile -Force }
+
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            $logContent = Get-Content $script:logFile -Raw
+            $logContent | Should -Match "already up to date"
+            "$cfg.bak" | Should -Not -Exist   # no rewrite => no backup made
+        }
+    }
+}
+
+AfterAll {
+    $env:USERPROFILE = $script:realUserProfile
+    $env:HOME = $script:realHome
+    if ($script:fakeHomeGlobal -and (Test-Path $script:fakeHomeGlobal)) {
+        Remove-Item $script:fakeHomeGlobal -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

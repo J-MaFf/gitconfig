@@ -83,6 +83,18 @@ try {
     $generatedContent = $templateContent
     $generatedContent = $generatedContent -replace '\{\{REPO_PATH\}\}', $repoPathForward
     $generatedContent = $generatedContent -replace '\{\{HOME_DIR\}\}', $homeDirForward
+
+    # Idempotent: skip backup/write when the installed config already matches the
+    # rendered template (newline-insensitive compare). Makes the auto-update
+    # convergent and avoids needless rewrites/.bak churn on every login.
+    if (Test-Path $outputPath) {
+        $normExisting = ((Get-Content $outputPath -Raw) -replace "`r`n", "`n").TrimEnd("`n")
+        $normGenerated = ($generatedContent -replace "`r`n", "`n").TrimEnd("`n")
+        if ($normExisting -eq $normGenerated) {
+            Write-Host "[OK] .gitconfig already up to date (matches template); no changes made" -ForegroundColor Green
+            exit 0
+        }
+    }
     
     # Backup existing file if it exists
     if (Test-Path $outputPath) {

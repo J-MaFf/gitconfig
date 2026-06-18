@@ -30,42 +30,35 @@ mkdir -p "$(dirname "$LOG_FILE")"
 
     cd "$REPO_PATH" || exit 1
 
-    log_message "Switching to main branch..."
-    SWITCH_RESULT=$(git checkout main 2>&1)
-    if [ $? -ne 0 ]; then
-        log_message "ERROR: Failed to switch to main branch"
-        log_message "Output: $SWITCH_RESULT"
-        exit 1
-    fi
-
-    log_message "Pulling latest changes from main..."
-    HEAD_BEFORE=$(git rev-parse HEAD 2>/dev/null)
-    PULL_RESULT=$(git pull 2>&1)
-    if [ $? -eq 0 ]; then
-        log_message "SUCCESS: git pull completed"
-        log_message "Output: $PULL_RESULT"
+    # --- Update the repo (best-effort; never fatal) ------------------------
+    # A dirty tree, offline state, or diverged history must not stop us from
+    # converging ~/.gitconfig below. --untracked-files=no: the log we just wrote
+    # under docs/ is untracked and must not count as "dirty" (untracked files
+    # don't block a checkout or ff-only pull).
+    if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+        log_message "WARN: working tree not clean; skipping pull (will still converge ~/.gitconfig)"
     else
-        log_message "ERROR: git pull failed"
-        log_message "Output: $PULL_RESULT"
-        exit 1
-    fi
-    HEAD_AFTER=$(git rev-parse HEAD 2>/dev/null)
-
-    # Reinstall ~/.gitconfig if the template changed during this pull.
-    # ~/.gitconfig is rendered from .gitconfig.template, so template changes
-    # download on pull but only take effect after regeneration.
-    if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ] && \
-       [ -n "$(git diff --name-only "$HEAD_BEFORE" "$HEAD_AFTER" -- .gitconfig.template)" ]; then
-        log_message ".gitconfig.template changed; regenerating ~/.gitconfig..."
-        # shellcheck source=functions.sh
-        source "$SCRIPT_DIR/functions.sh"
-        if generate_gitconfig "$REPO_PATH" "$HOME" true; then
-            log_message "SUCCESS: ~/.gitconfig regenerated from template (previous saved to ~/.gitconfig.bak)"
-        else
-            log_message "ERROR: Failed to regenerate ~/.gitconfig from template"
+        if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ]; then
+            git checkout main >/dev/null 2>&1 || log_message "WARN: could not switch to main; pulling current branch"
         fi
+        log_message "Fetching and fast-forwarding..."
+        if git pull --ff-only; then
+            log_message "SUCCESS: repo up to date"
+        else
+            log_message "WARN: pull failed (offline or diverged); continuing with the local template"
+        fi
+    fi
+
+    # --- Converge ~/.gitconfig to the template (always) --------------------
+    # generate_gitconfig is idempotent: it writes only when the rendered template
+    # differs from ~/.gitconfig, so this self-heals from any state (stale,
+    # hand-edited, deleted, or a no-op pull) and is safe to run on every login.
+    # shellcheck source=functions.sh
+    source "$SCRIPT_DIR/functions.sh"
+    if generate_gitconfig "$REPO_PATH" "$HOME" true; then
+        log_message "SUCCESS: ~/.gitconfig converged to template"
     else
-        log_message "No .gitconfig.template changes; skipping regeneration"
+        log_message "ERROR: could not converge ~/.gitconfig from template"
     fi
 
     # Ensure the optional 'textual' dependency (for the interactive `git alias`
@@ -117,9 +110,8 @@ mkdir -p "$(dirname "$LOG_FILE")"
         done < <(git branch -vv)
         log_message "SUCCESS: Merged branches pruned"
     else
-        log_message "ERROR: git fetch --prune failed"
+        log_message "WARN: git fetch --prune failed (offline?); skipping prune"
         log_message "Output: $FETCH_RESULT"
-        exit 1
     fi
 
     log_message "Repository synchronization completed"
