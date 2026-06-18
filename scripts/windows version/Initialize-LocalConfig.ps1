@@ -131,6 +131,12 @@ try {
 	# Lets git verify SSH commit signatures locally (git log --show-signature, verify-commit)
 	allowedSignersFile = $($homeDir -replace '\\', '/')/.ssh/allowed_signers
 
+[credential]
+	# HTTPS auth for unattended pulls of private repos (e.g. the claude-skills
+	# scheduled-task sync). Git Credential Manager stores the token in the
+	# per-user Windows Credential Manager, so the scheduled task never prompts.
+	helper = manager
+
 [safe]
 	# Network locations (make sure these paths exist on this machine)
 	directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setup
