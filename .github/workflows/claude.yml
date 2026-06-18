@@ -33,6 +33,24 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Pull the shared git-policies conventions into CLAUDE.md so @claude follows
+      # them on every run. The rules live in the private claude-skills repo and are
+      # published to this public URL; we fetch them fresh each run (no token needed).
+      # Soft-fails: if the fetch is unavailable, the job still runs without them.
+      - name: Load git-policies into CLAUDE.md
+        run: |
+          url="https://raw.githubusercontent.com/J-MaFf/J-MaFf.github.io/main/claude/git-policies.md"
+          if curl -fsSL "$url" -o /tmp/git-policies.md; then
+            {
+              printf '\n<!-- BEGIN git-policies (fetched at runtime from %s) -->\n' "$url"
+              cat /tmp/git-policies.md
+              printf '\n<!-- END git-policies -->\n'
+            } >> CLAUDE.md
+            echo "Loaded git-policies into CLAUDE.md ($(wc -l < /tmp/git-policies.md) lines)."
+          else
+            echo "::warning::Could not fetch git-policies from $url; proceeding without it."
+          fi
+
       - name: Run Claude Code
         uses: anthropics/claude-code-action@v1
         with:
