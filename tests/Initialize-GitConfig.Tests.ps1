@@ -81,10 +81,13 @@ Describe "Initialize-GitConfig.ps1" {
 
         It "Generated config should use forward slashes in paths" {
             $generatedContent = Get-Content $script:outputPath -Raw
-            # Git config requires forward slashes, not backslashes
-            if ($generatedContent -match 'python\s+([^\s]+)') {
-                $pythonPath = $matches[1]
-                $pythonPath | Should -Not -Match '\\'
+            # Git config requires forward slashes, not backslashes.
+            # The helper is now invoked via the py/python3/python loop as
+            # `exec "$p" <path>/gitconfig_helper.py`, so match the absolute
+            # path directly (same pattern as "should contain absolute paths").
+            if ($generatedContent -match '((?:[A-Za-z]:)?/[^\s"]*gitconfig_helper\.py)') {
+                $helperPath = $matches[1]
+                $helperPath | Should -Not -Match '\\'
             }
         }
 
