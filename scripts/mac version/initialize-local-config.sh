@@ -133,6 +133,15 @@ else
 fi
 
 CONFIG_CONTENT+="
+[credential]
+	# Lets unattended HTTPS pulls of private repos (e.g. the claude-skills
+	# launchd sync) authenticate from the macOS login keychain — no prompt and
+	# no 1Password dependency. Store a token once with:
+	#   git credential-osxkeychain store
+	helper = osxkeychain
+"
+
+CONFIG_CONTENT+="
 [safe]
 	# Add trusted local or network directories here:
 	# directory = /path/to/trusted/repo
