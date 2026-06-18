@@ -7,8 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `scripts/mac version/initialize-local-config.sh` — always write `[gpg "ssh"]
+  allowedSignersFile` when commit signing is enabled, not only when 1Password's
+  `op-ssh-sign` is detected. The template ships a literal `signingkey` with
+  `commit.gpgsign = true`, so on a macOS box without 1Password the script wrote no
+  `allowedSignersFile` and `git log --show-signature` reported "No signature" for
+  perfectly valid signatures. It now mirrors the Linux script: when `op-ssh-sign` is
+  absent but a `user.signingkey` is configured (literal key or a file-based key), it
+  writes the `allowedSignersFile` block and registers the identity via
+  `update_allowed_signers`. With no key and no 1Password it still skips, as before
+  ([#116](https://github.com/J-MaFf/gitconfig/issues/116))
+
+- `scripts/shared/update-gitconfig.sh` — fixed every log line being written **twice**.
+  `log_message` piped through `tee -a "$LOG_FILE"` while the entire main block was already
+  redirected with `>> "$LOG_FILE" 2>&1`, so each line landed in the log once via `tee` and
+  again via the block redirect. The script runs headless under launchd/cron (no terminal),
+  so `log_message` now uses a plain `echo` and the block redirect is the single source of
+  truth ([#114](https://github.com/J-MaFf/gitconfig/issues/114))
+
+- `.gitconfig.template` — normalized indentation to tabs throughout. The `[push]` and
+  `[alias]` sections used four-space indentation while every other section used tabs; git
+  accepts both but the inconsistency is fragile for any future formatter/validator. All
+  value/comment lines are now tab-indented ([#113](https://github.com/J-MaFf/gitconfig/issues/113))
+
+- `.gitconfig.template` — moved the `[include] path = ~/.gitconfig.local` directive to the
+  **bottom** of the template. Git applies includes inline and the last declaration of a key
+  wins, so with the include at the top the template's hardcoded literal `signingkey` silently
+  overrode whatever the local config set (e.g. the file-based key on Linux). The include now
+  runs last, so `~/.gitconfig.local` overrides take effect
+  ([#112](https://github.com/J-MaFf/gitconfig/issues/112))
+
 ### Added
 
+- Cross-platform test coverage for the shared scripts. Until now every test was Pester
+  (Windows-only), leaving `scripts/shared/functions.sh` and `gitconfig_helper.py` untested
+  on the primary dev platforms. Added `tests/shared/functions.bats` (bats-core) covering
+  `backup_file`, `create_symlink`, `update_allowed_signers`, `generate_gitconfig`, and the
+  git-alias widget enable/disable, plus `tests/shared/test_gitconfig_helper.py` (pytest)
+  covering `_slugify`, `LABEL_PREFIX` selection, `_have`, `_default_branch`, and
+  `get_git_aliases` parsing. See `tests/shared/README.md` to run them
+  ([#115](https://github.com/J-MaFf/gitconfig/issues/115))
 - `git skill-sync-status` alias — dispatches by OS to the claude-skills
   `skill-sync-status.{sh,ps1}` helper: shows this machine's last background sync (from
   `~/.claude/skills-sync.log`) plus any unpublished local changes. Sibling to `skill-sync`

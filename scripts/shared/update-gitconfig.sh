@@ -10,7 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 log_message() {
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] $1" | tee -a "$LOG_FILE"
+    # The whole main block below is redirected to "$LOG_FILE", so a plain echo
+    # already reaches the log. Using `tee -a "$LOG_FILE"` here would write the
+    # line a second time (once via tee, once via the block redirect). This runs
+    # headless under launchd/cron with no terminal attached, so the block
+    # redirect is the single source of truth for log output.
+    echo "[$timestamp] $1"
 }
 
 mkdir -p "$(dirname "$LOG_FILE")"
