@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `.gitconfig.template` — new `git skill list` alias that lists installed skills
+  (immediate subdirectories of `~/.claude/skills` containing a `SKILL.md`). Implemented
+  as a `skill` subcommand dispatcher so future `git skill <subcommand>` forms can be added.
+  Registered in `gitconfig_helper.py`'s `ALIAS_METADATA` under "Claude Skills" so it appears
+  in the `git alias` browser ([#140](https://github.com/J-MaFf/gitconfig/issues/140))
+
 ### Fixed
 
 - `scripts/mac version/initialize-local-config.sh` — always write `[gpg "ssh"]

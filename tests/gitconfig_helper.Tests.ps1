@@ -429,6 +429,7 @@ import gitconfig_helper
             $script:src | Should -Match '"pr":\s*\("GitHub"'
             $script:src | Should -Match '"amend":\s*\("Commit"'
             $script:src | Should -Match '"s":\s*\("Inspect"'
+            $script:src | Should -Match '"skill":\s*\("Claude Skills"'
             $script:src | Should -Match '"skill-sync":\s*\("Claude Skills"'
             $script:src | Should -Match '"skill-publish":\s*\("Claude Skills"'
         }
