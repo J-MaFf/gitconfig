@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `.gitignore` — ignore Pester's generated `coverage.xml` code-coverage report (emitted at
+  the repo root when `config/pester.config.ps1` runs with `CodeCoverage.Enabled = $true`),
+  plus `testResults.xml` defensively (Pester's default test-result filename, not currently
+  emitted since `TestResult` output is disabled). Keeps generated test artifacts out of
+  `git status` ([#146](https://github.com/J-MaFf/gitconfig/issues/146))
+
 ### Changed
 
 - `.gitconfig.template` / `gitconfig_helper.py` — adopted the `git <noun> <subcommand>`
