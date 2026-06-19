@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `scripts/windows version/Initialize-LocalConfig.ps1` — fixed a spurious `[WARN] Git may
+  have issues reading the configuration` printed by `install.ps1`. The verification step
+  used `git config --local --list`, which reads the *repository* `.git/config` (unrelated to
+  the generated `~/.gitconfig.local`) and errors with exit 128 when the current directory
+  isn't a git repo — and `install.ps1` runs from the home directory. It now validates the
+  generated file directly with `git config --file $localConfigPath --list` (scope- and
+  CWD-independent), matching `Initialize-GitConfig.ps1` and `scripts/shared/functions.sh`.
+  Added Pester coverage asserting the `[OK]` result (and no WARN) when run outside a repo
+  ([#148](https://github.com/J-MaFf/gitconfig/issues/148))
+
 - `.gitignore` — ignore Pester's generated `coverage.xml` code-coverage report (emitted at
   the repo root when `config/pester.config.ps1` runs with `CodeCoverage.Enabled = $true`),
   plus `testResults.xml` defensively (Pester's default test-result filename, not currently

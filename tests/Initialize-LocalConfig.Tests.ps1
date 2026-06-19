@@ -87,4 +87,53 @@ Describe "Initialize-LocalConfig.ps1" {
             $content | Should -Match 'sandbox@example.com'
         }
     }
+
+    Context "config verification" {
+        BeforeEach {
+            # Same sandbox isolation as above; the sandbox dir is deliberately NOT
+            # a git repo (it lives under TestDrive), which is the condition that
+            # exposed the verification-scope bug.
+            $script:sandbox = Join-Path $TestDrive ([guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Path $script:sandbox -Force | Out-Null
+
+            $script:savedUserProfile = $env:USERPROFILE
+            $script:savedHome = $env:HOME
+            $script:savedGlobal = $env:GIT_CONFIG_GLOBAL
+            $script:savedSystem = $env:GIT_CONFIG_SYSTEM
+
+            $env:USERPROFILE = $script:sandbox
+            $env:HOME = $script:sandbox
+            $env:GIT_CONFIG_GLOBAL = Join-Path $script:sandbox ".gitconfig"
+            $env:GIT_CONFIG_SYSTEM = Join-Path $script:sandbox "no-system-config"
+
+            git config --global user.email "sandbox@example.com" 2>&1 | Out-Null
+            git config --global user.signingkey "ssh-ed25519 AAAASANDBOXKEY test-comment" 2>&1 | Out-Null
+        }
+
+        AfterEach {
+            $env:USERPROFILE = $script:savedUserProfile
+            $env:HOME = $script:savedHome
+            $env:GIT_CONFIG_GLOBAL = $script:savedGlobal
+            $env:GIT_CONFIG_SYSTEM = $script:savedSystem
+        }
+
+        It "Should verify the generated config (not WARN) when run outside a git repo" {
+            # Regression guard for #148: the script must validate the file it wrote
+            # (git config --file ...), not the repo config (git config --local ...),
+            # which errors when the current directory isn't a git repo. The sandbox
+            # CWD is not a repo, so the old --local check printed a spurious WARN.
+            # Capture all streams (*>&1) so Write-Host's information-stream output
+            # lands in $out; 2>&1 alone would miss it.
+            Push-Location $script:sandbox
+            try { $out = & $script:scriptPath -Force *>&1 } finally { Pop-Location }
+            $text = $out | Out-String
+
+            $text | Should -Match '\[OK\] Git configuration verified!'
+            $text | Should -Not -Match 'Git may have issues reading the configuration'
+        }
+
+        It "Should not use the CWD-dependent 'git config --local' check" {
+            (Get-Content $script:scriptPath -Raw) | Should -Not -Match 'git config --local --list'
+        }
+    }
 }
