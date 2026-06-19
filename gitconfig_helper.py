@@ -225,10 +225,7 @@ ALIAS_METADATA = {
     "localconfig": ("Maintenance", "Edit machine-specific git config (~/.gitconfig.local)"),
     "selfupdate": ("Maintenance", "Pull this repo and reinstall ~/.gitconfig from the template"),
     # Claude Skills
-    "skill": ("Claude Skills", "List installed skills in ~/.claude/skills with descriptions and last-updated dates (git skill list)"),
-    "skill-sync": ("Claude Skills", "Sync ~/.claude/skills: status, pull --ff-only, status (flags unpublished local work)"),
-    "skill-sync-status": ("Claude Skills", "Show ~/.claude/skills sync state: last background sync + unpublished local changes"),
-    "skill-publish": ("Claude Skills", "Publish new/edited skills (~/.claude/skills) via a PR with auto-merge"),
+    "skill": ("Claude Skills", "Manage ~/.claude/skills via subcommands: list, sync, status, publish (git skill <subcommand>)"),
 }
 
 
@@ -390,21 +387,72 @@ def list_skills():
     return 0
 
 
+# Subcommands that delegate to the per-OS wrapper scripts shipped in the
+# claude-skills repo (~/.claude/skills/scripts). Maps subcommand -> script base
+# name (the .ps1 and .sh share the base). Keeping these wrappers in that repo is
+# intentional so tweaks sync without touching this helper.
+SKILL_SCRIPTS = {
+    "sync": "skill-sync",
+    "status": "skill-sync-status",
+    "publish": "publish-skill",
+}
+
+# usage banner for `git skill` with no argument and `git skill help`.
+SKILL_USAGE = (
+    "usage: git skill <subcommand>\n"
+    "\n"
+    "  list      List installed skills (name, description, last updated)\n"
+    "  sync      Sync ~/.claude/skills: status, pull --ff-only, status\n"
+    "  status    Show this machine's ~/.claude/skills sync state\n"
+    "  publish   Publish new/edited skills via a PR (auto-merge)"
+)
+
+
+def _run_skill_script(base):
+    """Run a claude-skills wrapper script (~/.claude/skills/scripts/<base>.{ps1,sh}).
+
+    Picks the per-OS variant: PowerShell on Windows, bash elsewhere. Returns the
+    script's exit code, or 1 if the expected script file is missing.
+    """
+    scripts_dir = os.path.join(os.path.expanduser("~"), ".claude", "skills", "scripts")
+    if sys.platform == "win32":
+        script = os.path.join(scripts_dir, base + ".ps1")
+        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
+    else:
+        script = os.path.join(scripts_dir, base + ".sh")
+        cmd = ["bash", script]
+    if not os.path.isfile(script):
+        Console(stderr=True).print(
+            f"[red]git skill: wrapper script not found: {script}[/red]"
+        )
+        return 1
+    return subprocess.run(cmd).returncode
+
+
 def skill(args):
     """Dispatch a `git skill <subcommand>` invocation.
 
     Subcommands:
-      list   List installed skills in ~/.claude/skills (name, description,
-             last-updated date) as a table.
+      list      List installed skills in ~/.claude/skills (name, description,
+                last-updated date) as a table.
+      sync      Sync ~/.claude/skills: status, pull --ff-only, status.
+      status    Show this machine's ~/.claude/skills sync state.
+      publish   Publish new/edited skills via a PR with auto-merge.
+
+    `list` is handled here in Python; sync/status/publish delegate to the per-OS
+    wrapper scripts shipped in the claude-skills repo (see SKILL_SCRIPTS).
     """
     sub = args[0] if args else ""
     if sub == "list":
         return list_skills()
+    if sub in SKILL_SCRIPTS:
+        return _run_skill_script(SKILL_SCRIPTS[sub])
     if sub in ("", "help", "-h", "--help"):
-        Console().print("usage: git skill list")
+        Console().print(SKILL_USAGE)
         return 0
     Console(stderr=True).print(
-        f"[red]git skill: unknown subcommand '{sub}' (try: list)[/red]"
+        f"[red]git skill: unknown subcommand '{sub}' "
+        f"(try: list, sync, status, publish)[/red]"
     )
     return 1
 

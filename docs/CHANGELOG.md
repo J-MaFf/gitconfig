@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `.gitconfig.template` / `gitconfig_helper.py` — adopted the `git <noun> <subcommand>`
+  style for the skill aliases. The dashed `git skill-sync`, `git skill-sync-status`, and
+  `git skill-publish` aliases are now the `git skill sync`, `git skill status`, and
+  `git skill publish` subcommands, joining the existing `git skill list`. `git skill` with
+  no argument (or `git skill help`) prints the available subcommands, and an unknown
+  subcommand errors (exit 1). The `skill` Python dispatcher handles `list` itself and
+  delegates `sync`/`status`/`publish` to the per-OS wrapper scripts in
+  `~/.claude/skills/scripts` (PowerShell on Windows, bash elsewhere), which stay in the
+  claude-skills repo so tweaks sync without touching this alias. `ALIAS_METADATA` now
+  carries a single `skill` entry describing all four subcommands, so the `git alias`
+  browser lists one discoverable "skill" row instead of three dashed ones
+  ([#144](https://github.com/J-MaFf/gitconfig/issues/144))
+
+### Removed
+
+- `.gitconfig.template` — the dashed `git skill-sync`, `git skill-sync-status`, and
+  `git skill-publish` aliases (replaced by the `git skill <subcommand>` forms above). This
+  is a breaking change: invocations or keybindings using the old hyphenated names must
+  switch to the space-separated subcommands ([#144](https://github.com/J-MaFf/gitconfig/issues/144))
+
 ### Added
 
 - `.gitconfig.template` — new `git skill list` alias that lists installed skills

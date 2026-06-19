@@ -160,9 +160,16 @@ import gitconfig_helper
     }
 
     Context "skill aliases" {
-        It "skill-publish should be described in alias_descriptions" {
+        It "no longer describes the removed dashed skill aliases in ALIAS_METADATA" {
+            # #144 migrated skill-sync/skill-sync-status/skill-publish to the
+            # `git skill <subcommand>` form, so the dashed names are gone from
+            # ALIAS_METADATA (only the single `skill` row remains). Match on the
+            # metadata-tuple form so the SKILL_SCRIPTS values (e.g. "skill-sync")
+            # don't trip this assertion.
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match '"skill-publish"'
+            $scriptContent | Should -Not -Match '"skill-sync":\s*\('
+            $scriptContent | Should -Not -Match '"skill-sync-status":\s*\('
+            $scriptContent | Should -Not -Match '"skill-publish":\s*\('
         }
 
         It "should no longer define the obsolete skill_push helper" {
@@ -178,6 +185,17 @@ import gitconfig_helper
             $scriptContent | Should -Match 'def list_skills\('
             $scriptContent | Should -Match 'def skill\('
             $scriptContent | Should -Match 'function_name == "skill"'
+        }
+
+        It "skill dispatcher routes sync/status/publish to per-OS wrapper scripts" {
+            # list runs in Python; sync/status/publish delegate to the claude-skills
+            # wrapper scripts (.ps1 on Windows, .sh elsewhere) via SKILL_SCRIPTS.
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'SKILL_SCRIPTS'
+            $scriptContent | Should -Match '"sync":\s*"skill-sync"'
+            $scriptContent | Should -Match '"status":\s*"skill-sync-status"'
+            $scriptContent | Should -Match '"publish":\s*"publish-skill"'
+            $scriptContent | Should -Match 'def _run_skill_script\('
         }
 
         It "list_skills reads a description and a last-updated date per skill" {
@@ -507,8 +525,6 @@ import gitconfig_helper
             $script:src | Should -Match '"amend":\s*\("Commit"'
             $script:src | Should -Match '"s":\s*\("Inspect"'
             $script:src | Should -Match '"skill":\s*\("Claude Skills"'
-            $script:src | Should -Match '"skill-sync":\s*\("Claude Skills"'
-            $script:src | Should -Match '"skill-publish":\s*\("Claude Skills"'
         }
 
         It "get_git_aliases returns (name, description, category) tuples" {

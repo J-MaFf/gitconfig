@@ -167,10 +167,11 @@ git selfupdate           # Pull this repo and reinstall ~/.gitconfig from the te
 **Claude Skills**
 
 ```bash
+git skill                # Print available subcommands (same as git skill help)
 git skill list           # Table of installed skills: name, description, last updated
-git skill-sync           # Sync ~/.claude/skills: status -> pull --ff-only -> status
-git skill-sync-status    # Show ~/.claude/skills state: last background sync + unpublished local changes
-git skill-publish        # Publish new/edited skills via a PR (prompts for a message, auto-merges)
+git skill sync           # Sync ~/.claude/skills: status -> pull --ff-only -> status
+git skill status         # Show ~/.claude/skills state: last background sync + unpublished local changes
+git skill publish        # Publish new/edited skills via a PR (prompts for a message, auto-merges)
 ```
 
 ### Setup Script Options (Windows)

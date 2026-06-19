@@ -30,23 +30,16 @@
 	main = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 	# Manage machine-specific git configuration
 	localconfig = !git config --file ~/.gitconfig.local
-	# Read-only skill subcommands operating on ~/.claude/skills (dispatches to the
-	# Python helper). `git skill list` shows each installed skill's name, a one-line
-	# description from its SKILL.md, and its last-updated date as a rich table.
+	# Manage ~/.claude/skills via subcommands (dispatches to the Python helper):
+	#   list      rich table of installed skills (name, description, last updated)
+	#   sync      sync the repo: status, pull --ff-only, status (flags unpublished work)
+	#   status    this machine's sync state (last background sync + local changes)
+	#   publish   publish new/edited skills via a PR (its main is branch-protected)
+	# `list` runs in Python; sync/status/publish delegate to the per-OS wrapper
+	# scripts in ~/.claude/skills/scripts (kept in the claude-skills repo so tweaks
+	# sync without touching this alias). `git skill` with no argument prints usage.
+	# Runs from any directory.
 	skill = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py skill \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
-	# Sync the claude-skills repo (~/.claude/skills) on demand: show status, pull
-	# --ff-only, show status again, so unpublished local work is surfaced before and
-	# after. Dispatches by OS like skill-publish; runs from any directory. The wrapper
-	# lives in the claude-skills repo so future tweaks sync without touching this alias.
-	skill-sync = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -ExecutionPolicy Bypass -File \"$USERPROFILE\\.claude\\skills\\scripts\\skill-sync.ps1\" ;; *) bash \"$HOME/.claude/skills/scripts/skill-sync.sh\" ;; esac; }; f"
-	# Show this machine's claude-skills sync state on demand: last background sync
-	# (from ~/.claude/skills-sync.log) + any unpublished local changes. Read-only.
-	skill-sync-status = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -ExecutionPolicy Bypass -File \"$USERPROFILE\\.claude\\skills\\scripts\\skill-sync-status.ps1\" ;; *) bash \"$HOME/.claude/skills/scripts/skill-sync-status.sh\" ;; esac; }; f"
-	# Publish new/edited skills in the claude-skills repo (~/.claude/skills) via a
-	# PR (its main is branch-protected): branches off main, prompts for a commit
-	# message, makes a signed commit, opens a PR, and enables squash auto-merge.
-	# Dispatches by OS like selfupdate; runs from any directory.
-	skill-publish = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -ExecutionPolicy Bypass -File \"$USERPROFILE\\.claude\\skills\\scripts\\publish-skill.ps1\" ;; *) bash \"$HOME/.claude/skills/scripts/publish-skill.sh\" ;; esac; }; f"
 	# Pull the latest gitconfig repo and reinstall ~/.gitconfig from the template
 	# on demand. Dispatches by OS: Git-for-Windows reports MINGW/MSYS/CYGWIN.
 	selfupdate = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -File '{{REPO_PATH}}/scripts/windows version/Update-GitConfig.ps1' -RepoPath '{{REPO_PATH}}' ;; *) bash '{{REPO_PATH}}/scripts/shared/update-gitconfig.sh' '{{REPO_PATH}}' ;; esac; }; f"
