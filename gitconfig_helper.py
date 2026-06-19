@@ -402,7 +402,7 @@ SKILL_USAGE = (
     "usage: git skill <subcommand>\n"
     "\n"
     "  list      List installed skills (name, description, last updated)\n"
-    "  sync      Sync ~/.claude/skills: status, pull --ff-only, status\n"
+    "  sync      Pull ~/.claude/skills (--ff-only); never publishes local work\n"
     "  status    Show this machine's ~/.claude/skills sync state\n"
     "  publish   Publish new/edited skills via a PR (auto-merge)"
 )
@@ -435,7 +435,8 @@ def skill(args):
     Subcommands:
       list      List installed skills in ~/.claude/skills (name, description,
                 last-updated date) as a table.
-      sync      Sync ~/.claude/skills: status, pull --ff-only, status.
+      sync      Pull ~/.claude/skills (--ff-only); flags unpublished local
+                work but never publishes it (publish with `publish`).
       status    Show this machine's ~/.claude/skills sync state.
       publish   Publish new/edited skills via a PR with auto-merge.
 

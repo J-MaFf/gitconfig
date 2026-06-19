@@ -32,7 +32,7 @@
 	localconfig = !git config --file ~/.gitconfig.local
 	# Manage ~/.claude/skills via subcommands (dispatches to the Python helper):
 	#   list      rich table of installed skills (name, description, last updated)
-	#   sync      sync the repo: status, pull --ff-only, status (flags unpublished work)
+	#   sync      pull-only refresh: pull --ff-only (flags unpublished work, never publishes)
 	#   status    this machine's sync state (last background sync + local changes)
 	#   publish   publish new/edited skills via a PR (its main is branch-protected)
 	# `list` runs in Python; sync/status/publish delegate to the per-OS wrapper
