@@ -172,9 +172,13 @@ try {
     Write-Host "  3. Save and reload git" -ForegroundColor Gray
     Write-Host ""
 
-    # Verify git can read the config
+    # Verify git can read the config. Validate the generated file directly with
+    # --file (scope- and CWD-independent) rather than --local, which reads the
+    # repo's .git/config and errors (exit 128) when the current directory isn't a
+    # git repo. install.ps1 runs from the home directory, so --local produced a
+    # spurious [WARN]. Mirrors Initialize-GitConfig.ps1 and shared/functions.sh.
     Write-Host "Verifying git configuration..." -ForegroundColor Cyan
-    & git config --local --list 2>&1 | Out-Null
+    & git config --file $localConfigPath --list 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[OK] Git configuration verified!" -ForegroundColor Green
     }
