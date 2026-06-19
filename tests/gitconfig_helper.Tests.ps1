@@ -110,6 +110,21 @@ import gitconfig_helper
             $scriptContent = Get-Content $helperScript -Raw
             $scriptContent | Should -Not -Match "def skill_push"
         }
+
+        It "defines list_skills and a skill dispatcher wired from __main__" {
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'def list_skills\('
+            $scriptContent | Should -Match 'def skill\('
+            $scriptContent | Should -Match 'function_name == "skill"'
+        }
+
+        It "list_skills reads a description and a last-updated date per skill" {
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'def _read_skill_description\('
+            $scriptContent | Should -Match 'def _skill_last_updated\('
+            # last-updated uses the skills repo git log, short date format
+            $scriptContent | Should -Match '--format=%cs'
+        }
     }
 
     Context "get_git_aliases Function" {

@@ -30,9 +30,10 @@
 	main = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 	# Manage machine-specific git configuration
 	localconfig = !git config --file ~/.gitconfig.local
-	# Read-only skill subcommands operating on ~/.claude/skills.
-	#   git skill list   List installed skills (immediate subdirs holding a SKILL.md)
-	skill = "!f() { case \"$1\" in list) d=\"$HOME/.claude/skills\"; [ -d \"$d\" ] || { echo \"git skill: skills directory not found: $d\" >&2; return 1; }; n=0; for s in \"$d\"/*/; do [ -f \"${s}SKILL.md\" ] || continue; b=${s%/}; echo \"${b##*/}\"; n=1; done; [ \"$n\" = 1 ] || { echo \"git skill: no skills found in $d\" >&2; return 1; } ;; \"\"|-h|--help|help) echo \"usage: git skill list\" >&2 ;; *) echo \"git skill: unknown subcommand '$1' (try: list)\" >&2; return 1 ;; esac; }; f"
+	# Read-only skill subcommands operating on ~/.claude/skills (dispatches to the
+	# Python helper). `git skill list` shows each installed skill's name, a one-line
+	# description from its SKILL.md, and its last-updated date as a rich table.
+	skill = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py skill \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 	# Sync the claude-skills repo (~/.claude/skills) on demand: show status, pull
 	# --ff-only, show status again, so unpublished local work is surfaced before and
 	# after. Dispatches by OS like skill-publish; runs from any directory. The wrapper

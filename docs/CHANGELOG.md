@@ -10,10 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `.gitconfig.template` — new `git skill list` alias that lists installed skills
-  (immediate subdirectories of `~/.claude/skills` containing a `SKILL.md`). Implemented
-  as a `skill` subcommand dispatcher so future `git skill <subcommand>` forms can be added.
-  Registered in `gitconfig_helper.py`'s `ALIAS_METADATA` under "Claude Skills" so it appears
-  in the `git alias` browser ([#140](https://github.com/J-MaFf/gitconfig/issues/140))
+  (immediate subdirectories of `~/.claude/skills` containing a `SKILL.md`) as a `rich`
+  table showing each skill's name, a one-line description parsed from its `SKILL.md`
+  frontmatter, and the date it was last updated (last commit touching the skill, falling
+  back to the file mtime). Implemented as a `skill` subcommand dispatcher in
+  `gitconfig_helper.py` (so future `git skill <subcommand>` forms can be added) and
+  registered in `ALIAS_METADATA` under "Claude Skills" so it appears in the `git alias`
+  browser ([#140](https://github.com/J-MaFf/gitconfig/issues/140))
 
 ### Fixed
 

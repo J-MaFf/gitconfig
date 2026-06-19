@@ -15,6 +15,7 @@ import shutil
 try:
     from rich.console import Console
     from rich.table import Table
+    from rich.markup import escape
 except ImportError:
     print("Error: the 'rich' library is not installed.")
     print("Run the install script for your platform, or: pip install rich")
@@ -224,7 +225,7 @@ ALIAS_METADATA = {
     "localconfig": ("Maintenance", "Edit machine-specific git config (~/.gitconfig.local)"),
     "selfupdate": ("Maintenance", "Pull this repo and reinstall ~/.gitconfig from the template"),
     # Claude Skills
-    "skill": ("Claude Skills", "List installed skills in ~/.claude/skills (git skill list)"),
+    "skill": ("Claude Skills", "List installed skills in ~/.claude/skills with descriptions and last-updated dates (git skill list)"),
     "skill-sync": ("Claude Skills", "Sync ~/.claude/skills: status, pull --ff-only, status (flags unpublished local work)"),
     "skill-sync-status": ("Claude Skills", "Show ~/.claude/skills sync state: last background sync + unpublished local changes"),
     "skill-publish": ("Claude Skills", "Publish new/edited skills (~/.claude/skills) via a PR with auto-merge"),
@@ -278,6 +279,134 @@ def get_git_aliases():
     order = {cat: i for i, cat in enumerate(CATEGORY_ORDER)}
     aliases.sort(key=lambda a: (order.get(a[2], len(order)), a[0]))
     return aliases
+
+
+def _read_skill_description(skill_md_path):
+    """Return the one-line 'description' from a SKILL.md YAML frontmatter block.
+
+    Handles both a single-line 'description: text' and a folded/literal block
+    scalar ('description: >' or '|' followed by indented lines). Returns '' when
+    there is no frontmatter or no description. Whitespace is collapsed to single
+    spaces and any surrounding quotes are stripped.
+    """
+    try:
+        with open(skill_md_path, encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return ""
+
+    if not lines or lines[0].strip() != "---":
+        return ""
+
+    # Collect the frontmatter lines up to the closing '---'.
+    front = []
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        front.append(line)
+
+    for i, line in enumerate(front):
+        match = re.match(r"\s*description\s*:\s*(.*)$", line)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        # Block scalar (empty value or a '>'/'|' indicator): gather the following
+        # blank or more-indented lines until the next top-level key.
+        if value in ("", ">", "|", ">-", "|-", ">+", "|+"):
+            collected = []
+            for cont in front[i + 1:]:
+                if cont.strip() == "":
+                    continue
+                if re.match(r"\s", cont):
+                    collected.append(cont.strip())
+                else:
+                    break
+            value = " ".join(collected)
+        value = value.strip()
+        if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
+            value = value[1:-1]
+        return re.sub(r"\s+", " ", value).strip()
+
+    return ""
+
+
+def _skill_last_updated(skills_dir, name, skill_md_path):
+    """Return the date a skill was last updated as 'YYYY-MM-DD'.
+
+    Prefers the last commit that touched the skill directory (when the skills
+    directory is a git repo); falls back to the SKILL.md modification time, or
+    'unknown' if neither is available.
+    """
+    result = run_git("-C", skills_dir, "log", "-1", "--format=%cs", "--", name)
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    try:
+        import datetime
+
+        return datetime.date.fromtimestamp(os.path.getmtime(skill_md_path)).isoformat()
+    except OSError:
+        return "unknown"
+
+
+def list_skills():
+    """Print installed Claude skills (~/.claude/skills) as a rich table.
+
+    A skill is an immediate subdirectory containing a SKILL.md. Each row shows
+    the skill name, a one-line description from the SKILL.md frontmatter, and the
+    date it was last updated (last commit touching it, else the file mtime).
+    """
+    console = Console()
+    skills_dir = os.path.join(os.path.expanduser("~"), ".claude", "skills")
+    if not os.path.isdir(skills_dir):
+        console.print(f"[red]Skills directory not found: {skills_dir}[/red]")
+        return 1
+
+    rows = []
+    for name in sorted(os.listdir(skills_dir)):
+        skill_md = os.path.join(skills_dir, name, "SKILL.md")
+        if not os.path.isfile(skill_md):
+            continue
+        description = _read_skill_description(skill_md)
+        if len(description) > 100:
+            description = description[:99].rstrip() + "..."
+        updated = _skill_last_updated(skills_dir, name, skill_md)
+        rows.append((name, description, updated))
+
+    if not rows:
+        console.print(f"[yellow]No skills found in {skills_dir}[/yellow]")
+        return 0
+
+    table = Table(title="Claude Skills", show_lines=True, header_style="bold yellow")
+    table.add_column("Skill", justify="left", style="cyan", no_wrap=True)
+    table.add_column("Description", justify="left", style="white")
+    table.add_column("Updated", justify="left", style="green", no_wrap=True)
+    for name, description, updated in rows:
+        table.add_row(
+            name, escape(description) if description else "(no description)", updated
+        )
+
+    console.print(table)
+    console.print(f"\n[dim]{len(rows)} skills in {skills_dir}[/dim]")
+    return 0
+
+
+def skill(args):
+    """Dispatch a `git skill <subcommand>` invocation.
+
+    Subcommands:
+      list   List installed skills in ~/.claude/skills (name, description,
+             last-updated date) as a table.
+    """
+    sub = args[0] if args else ""
+    if sub == "list":
+        return list_skills()
+    if sub in ("", "help", "-h", "--help"):
+        Console().print("usage: git skill list")
+        return 0
+    Console(stderr=True).print(
+        f"[red]git skill: unknown subcommand '{sub}' (try: list)[/red]"
+    )
+    return 1
 
 
 # Issue labels -> branch-name prefix, per the git-policies branch conventions.
@@ -976,6 +1105,8 @@ if __name__ == "__main__":
             sys.exit(switch_to_main())
         elif function_name == "update_all_main":
             sys.exit(update_all_main())
+        elif function_name == "skill":
+            sys.exit(skill(sys.argv[2:]))
         else:
             print(f"Function {function_name} not found.")
     else:
