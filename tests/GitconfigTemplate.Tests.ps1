@@ -10,6 +10,7 @@ BeforeDiscovery {
         @{ Alias = 'cleanup' }
         @{ Alias = 'main' }
         @{ Alias = 'start' }
+        @{ Alias = 'skill' }
     )
 
     # Simple (non-helper) aliases added for the categorized browser. Each must be
