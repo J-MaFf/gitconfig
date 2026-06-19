@@ -8,6 +8,10 @@
 test_output.txt
 docs/update-gitconfig.log
 
+# Pester generated reports (config/pester.config.ps1 enables code coverage)
+coverage.xml
+testResults.xml
+
 # Claude Code local session data
 .claude/
 
