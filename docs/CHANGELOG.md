@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `tests/gitconfig_helper.Tests.ps1` — the `cleanup Function` tests no longer run the
+  destructive `git cleanup` / `cleanup --force` / `cleanup -f` against the current working
+  directory. Run from a clone, that directory is the real repo, and `--force` deletes
+  local-only branches and moves `HEAD` to `main` — it silently deleted a freshly created
+  `feat/` branch during #141. The three tests now build a throwaway repo (with a wired bare
+  remote, a deleted-remote "gone" branch, and a local-only branch) in a temp dir, run inside
+  it, and restore the original location afterward — mirroring the `switch_to_main` /
+  `update_all_main` isolation. They also now assert the expected branches are deleted/kept
+  ([#142](https://github.com/J-MaFf/gitconfig/issues/142))
+
 - `scripts/mac version/initialize-local-config.sh` — always write `[gpg "ssh"]
   allowedSignersFile` when commit signing is enabled, not only when 1Password's
   `op-ssh-sign` is detected. The template ships a literal `signingkey` with

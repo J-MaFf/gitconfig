@@ -64,23 +64,85 @@ import gitconfig_helper
     }
 
     Context "cleanup Function" {
+        # `cleanup` is DESTRUCTIVE: it switches HEAD to main and (with --force/-f)
+        # deletes local-only branches. Running it against the current directory
+        # would maul the developer's working clone when the suite is run from a
+        # checkout (this deleted a freshly created feat/ branch during PR #141).
+        # So each test runs inside a throwaway repo, mirroring the switch_to_main /
+        # update_all_main contexts below.
+        BeforeEach {
+            # Parent temp dir holds both the working repo and its bare "remote".
+            $script:cleanupParent = New-Item -ItemType Directory -Path "$env:TEMP\git_cleanup_$(Get-Random)" -Force
+            $repo = Join-Path $script:cleanupParent "repo"
+            $bare = Join-Path $script:cleanupParent "remote.git"
+            New-Item -ItemType Directory -Path $repo | Out-Null
+            Push-Location $repo
+
+            & git init 2>&1 | Out-Null
+            & git checkout -b main 2>&1 | Out-Null
+            & git config user.email "test@example.com" 2>&1 | Out-Null
+            & git config user.name "Test User" 2>&1 | Out-Null
+            & git config commit.gpgsign false 2>&1 | Out-Null
+            & git config init.defaultBranch main 2>&1 | Out-Null
+
+            # Initial commit on main, wired to a bare remote so fetch/pull succeed.
+            New-Item -Path "a.txt" -Value "a" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "init" 2>&1 | Out-Null
+            & git init --bare $bare 2>&1 | Out-Null
+            & git remote add origin $bare 2>&1 | Out-Null
+            & git push -u origin main 2>&1 | Out-Null
+
+            # A branch whose upstream was deleted ("[origin/...: gone]") -> cleanup
+            # auto-deletes it even without --force (the merged-branch case).
+            & git checkout -b feature-gone 2>&1 | Out-Null
+            & git push -u origin feature-gone 2>&1 | Out-Null
+            & git push origin --delete feature-gone 2>&1 | Out-Null
+
+            # A local-only branch (never pushed, no upstream) -> only --force deletes it.
+            & git checkout main 2>&1 | Out-Null
+            & git branch local-only 2>&1 | Out-Null
+
+            # Prune the stale remote-tracking ref so feature-gone reads as ": gone]".
+            & git fetch -p 2>&1 | Out-Null
+        }
+
+        AfterEach {
+            Pop-Location
+            Remove-Item -Path $script:cleanupParent -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
         It "Should accept 'cleanup' function name without arguments" {
-            # Just verify it can be called - actual cleanup depends on git state
             $result = & python $script:helperScript cleanup 2>&1
             # Should complete execution (may return 0 or non-zero depending on git state)
             $result | Should -Not -BeNullOrEmpty
+
+            # Without --force: the gone-remote branch is deleted, the local-only branch survives.
+            $branches = & git branch --format='%(refname:short)'
+            $branches | Should -Not -Contain "feature-gone"
+            $branches | Should -Contain "local-only"
         }
 
         It "Should accept --force flag" {
-            $result = & python $helperScript cleanup --force 2>&1
+            $result = & python $script:helperScript cleanup --force 2>&1
             # Should complete execution with --force flag
             $result | Should -Not -BeNullOrEmpty
+
+            # With --force: both the gone-remote branch AND the local-only branch are deleted.
+            $branches = & git branch --format='%(refname:short)'
+            $branches | Should -Not -Contain "feature-gone"
+            $branches | Should -Not -Contain "local-only"
         }
 
         It "Should accept -f shorthand flag" {
-            $result = & python $helperScript cleanup -f 2>&1
+            $result = & python $script:helperScript cleanup -f 2>&1
             # Should complete execution with -f flag
             $result | Should -Not -BeNullOrEmpty
+
+            # -f behaves exactly like --force: both branches are deleted.
+            $branches = & git branch --format='%(refname:short)'
+            $branches | Should -Not -Contain "feature-gone"
+            $branches | Should -Not -Contain "local-only"
         }
 
         It "Should handle non-git directory gracefully" {
