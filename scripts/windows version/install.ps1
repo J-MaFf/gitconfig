@@ -31,6 +31,14 @@ REQUIREMENTS: Administrator privileges
     exit 0
 }
 
+# Preflight: git is required throughout (this whole tool configures git). A clear
+# "install git" beats a cryptic mid-run failure. Python is checked later by
+# Install-PythonDeps, which degrades gracefully if it's missing.
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Error 'git not found on PATH. Install Git for Windows (winget install Git.Git), then re-run.'
+    exit 1
+}
+
 # Check if running as administrator - elevate if needed
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
