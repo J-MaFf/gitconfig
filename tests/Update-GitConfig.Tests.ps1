@@ -79,11 +79,16 @@ Describe "Update-GitConfig.ps1" {
             $scriptContent | Should -Match 'param\s*\(\s*\[string\]\s*\$RepoPath'
         }
 
-        It "Should ensure the optional 'textual' dependency (idempotent, best-effort)" {
+        It "Should ensure Python deps via the shared Install-PythonDeps routine (idempotent, best-effort)" {
             $scriptContent = Get-Content $script:scriptPath -Raw
-            # Checks presence before installing so repeat runs are a no-op.
-            $scriptContent | Should -Match 'import textual'
-            $scriptContent | Should -Match 'pip install textual'
+            # The dep logic now lives in the shared routine; the update just calls it.
+            $scriptContent | Should -Match 'Install-PythonDeps'
+        }
+
+        It "Should declare 'textual' as an optional (tui) dependency in pyproject.toml" {
+            $repoRoot = Split-Path -Parent $PSScriptRoot
+            $pyproject = Get-Content (Join-Path $repoRoot "pyproject.toml") -Raw
+            $pyproject | Should -Match 'textual'
         }
     }
 

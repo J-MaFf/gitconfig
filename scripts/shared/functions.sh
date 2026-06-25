@@ -264,3 +264,89 @@ disable_git_alias_widget() {
         echo "[OK] Disabled git-alias keybinding in $rc"
     done
 }
+
+# pip install helper: quiet, normal then a --break-system-packages retry for PEP
+# 668 "externally-managed" environments (Homebrew/Debian system Python).
+# Usage: _pip_install PYTHON_BIN PKG...
+_pip_install() {
+    local py="$1"; shift
+    "$py" -m pip install --quiet "$@" >/dev/null 2>&1 \
+        || "$py" -m pip install --quiet --break-system-packages "$@" >/dev/null 2>&1
+}
+
+# Install the Python dependencies declared in pyproject.toml (read via
+# scripts/shared/deps.py): the required deps (rich) plus the optional 'tui' group
+# (textual). Single source of truth for what gets installed — the mac/linux
+# installers and the login auto-update all call this instead of duplicating pip
+# logic. Idempotent (only installs what is not already importable), resolves the
+# interpreter py -> python3 -> python like the git aliases, and treats a failed
+# *optional* install as a warning (the helper falls back to a static table).
+# Every fallible step is guarded so this is safe under `set -e`.
+# Usage: install_python_deps REPO_ROOT
+install_python_deps() {
+    local repo_root="$1"
+    local deps_py="$repo_root/scripts/shared/deps.py"
+    local py="" p spec name
+    local -a required=() optional=() need_required=() need_optional=()
+
+    for p in py python3 python; do
+        if command -v "$p" >/dev/null 2>&1 && "$p" -c '' >/dev/null 2>&1; then
+            py="$p"; break
+        fi
+    done
+    if [ -z "$py" ]; then
+        echo "[WARN] No Python interpreter found; skipping rich/textual (install Python 3, then re-run)"
+        return 0
+    fi
+    if [ ! -f "$deps_py" ]; then
+        echo "[WARN] $deps_py not found; skipping Python dependency install"
+        return 0
+    fi
+    if ! "$py" -m pip --version >/dev/null 2>&1; then
+        echo "[WARN] pip unavailable for $py; install rich (and optionally textual) manually"
+        return 0
+    fi
+
+    # Declared specs, one per line, into arrays (avoids word-splitting on '>=').
+    while IFS= read -r spec; do [ -n "$spec" ] && required+=("$spec"); done < <("$py" "$deps_py" required)
+    while IFS= read -r spec; do [ -n "$spec" ] && optional+=("$spec"); done < <("$py" "$deps_py" optional)
+
+    # Only install what is not already importable (import name = spec minus any
+    # version operator: "rich>=13" -> "rich").
+    for spec in "${required[@]}"; do
+        name="${spec%%[<>=!~ ]*}"
+        "$py" -c "import ${name}" >/dev/null 2>&1 || need_required+=("$spec")
+    done
+    for spec in "${optional[@]}"; do
+        name="${spec%%[<>=!~ ]*}"
+        "$py" -c "import ${name}" >/dev/null 2>&1 || need_optional+=("$spec")
+    done
+
+    if [ "${#need_required[@]}" -eq 0 ] && [ "${#need_optional[@]}" -eq 0 ]; then
+        echo "[OK] Python dependencies already present (rich + textual)"
+        return 0
+    fi
+
+    if [ "${#need_required[@]}" -gt 0 ]; then
+        # Try required + optional together; if that fails, make sure the required
+        # land even when an optional dep is unavailable on this platform.
+        if [ "${#need_optional[@]}" -gt 0 ] && _pip_install "$py" "${need_required[@]}" "${need_optional[@]}"; then
+            echo "[OK] Installed Python deps: ${need_required[*]} ${need_optional[*]}"
+        elif _pip_install "$py" "${need_required[@]}"; then
+            if [ "${#need_optional[@]}" -gt 0 ]; then
+                echo "[OK] Installed required Python deps: ${need_required[*]} (optional unavailable; 'git alias' uses the static table)"
+            else
+                echo "[OK] Installed required Python deps: ${need_required[*]}"
+            fi
+        else
+            echo "[WARN] Could not install required Python deps (${need_required[*]}) — run: $py -m pip install ${need_required[*]}"
+        fi
+    elif [ "${#need_optional[@]}" -gt 0 ]; then
+        if _pip_install "$py" "${need_optional[@]}"; then
+            echo "[OK] Installed optional Python deps: ${need_optional[*]}"
+        else
+            echo "[WARN] Optional Python deps unavailable (${need_optional[*]}); 'git alias' uses the static table"
+        fi
+    fi
+    return 0
+}

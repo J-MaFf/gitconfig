@@ -1,0 +1,23 @@
+# Dependency manifest for the gitconfig helper tooling.
+#
+# DECLARATION ONLY. This repo is a collection of scripts, not a pip-installable
+# package — there is intentionally no [build-system] and you do not `pip install .`.
+# The setup/update scripts read these names via scripts/shared/deps.py and install
+# them directly (degrading gracefully if the optional group is unavailable).
+[project]
+name = "gitconfig-tooling"
+version = "0.0.0"
+description = "Helper tooling for the gitconfig repo (git-alias browser, maintenance)."
+requires-python = ">=3.8"
+
+# Required: gitconfig_helper.py renders its alias/skill tables with rich.
+dependencies = [
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+# Optional: the interactive `git alias` browser (Ctrl-G) uses textual. Without it
+# the helper falls back to a static table, so a missing textual is never fatal.
+tui = [
+    "textual>=0.50",
+]

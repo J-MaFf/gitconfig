@@ -67,33 +67,12 @@ try {
         Write-Log "ERROR: convergence failed (exit code $LASTEXITCODE)"
     }
 
-    # Step 2c: Ensure the optional 'textual' dependency (for the interactive
-    # `git alias` browser) is present. Best-effort and idempotent: resolves the
-    # interpreter py -> python3 -> python (avoiding the Microsoft Store stub),
-    # only installs when missing, and never fails the update if it cannot.
-    $pyCmd = if (Get-Command py -ErrorAction SilentlyContinue)          { "py" }
-             elseif (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" }
-             elseif (Get-Command python -ErrorAction SilentlyContinue)  { "python" }
-             else { $null }
-    if (-not $pyCmd) {
-        Write-Log "Skipping 'textual' check: no Python interpreter found"
-    }
-    else {
-        & $pyCmd -c "import textual" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Log "Optional dependency 'textual' already present"
-        }
-        else {
-            Write-Log "Installing optional dependency 'textual' for the interactive 'git alias' browser..."
-            & $pyCmd -m pip install textual --quiet 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Log "SUCCESS: installed 'textual'"
-            }
-            else {
-                Write-Log "WARNING: could not install 'textual'; 'git alias' will use the static table (install manually: pip install textual)"
-            }
-        }
-    }
+    # Step 2c: Ensure the declared Python deps are present (rich required; textual
+    # optional, for the interactive `git alias` browser). Single source of truth:
+    # the shared Install-PythonDeps routine reads pyproject.toml and installs only
+    # what is missing. Best-effort and idempotent — never fails the update.
+    . (Join-Path $PSScriptRoot 'Functions.ps1')
+    Install-PythonDeps -RepoRoot $RepoPath -Logger { param($m) Write-Log $m }
 
     # Step 3: Prune merged branches. Drop stale remote-tracking refs, then delete
     # local branches whose upstream remote has been deleted (": gone]"). Mirrors

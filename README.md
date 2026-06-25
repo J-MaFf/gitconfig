@@ -204,6 +204,9 @@ python -m pip install rich textual
 
 `rich` is required; `textual` is optional and only powers the interactive
 `git alias` browser. Without it, `git alias` shows the static grouped table.
+These are declared in [`pyproject.toml`](pyproject.toml) (`rich` required; `textual`
+under the optional `tui` extra); the setup/update scripts read it and install them
+for you, so the manual `pip install` above is only needed as a fallback.
 
 **`git alias` shows a static table instead of the interactive browser:** install
 `textual` (`pip install textual`) and run `git alias` directly in a terminal —

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`pyproject.toml` dependency manifest** — the helper's Python deps are now declared in one
+  place: `rich` (required) under `[project.dependencies]` and `textual` (optional) under the
+  `[project.optional-dependencies].tui` extra. Declaration only — the repo is scripts, not a
+  pip-installable package. A dependency-free `scripts/shared/deps.py` reads it (tomllib with a
+  regex fallback for Python < 3.11) ([#154](https://github.com/J-MaFf/gitconfig/pull/154), closes [#153](https://github.com/J-MaFf/gitconfig/issues/153))
+
+### Changed
+
+- **Consolidated the duplicated Python-dependency install logic** behind one routine per platform
+  family that reads the manifest: `install_python_deps` in `scripts/shared/functions.sh` (bash, for
+  the mac/linux installers + the login auto-update) and `Install-PythonDeps` in the new
+  `scripts/windows version/Functions.ps1` (PowerShell, for `install.ps1` + `Update-GitConfig.ps1`).
+  Replaced five near-identical pip blocks with calls. Behaviour is unchanged — idempotent,
+  `py`→`python3`→`python` resolution, `--break-system-packages` fallback, optional-dep failure stays
+  a warning. Pester tests retargeted to the new structure
+  ([#154](https://github.com/J-MaFf/gitconfig/pull/154))
+
 ### Fixed
 
 - `scripts/windows version/Initialize-LocalConfig.ps1` — fixed a spurious `[WARN] Git may
