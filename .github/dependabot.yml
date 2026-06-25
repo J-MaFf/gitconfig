@@ -1,0 +1,35 @@
+version: 2
+updates:
+  # Keep the GitHub Actions in .github/workflows current. Grouped into one weekly
+  # PR (only a couple of actions are pinned, so per-action PRs would be noise).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+    assignees:
+      - "J-MaFf"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # Track the Python deps declared in pyproject.toml (rich, textual). They are
+  # floor-pinned (>=), so version bumps are rare — the main value here is
+  # Dependabot SECURITY updates for these packages. Requires pyproject.toml,
+  # added in PR #154; merge that first so this ecosystem has a manifest.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    assignees:
+      - "J-MaFf"
+    groups:
+      python:
+        patterns:
+          - "*"

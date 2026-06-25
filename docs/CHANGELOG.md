@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/windows version/install.ps1` now verify `git` is on `PATH` up front and exit with an
   "install git" message, rather than failing partway through (the whole tool configures git)
   ([#156](https://github.com/J-MaFf/gitconfig/pull/156))
+- **Dependabot** (`.github/dependabot.yml`) — weekly, grouped, J-MaFf-assigned updates for two
+  ecosystems: **github-actions** (the workflow action pins) and **pip** (the `rich`/`textual` deps
+  declared in `pyproject.toml`; floor-pinned, so the pip value is mainly Dependabot security
+  updates). Conventional `ci:` / `deps:` commit prefixes. The pip ecosystem needs `pyproject.toml`
+  (added in [#154](https://github.com/J-MaFf/gitconfig/pull/154) — merge that first)
+  ([#157](https://github.com/J-MaFf/gitconfig/issues/157))
 
 ### Changed
 
