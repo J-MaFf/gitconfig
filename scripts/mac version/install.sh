@@ -9,6 +9,11 @@
 
 set -e
 
+# Preflight: git is required throughout (this whole tool configures git). A clear
+# "install git" beats a cryptic mid-run failure. Python is checked later by
+# install_python_deps, which degrades gracefully if it's missing.
+command -v git >/dev/null 2>&1 || { echo "[ERROR] git not found on PATH. Install git (brew install git), then re-run." >&2; exit 1; }
+
 FORCE=false
 NO_LAUNCHD=false
 HELP=false

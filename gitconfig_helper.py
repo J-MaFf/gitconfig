@@ -345,6 +345,30 @@ def _skill_last_updated(skills_dir, name, skill_md_path):
         return "unknown"
 
 
+# The claude-skills repo, cloned to ~/.claude/skills, supplies both the skills
+# themselves and the wrapper scripts that `git skill sync/status/publish` drive.
+# It is a SEPARATE repo (https://github.com/J-MaFf/claude-skills); gitconfig only
+# provides the `git skill` UX layer on top of it. So every `git skill` subcommand
+# depends on that repo being installed there.
+SKILLS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "skills")
+
+
+def _require_skills_dir():
+    """Return True if ~/.claude/skills exists, else print an actionable pointer to
+    the claude-skills repo and return False."""
+    if os.path.isdir(SKILLS_DIR):
+        return True
+    Console(stderr=True).print(
+        f"[red]git skill: {SKILLS_DIR} not found — the claude-skills repo isn't "
+        f"installed on this machine.[/red]\n"
+        f"[yellow]It's a separate repo that supplies the skills and the wrapper "
+        f"scripts these aliases drive. Install it:[/yellow]\n"
+        f"  git clone https://github.com/J-MaFf/claude-skills.git ~/.claude/skills\n"
+        f"  # then run its per-OS setup, e.g.:  sh ~/.claude/skills/scripts/setup-macos.sh"
+    )
+    return False
+
+
 def list_skills():
     """Print installed Claude skills (~/.claude/skills) as a rich table.
 
@@ -353,7 +377,7 @@ def list_skills():
     date it was last updated (last commit touching it, else the file mtime).
     """
     console = Console()
-    skills_dir = os.path.join(os.path.expanduser("~"), ".claude", "skills")
+    skills_dir = SKILLS_DIR
     if not os.path.isdir(skills_dir):
         console.print(f"[red]Skills directory not found: {skills_dir}[/red]")
         return 1
@@ -414,7 +438,7 @@ def _run_skill_script(base):
     Picks the per-OS variant: PowerShell on Windows, bash elsewhere. Returns the
     script's exit code, or 1 if the expected script file is missing.
     """
-    scripts_dir = os.path.join(os.path.expanduser("~"), ".claude", "skills", "scripts")
+    scripts_dir = os.path.join(SKILLS_DIR, "scripts")
     if sys.platform == "win32":
         script = os.path.join(scripts_dir, base + ".ps1")
         cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
@@ -444,18 +468,21 @@ def skill(args):
     wrapper scripts shipped in the claude-skills repo (see SKILL_SCRIPTS).
     """
     sub = args[0] if args else ""
-    if sub == "list":
-        return list_skills()
-    if sub in SKILL_SCRIPTS:
-        return _run_skill_script(SKILL_SCRIPTS[sub])
     if sub in ("", "help", "-h", "--help"):
         Console().print(SKILL_USAGE)
         return 0
-    Console(stderr=True).print(
-        f"[red]git skill: unknown subcommand '{sub}' "
-        f"(try: list, sync, status, publish)[/red]"
-    )
-    return 1
+    if sub != "list" and sub not in SKILL_SCRIPTS:
+        Console(stderr=True).print(
+            f"[red]git skill: unknown subcommand '{sub}' "
+            f"(try: list, sync, status, publish)[/red]"
+        )
+        return 1
+    # All real subcommands need the claude-skills repo at ~/.claude/skills.
+    if not _require_skills_dir():
+        return 1
+    if sub == "list":
+        return list_skills()
+    return _run_skill_script(SKILL_SCRIPTS[sub])
 
 
 # Issue labels -> branch-name prefix, per the git-policies branch conventions.

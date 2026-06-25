@@ -199,5 +199,36 @@ class TestGetGitAliases:
         assert helper.get_git_aliases() == []
 
 
+# --------------------------------------------------------------------------
+# _require_skills_dir / skill() cross-repo guard
+# --------------------------------------------------------------------------
+
+class TestSkillCrossRepoGuard:
+    """`git skill` depends on the separate claude-skills repo at ~/.claude/skills.
+    The guard must allow help/usage and unknown-subcommand handling without it,
+    but block the real subcommands with an actionable pointer when it's missing."""
+
+    def test_require_true_when_dir_exists(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        assert helper._require_skills_dir() is True
+
+    def test_require_false_when_dir_missing(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path / "nope"))
+        assert helper._require_skills_dir() is False
+
+    def test_skill_list_blocked_when_repo_missing(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path / "nope"))
+        assert helper.skill(["list"]) == 1
+
+    def test_help_and_usage_work_without_repo(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path / "nope"))
+        assert helper.skill(["help"]) == 0
+        assert helper.skill([]) == 0
+
+    def test_unknown_subcommand_errors_without_repo(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path / "nope"))
+        assert helper.skill(["bogus"]) == 1
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
