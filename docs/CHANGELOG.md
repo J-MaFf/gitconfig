@@ -21,11 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `git clone … && setup` to fix it) instead of a generic "directory not found" or "wrapper script not
   found". `git skill help` and unknown-subcommand handling still work without the repo. Covered by new
   pytest cases in `tests/shared/test_gitconfig_helper.py`
-  ([#155](https://github.com/J-MaFf/gitconfig/issues/155))
+  ([#156](https://github.com/J-MaFf/gitconfig/pull/156), closes [#155](https://github.com/J-MaFf/gitconfig/issues/155))
 - **`git` preflight in the installers** — `scripts/{mac,linux} version/install.sh` and
   `scripts/windows version/install.ps1` now verify `git` is on `PATH` up front and exit with an
   "install git" message, rather than failing partway through (the whole tool configures git)
-  ([#155](https://github.com/J-MaFf/gitconfig/issues/155))
+  ([#156](https://github.com/J-MaFf/gitconfig/pull/156))
 
 ### Changed
 
