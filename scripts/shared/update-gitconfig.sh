@@ -61,30 +61,12 @@ mkdir -p "$(dirname "$LOG_FILE")"
         log_message "ERROR: could not converge ~/.gitconfig from template"
     fi
 
-    # Ensure the optional 'textual' dependency (for the interactive `git alias`
-    # browser) is present. Best-effort and idempotent: resolves the interpreter
-    # py -> python3 -> python like the aliases, only installs when textual is
-    # missing, and never fails the update if the install does not succeed.
-    PYTHON_BIN=""
-    for p in py python3 python; do
-        if command -v "$p" >/dev/null 2>&1 && "$p" -c '' >/dev/null 2>&1; then
-            PYTHON_BIN="$p"
-            break
-        fi
-    done
-    if [ -z "$PYTHON_BIN" ]; then
-        log_message "Skipping 'textual' check: no working Python interpreter found"
-    elif "$PYTHON_BIN" -c "import textual" >/dev/null 2>&1; then
-        log_message "Optional dependency 'textual' already present"
-    else
-        log_message "Installing optional dependency 'textual' for the interactive 'git alias' browser..."
-        if "$PYTHON_BIN" -m pip install textual --quiet >/dev/null 2>&1 || \
-           "$PYTHON_BIN" -m pip install textual --quiet --break-system-packages >/dev/null 2>&1; then
-            log_message "SUCCESS: installed 'textual'"
-        else
-            log_message "WARNING: could not install 'textual'; 'git alias' will use the static table (install manually: pip3 install textual)"
-        fi
-    fi
+    # Ensure the declared Python deps are present (rich required; textual optional,
+    # for the interactive `git alias` browser). Single source of truth: the shared
+    # install_python_deps routine reads pyproject.toml and installs only what is
+    # missing. Best-effort and idempotent — never fails the update.
+    log_message "Checking Python dependencies (rich + optional textual)..."
+    install_python_deps "$REPO_PATH"
 
     # Prune merged branches: drop stale remote-tracking refs, then delete local
     # branches whose upstream remote has been deleted (": gone]"). Mirrors the

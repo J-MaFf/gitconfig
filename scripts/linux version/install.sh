@@ -153,27 +153,13 @@ if [ "$NO_CRON" = false ]; then
     echo ""
 fi
 
-# STEP 6: Install Python dependencies
+# STEP 6: Install Python dependencies (rich required; textual optional, for the
+# interactive 'git alias' browser). Declared in pyproject.toml and installed by
+# the shared install_python_deps routine (single source of truth across mac/linux
+# install + the login auto-update).
 echo "[STEP 6] Installing Python dependencies..."
 echo "-----"
-# 'rich' is required for the helper's tables; 'textual' is optional and only
-# powers the interactive 'git alias' browser (the helper falls back to a static
-# table without it), so a failed textual install is a warning, not an error.
-if command -v pip3 &>/dev/null; then
-    if pip3 show rich &>/dev/null 2>&1 && pip3 show textual &>/dev/null 2>&1; then
-        echo "[OK] Python 'rich' and 'textual' already installed"
-    elif pip3 install rich textual --quiet 2>/dev/null; then
-        echo "[OK] Installed Python 'rich' and 'textual'"
-    elif pip3 install rich textual --quiet --break-system-packages 2>/dev/null; then
-        echo "[OK] Installed Python 'rich' and 'textual' (--break-system-packages)"
-    elif pip3 install rich --quiet 2>/dev/null || pip3 install rich --quiet --break-system-packages 2>/dev/null; then
-        echo "[OK] Installed Python 'rich' (textual unavailable; 'git alias' uses the static table)"
-    else
-        echo "[WARN] Could not install 'rich' — run manually: pip3 install rich textual"
-    fi
-else
-    echo "[WARN] pip3 not found — install Python 3: sudo apt install python3-pip"
-fi
+install_python_deps "$REPO_ROOT"
 echo ""
 
 # STEP 6b: Enable the interactive git-alias browser keybinding (Ctrl-G)

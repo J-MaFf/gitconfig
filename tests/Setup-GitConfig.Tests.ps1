@@ -56,19 +56,23 @@ Describe "install.ps1" {
     }
 
     Context "Python Dependencies" {
-        It "Should attempt to install Python rich library" {
+        # The install logic now lives in the shared Install-PythonDeps routine
+        # (scripts/windows version/Functions.ps1), driven by the pyproject.toml
+        # manifest. install.ps1 just delegates to it.
+        It "Should delegate Python dependency install to the shared Install-PythonDeps routine" {
             $scriptContent = Get-Content $script:scriptPath -Raw
-            $scriptContent | Should -Match "pip.*install.*rich"
+            $scriptContent | Should -Match "Install-PythonDeps"
         }
 
-        It "Should verify rich is importable" {
-            $scriptContent = Get-Content $script:scriptPath -Raw
-            $scriptContent | Should -Match "import rich"
+        It "Should declare 'rich' (required) in pyproject.toml" {
+            $pyproject = Get-Content (Join-Path $script:repoRoot "pyproject.toml") -Raw
+            $pyproject | Should -Match "rich"
         }
 
-        It "Should warn gracefully if pip is not available" {
-            $scriptContent = Get-Content $script:scriptPath -Raw
-            $scriptContent | Should -Match "\[WARN\].*pip"
+        It "The shared routine should pip-install deps and warn gracefully without pip" {
+            $functions = Get-Content (Join-Path $script:repoRoot "scripts\windows version\Functions.ps1") -Raw
+            $functions | Should -Match "pip install"
+            $functions | Should -Match "\[WARN\].*pip"
         }
     }
 

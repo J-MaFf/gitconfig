@@ -153,47 +153,14 @@ if (-not $NoTask) {
     Write-Host ""
 }
 
-# STEP 6: Install Python dependencies
+# STEP 6: Install Python dependencies (rich required; textual optional, for the
+# interactive 'git alias' browser). Declared in pyproject.toml and installed by
+# the shared Install-PythonDeps routine (single source of truth across Windows
+# install + the login auto-update).
 Write-Host "[STEP 6] Installing Python dependencies..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
-$pip = Get-Command pip -ErrorAction SilentlyContinue
-$pip3 = Get-Command pip3 -ErrorAction SilentlyContinue
-$pipCmd = if ($pip3) { "pip3" } elseif ($pip) { "pip" } else { $null }
-
-# 'rich' is required for the helper's tables; 'textual' is optional and only
-# powers the interactive 'git alias' browser (the helper falls back to a static
-# table without it), so a failed textual install is a warning, not an error.
-if ($pipCmd) {
-    $richCheck = & $pipCmd show rich 2>$null
-    $textualCheck = & $pipCmd show textual 2>$null
-    if ($richCheck -and $textualCheck) {
-        Write-Host "[OK] Python 'rich' and 'textual' already installed" -ForegroundColor Green
-    }
-    else {
-        try {
-            & $pipCmd install rich textual --quiet 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "[OK] Installed Python 'rich' and 'textual'" -ForegroundColor Green
-            }
-            else {
-                # textual is optional; make sure the required 'rich' still lands.
-                & $pipCmd install rich --quiet 2>$null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "[OK] Installed Python 'rich' (textual unavailable; 'git alias' uses the static table)" -ForegroundColor Green
-                }
-                else {
-                    Write-Host "[WARN] Could not install 'rich' - run manually: pip install rich textual" -ForegroundColor Yellow
-                }
-            }
-        }
-        catch {
-            Write-Host "[WARN] Could not install 'rich' - run manually: pip install rich textual" -ForegroundColor Yellow
-        }
-    }
-}
-else {
-    Write-Host "[WARN] pip not found - install Python 3 from https://python.org" -ForegroundColor Yellow
-}
+. (Join-Path $scriptDir 'Functions.ps1')
+Install-PythonDeps -RepoRoot $repoRoot
 Write-Host ""
 
 # STEP 6b: Enable the interactive git-alias browser keybinding (Ctrl-G)
