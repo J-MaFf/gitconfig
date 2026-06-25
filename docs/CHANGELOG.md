@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared in `pyproject.toml`; floor-pinned, so the pip value is mainly Dependabot security
   updates). Conventional `ci:` / `deps:` commit prefixes. The pip ecosystem needs `pyproject.toml`
   (added in [#154](https://github.com/J-MaFf/gitconfig/pull/154) — merge that first)
-  ([#157](https://github.com/J-MaFf/gitconfig/issues/157))
+  ([#158](https://github.com/J-MaFf/gitconfig/pull/158), closes [#157](https://github.com/J-MaFf/gitconfig/issues/157))
 
 ### Changed
 
