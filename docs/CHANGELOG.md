@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   place: `rich` (required) under `[project.dependencies]` and `textual` (optional) under the
   `[project.optional-dependencies].tui` extra. Declaration only — the repo is scripts, not a
   pip-installable package. A dependency-free `scripts/shared/deps.py` reads it (tomllib with a
-  regex fallback for Python < 3.11) ([#153](https://github.com/J-MaFf/gitconfig/issues/153))
+  regex fallback for Python < 3.11) ([#154](https://github.com/J-MaFf/gitconfig/pull/154), closes [#153](https://github.com/J-MaFf/gitconfig/issues/153))
 
 ### Changed
 
@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Replaced five near-identical pip blocks with calls. Behaviour is unchanged — idempotent,
   `py`→`python3`→`python` resolution, `--break-system-packages` fallback, optional-dep failure stays
   a warning. Pester tests retargeted to the new structure
-  ([#153](https://github.com/J-MaFf/gitconfig/issues/153))
+  ([#154](https://github.com/J-MaFf/gitconfig/pull/154))
 
 ### Fixed
 
