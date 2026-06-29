@@ -20,6 +20,20 @@ Describe "Cleanup-GitConfig.ps1" {
             $scriptContent = Get-Content $scriptPath -Raw
             $scriptContent | Should -Match '\[switch\]\s*\$Help'
         }
+
+        It "Should accept -KeepLocal parameter" {
+            $scriptContent = Get-Content $scriptPath -Raw
+            $scriptContent | Should -Match '\[switch\]\s*\$KeepLocal'
+        }
+    }
+
+    Context "Preserve machine-specific config" {
+        It "Should skip removing .gitconfig.local when -KeepLocal is set" {
+            $scriptContent = Get-Content $scriptPath -Raw
+            # Guard branch present: -KeepLocal short-circuits the removal step.
+            $scriptContent | Should -Match 'if \(\$KeepLocal\)'
+            $scriptContent | Should -Match 'Preserving \.gitconfig\.local'
+        }
     }
 
     Context "Script Functionality" {

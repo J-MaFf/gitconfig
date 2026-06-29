@@ -15,18 +15,24 @@ USAGE:
     .\Initialize-LocalConfig.ps1 [OPTIONS]
 
 OPTIONS:
-    -Force      Overwrite existing .gitconfig.local without prompting
+    -Force      Regenerate (overwrite) an existing .gitconfig.local from the
+                template. Without -Force, an existing file is preserved.
     -Help       Display this help message
 
 DESCRIPTION:
     Creates ~/.gitconfig.local with machine-specific safe directories and paths.
     This file is included by the main .gitconfig and should NOT be version controlled.
 
+    Create-if-missing: because this file holds user-owned machine state (hand-tuned
+    safe.directory entries, etc.), an existing one is preserved by default; pass
+    -Force to regenerate it from the template. The allowed_signers file is always
+    ensured (idempotently), even when the config itself is preserved.
+
 EXAMPLE:
-    # Interactive mode (prompts before overwriting)
+    # Create if missing; preserve an existing file
     .\Initialize-LocalConfig.ps1
 
-    # Force mode (overwrites without prompting)
+    # Regenerate from template, overwriting the existing file
     .\Initialize-LocalConfig.ps1 -Force
 
 SAFE DIRECTORIES:
@@ -106,18 +112,18 @@ Write-Host "Home Directory: $homeDir" -ForegroundColor Green
 Write-Host "Local Config Path: $localConfigPath" -ForegroundColor Green
 Write-Host ""
 
-# Check if .gitconfig.local already exists
-if ((Test-Path $localConfigPath) -and -not $Force) {
-    Write-Host ".gitconfig.local already exists." -ForegroundColor Yellow
-    $response = Read-Host "Overwrite? (y/n)"
-    if ($response -ne "y") {
-        Write-Host "Cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
+# Create-if-missing: .gitconfig.local holds user-owned machine state (safe.directory
+# entries, etc.), so never clobber an existing one. Regenerate deliberately with -Force.
+$localConfigExists = Test-Path $localConfigPath
+$preserved = $localConfigExists -and -not $Force
 
 try {
-    $configContent = @"
+    if ($preserved) {
+        Write-Host "[SKIP] .gitconfig.local already exists; preserving machine-specific config" -ForegroundColor Yellow
+        Write-Host "       (regenerate from template with: Initialize-LocalConfig.ps1 -Force)" -ForegroundColor DarkGray
+    }
+    else {
+        $configContent = @"
 # Machine-Specific Git Configuration
 # This file is automatically included by .gitconfig and should NOT be committed
 
@@ -148,9 +154,15 @@ try {
 	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-install
 "@
 
-    # Create or overwrite the local config file
-    Set-Content -Path $localConfigPath -Value $configContent -Force
-    Write-Host "[OK] Created .gitconfig.local" -ForegroundColor Green
+        # Create or overwrite the local config file
+        Set-Content -Path $localConfigPath -Value $configContent -Force
+        if ($localConfigExists) {
+            Write-Host "[OK] Regenerated .gitconfig.local (-Force)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "[OK] Created .gitconfig.local" -ForegroundColor Green
+        }
+    }
     Write-Host ""
 
     # Build ~/.ssh/allowed_signers so git can verify SSH commit signatures locally.
@@ -159,18 +171,22 @@ try {
     $allowedSignersPath = Join-Path $homeDir ".ssh\allowed_signers"
     Update-AllowedSigners -AllowedSignersPath $allowedSignersPath
 
-    Write-Host ""
-    Write-Host "Local configuration includes:" -ForegroundColor Cyan
-    Write-Host "  - SSH signing program path (op-ssh-sign.exe)" -ForegroundColor Gray
-    Write-Host "  - Allowed signers file for local signature verification" -ForegroundColor Gray
-    Write-Host "  - Network safe directories (10.210.3.10, KFWS9BDC01)" -ForegroundColor Gray
-    Write-Host "  - Local development directories" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "To customize safe directories:" -ForegroundColor Cyan
-    Write-Host "  1. Edit $localConfigPath" -ForegroundColor Gray
-    Write-Host "  2. Add or modify entries in the [safe] section" -ForegroundColor Gray
-    Write-Host "  3. Save and reload git" -ForegroundColor Gray
-    Write-Host ""
+    # Describe the generated layout only when we actually wrote it; on the preserve
+    # path the user's file may differ, so this summary would be misleading.
+    if (-not $preserved) {
+        Write-Host ""
+        Write-Host "Local configuration includes:" -ForegroundColor Cyan
+        Write-Host "  - SSH signing program path (op-ssh-sign.exe)" -ForegroundColor Gray
+        Write-Host "  - Allowed signers file for local signature verification" -ForegroundColor Gray
+        Write-Host "  - Network safe directories (10.210.3.10, KFWS9BDC01)" -ForegroundColor Gray
+        Write-Host "  - Local development directories" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "To customize safe directories:" -ForegroundColor Cyan
+        Write-Host "  1. Edit $localConfigPath" -ForegroundColor Gray
+        Write-Host "  2. Add or modify entries in the [safe] section" -ForegroundColor Gray
+        Write-Host "  3. Save and reload git" -ForegroundColor Gray
+        Write-Host ""
+    }
 
     # Verify git can read the config. Validate the generated file directly with
     # --file (scope- and CWD-independent) rather than --local, which reads the

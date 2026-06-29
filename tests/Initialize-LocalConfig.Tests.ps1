@@ -136,4 +136,67 @@ Describe "Initialize-LocalConfig.ps1" {
             (Get-Content $script:scriptPath -Raw) | Should -Not -Match 'git config --local --list'
         }
     }
+
+    Context "create-if-missing (preserve existing .gitconfig.local)" {
+        BeforeEach {
+            # Same sandbox isolation as the other contexts.
+            $script:sandbox = Join-Path $TestDrive ([guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Path $script:sandbox -Force | Out-Null
+
+            $script:savedUserProfile = $env:USERPROFILE
+            $script:savedHome = $env:HOME
+            $script:savedGlobal = $env:GIT_CONFIG_GLOBAL
+            $script:savedSystem = $env:GIT_CONFIG_SYSTEM
+
+            $env:USERPROFILE = $script:sandbox
+            $env:HOME = $script:sandbox
+            $env:GIT_CONFIG_GLOBAL = Join-Path $script:sandbox ".gitconfig"
+            $env:GIT_CONFIG_SYSTEM = Join-Path $script:sandbox "no-system-config"
+
+            git config --global user.email "sandbox@example.com" 2>&1 | Out-Null
+            git config --global user.signingkey "ssh-ed25519 AAAASANDBOXKEY test-comment" 2>&1 | Out-Null
+
+            $script:localPath = Join-Path $script:sandbox ".gitconfig.local"
+        }
+
+        AfterEach {
+            $env:USERPROFILE = $script:savedUserProfile
+            $env:HOME = $script:savedHome
+            $env:GIT_CONFIG_GLOBAL = $script:savedGlobal
+            $env:GIT_CONFIG_SYSTEM = $script:savedSystem
+        }
+
+        It "Should preserve an existing file when run without -Force" {
+            Set-Content -Path $script:localPath -Value "# USER-EDIT-MARKER-DO-NOT-CLOBBER"
+
+            Push-Location $script:sandbox
+            try { & $script:scriptPath 2>&1 | Out-Null } finally { Pop-Location }
+
+            $content = Get-Content $script:localPath -Raw
+            $content | Should -Match 'USER-EDIT-MARKER-DO-NOT-CLOBBER'
+            $content | Should -Not -Match 'op-ssh-sign\.exe'   # template was NOT written
+        }
+
+        It "Should still ensure allowed_signers even when preserving the config" {
+            Set-Content -Path $script:localPath -Value "# USER-EDIT-MARKER-DO-NOT-CLOBBER"
+
+            Push-Location $script:sandbox
+            try { & $script:scriptPath 2>&1 | Out-Null } finally { Pop-Location }
+
+            $allowed = Join-Path $script:sandbox ".ssh\allowed_signers"
+            $allowed | Should -Exist
+            (Get-Content $allowed -Raw) | Should -Match 'sandbox@example.com namespaces="git" ssh-ed25519 AAAASANDBOXKEY'
+        }
+
+        It "Should regenerate from template when -Force overwrites an existing file" {
+            Set-Content -Path $script:localPath -Value "# USER-EDIT-MARKER-DO-NOT-CLOBBER"
+
+            Push-Location $script:sandbox
+            try { & $script:scriptPath -Force 2>&1 | Out-Null } finally { Pop-Location }
+
+            $content = Get-Content $script:localPath -Raw
+            $content | Should -Not -Match 'USER-EDIT-MARKER-DO-NOT-CLOBBER'
+            $content | Should -Match 'op-ssh-sign\.exe'        # template WAS written
+        }
+    }
 }

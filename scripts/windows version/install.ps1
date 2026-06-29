@@ -86,7 +86,10 @@ Write-Host ""
 Write-Host "[STEP 0] Cleaning up previous installation..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 try {
-    & $cleanupScript -Force -ErrorAction Stop | Out-Null
+    # -KeepLocal: the preflight teardown must not delete ~/.gitconfig.local, which
+    # holds user-owned machine state (safe.directory entries, etc.). A full reset
+    # is available via the standalone Cleanup-GitConfig.ps1 (without -KeepLocal).
+    & $cleanupScript -Force -KeepLocal -ErrorAction Stop | Out-Null
     Write-Host "[OK] Previous installation cleaned up" -ForegroundColor Green
 }
 catch {
@@ -117,15 +120,24 @@ catch {
 }
 Write-Host ""
 
-# STEP 3: Generate local config
+# STEP 3: Generate machine-specific config (create-if-missing). .gitconfig.local
+# is user-owned state, so an existing one is preserved (never overwritten on
+# re-install, even with -Force); regenerate deliberately with
+# Initialize-LocalConfig.ps1 -Force.
 Write-Host "[STEP 3] Generating machine-specific configuration..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 try {
-    if ($Force) { & $initLocalScript -Force | Out-Null } else { & $initLocalScript | Out-Null }
-    Write-Host "[OK] Generated .gitconfig.local" -ForegroundColor Green
+    $localExisted = Test-Path (Join-Path $homeDir ".gitconfig.local")
+    & $initLocalScript | Out-Null
+    if ($localExisted) {
+        Write-Host "[OK] Preserved existing .gitconfig.local" -ForegroundColor Green
+    }
+    else {
+        Write-Host "[OK] Generated .gitconfig.local" -ForegroundColor Green
+    }
 }
 catch {
-    Write-Host "[FAIL] Could not generate .gitconfig.local: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "[FAIL] Could not set up .gitconfig.local: $($_.Exception.Message)" -ForegroundColor Red
 }
 Write-Host ""
 

@@ -4,7 +4,8 @@
 
 param(
     [switch]$Help = $false,
-    [switch]$Force = $false
+    [switch]$Force = $false,
+    [switch]$KeepLocal = $false
 )
 
 if ($Help) {
@@ -14,14 +15,17 @@ GitConfig Cleanup Script
 USAGE: .\Cleanup-GitConfig.ps1 [OPTIONS]
 
 OPTIONS:
-    -Force   Skip confirmation prompts
-    -Help    Display this help message
+    -Force      Skip confirmation prompts
+    -KeepLocal  Preserve ~/.gitconfig.local (machine-specific user config).
+                Used by install.ps1's preflight so re-running setup never wipes
+                hand-tuned safe.directory entries, etc.
+    -Help       Display this help message
 
 DESCRIPTION:
     Removes all gitconfig-related setup:
     1. Backs up and removes .gitconfig (generated file)
     2. Removes symlinks (.gitignore_global and gitconfig_helper.py)
-    3. Removes .gitconfig.local
+    3. Removes .gitconfig.local (unless -KeepLocal)
     4. Deletes scheduled task (if it exists)
     5. Clears git SSH signing config
 
@@ -109,7 +113,10 @@ Write-Host "[STEP 2] Removing .gitconfig.local..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 
 $localConfigPath = "$homeDir\.gitconfig.local"
-if (Test-Path $localConfigPath) {
+if ($KeepLocal) {
+    Write-Host "[SKIP] Preserving .gitconfig.local (-KeepLocal)" -ForegroundColor Yellow
+}
+elseif (Test-Path $localConfigPath) {
     try {
         $backupName = "Existing.gitconfig.local.bak"
         $backupPath = Join-Path $homeDir $backupName
@@ -201,8 +208,11 @@ foreach ($file in $filesToRemove) {
     }
 }
 
-# Check .gitconfig.local was removed
-if (Test-Path $localConfigPath) {
+# Check .gitconfig.local was removed (skipped when intentionally preserved)
+if ($KeepLocal) {
+    Write-Host "[OK] .gitconfig.local preserved (-KeepLocal)" -ForegroundColor Green
+}
+elseif (Test-Path $localConfigPath) {
     Write-Host "[FAIL] .gitconfig.local still exists!" -ForegroundColor Red
     $verifyErrors++
 }
