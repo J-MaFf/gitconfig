@@ -15,18 +15,24 @@ USAGE:
     .\Initialize-LocalConfig.ps1 [OPTIONS]
 
 OPTIONS:
-    -Force      Overwrite existing .gitconfig.local without prompting
+    -Force      Regenerate (overwrite) an existing .gitconfig.local from the
+                template. Without -Force, an existing file is preserved.
     -Help       Display this help message
 
 DESCRIPTION:
     Creates ~/.gitconfig.local with machine-specific safe directories and paths.
     This file is included by the main .gitconfig and should NOT be version controlled.
 
+    Create-if-missing: because this file holds user-owned machine state (hand-tuned
+    safe.directory entries, etc.), an existing one is preserved by default; pass
+    -Force to regenerate it from the template. The allowed_signers file is always
+    ensured (idempotently), even when the config itself is preserved.
+
 EXAMPLE:
-    # Interactive mode (prompts before overwriting)
+    # Create if missing; preserve an existing file
     .\Initialize-LocalConfig.ps1
 
-    # Force mode (overwrites without prompting)
+    # Regenerate from template, overwriting the existing file
     .\Initialize-LocalConfig.ps1 -Force
 
 SAFE DIRECTORIES:
@@ -106,18 +112,17 @@ Write-Host "Home Directory: $homeDir" -ForegroundColor Green
 Write-Host "Local Config Path: $localConfigPath" -ForegroundColor Green
 Write-Host ""
 
-# Check if .gitconfig.local already exists
-if ((Test-Path $localConfigPath) -and -not $Force) {
-    Write-Host ".gitconfig.local already exists." -ForegroundColor Yellow
-    $response = Read-Host "Overwrite? (y/n)"
-    if ($response -ne "y") {
-        Write-Host "Cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
+# Create-if-missing: .gitconfig.local holds user-owned machine state (safe.directory
+# entries, etc.), so never clobber an existing one. Regenerate deliberately with -Force.
+$localConfigExists = Test-Path $localConfigPath
 
 try {
-    $configContent = @"
+    if ($localConfigExists -and -not $Force) {
+        Write-Host "[SKIP] .gitconfig.local already exists; preserving machine-specific config" -ForegroundColor Yellow
+        Write-Host "       (regenerate from template with: Initialize-LocalConfig.ps1 -Force)" -ForegroundColor DarkGray
+    }
+    else {
+        $configContent = @"
 # Machine-Specific Git Configuration
 # This file is automatically included by .gitconfig and should NOT be committed
 
@@ -148,9 +153,15 @@ try {
 	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-install
 "@
 
-    # Create or overwrite the local config file
-    Set-Content -Path $localConfigPath -Value $configContent -Force
-    Write-Host "[OK] Created .gitconfig.local" -ForegroundColor Green
+        # Create or overwrite the local config file
+        Set-Content -Path $localConfigPath -Value $configContent -Force
+        if ($localConfigExists) {
+            Write-Host "[OK] Regenerated .gitconfig.local (-Force)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "[OK] Created .gitconfig.local" -ForegroundColor Green
+        }
+    }
     Write-Host ""
 
     # Build ~/.ssh/allowed_signers so git can verify SSH commit signatures locally.
