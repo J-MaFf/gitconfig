@@ -3,8 +3,10 @@
 Run all Pester tests for GitConfig repository
 
 .DESCRIPTION
-Executes the complete Pester test suite including unit and integration tests.
-Requires Pester module and administrator privileges for integration tests.
+Executes the Pester test suite. Integration tests (Tag 'Integration') mutate real
+machine state - they run install.ps1 / Cleanup-GitConfig.ps1, which create/remove
+the login scheduled task, symlinks, and the real ~/.gitconfig. They must run on a
+real machine or VM and are EXCLUDED BY DEFAULT here. Opt in with -IncludeIntegration.
 
 .PARAMETER Path
 Path to test files or directory. Defaults to ./tests
@@ -13,30 +15,42 @@ Path to test files or directory. Defaults to ./tests
 Run only tests with specified tags
 
 .PARAMETER ExcludeTag
-Exclude tests with specified tags
+Exclude tests with specified tags. 'Integration' is always added unless
+-IncludeIntegration is passed.
+
+.PARAMETER IncludeIntegration
+Also run integration tests. WARNING: these mutate the real machine (scheduled task,
+symlinks, ~/.gitconfig) - only use on a throwaway machine or VM.
 
 .PARAMETER PassThru
 Return Pester results object
 
 .EXAMPLE
 .\run-tests.ps1
-Run all tests with default configuration
+Run the unit suite (integration excluded) - safe; does not touch real config.
 
 .EXAMPLE
 .\run-tests.ps1 -Tag Unit
 Run only unit tests
 
 .EXAMPLE
-.\run-tests.ps1 -ExcludeTag Integration
-Run all tests except integration tests
+.\run-tests.ps1 -IncludeIntegration
+Run everything, including machine-mutating integration tests (VM only).
 #>
 
 param(
     [string]$Path = './tests',
     [string[]]$Tag,
     [string[]]$ExcludeTag,
+    [switch]$IncludeIntegration,
     [switch]$PassThru
 )
+
+# Integration tests touch real machine state and must never run in a routine unit
+# pass. Exclude them by default; opt in explicitly with -IncludeIntegration.
+if (-not $IncludeIntegration) {
+    $ExcludeTag = @($ExcludeTag) + 'Integration' | Where-Object { $_ } | Select-Object -Unique
+}
 
 # Check if Pester is installed
 try {
@@ -83,13 +97,16 @@ $pesterConfig = @{
     }
 }
 
-# Add tag filters if specified
+# Add tag filters if specified. Tag include/exclude lives under the Filter section
+# in Pester 5 - setting them under Run is silently ignored (which previously let
+# Integration-tagged tests run even with -ExcludeTag Integration).
+$pesterConfig.Filter = @{}
 if ($Tag) {
-    $pesterConfig.Run['IncludeTag'] = $Tag
+    $pesterConfig.Filter['Tag'] = $Tag
 }
 
 if ($ExcludeTag) {
-    $pesterConfig.Run['ExcludeTag'] = $ExcludeTag
+    $pesterConfig.Filter['ExcludeTag'] = $ExcludeTag
 }
 
 Write-Host "Running Pester Tests for GitConfig" -ForegroundColor Cyan
