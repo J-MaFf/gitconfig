@@ -70,7 +70,7 @@ try {
     # Step 2c: Ensure the declared Python deps are present (rich required; textual
     # optional, for the interactive `git alias` browser). Single source of truth:
     # the shared Install-PythonDeps routine reads pyproject.toml and installs only
-    # what is missing. Best-effort and idempotent — never fails the update.
+    # what is missing. Best-effort and idempotent - never fails the update.
     . (Join-Path $PSScriptRoot 'Functions.ps1')
     Install-PythonDeps -RepoRoot $RepoPath -Logger { param($m) Write-Log $m }
 
