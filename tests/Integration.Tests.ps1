@@ -19,7 +19,7 @@ BeforeAll {
     $script:pwshExe = if ($script:platformIsWindows) { "powershell" } else { "pwsh" }
 }
 
-Describe "GitConfig Integration" {
+Describe "GitConfig Integration" -Tag 'Integration' {
 
     Context "End-to-End Setup and Verification" {
         It "Should complete setup without errors" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
@@ -129,7 +129,7 @@ Describe "GitConfig Integration" {
     }
 }
 
-Describe "GitConfig Helper Script" {
+Describe "GitConfig Helper Script" -Tag 'Integration' {
     It "gitconfig_helper.py should exist in repository" {
         $helperPath = Join-Path $script:repoRoot "gitconfig_helper.py"
         $helperPath | Should -Exist
@@ -142,7 +142,7 @@ Describe "GitConfig Helper Script" {
     }
 }
 
-Describe "Git Aliases" {
+Describe "Git Aliases" -Tag 'Integration' {
     It "git alias should work after setup" {
         # Check if .gitconfig symlink exists (setup completed)
         $gitconfigExists = Test-Path (Join-Path $testHome ".gitconfig")

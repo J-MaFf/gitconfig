@@ -3,11 +3,30 @@ BeforeAll {
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
     $script:scriptPath = Join-Path $script:repoRoot "scripts\windows version\Initialize-GitConfig.ps1"
     $script:templatePath = Join-Path $script:repoRoot ".gitconfig.template"
-    $script:testHome = $env:USERPROFILE
-    if (-not $script:testHome) {
-        $script:testHome = $env:HOME  # Unix/Linux fallback
-    }
+
+    # Sandbox HOME so generation never touches the real ~/.gitconfig (#162).
+    # Initialize-GitConfig.ps1 reads $env:USERPROFILE at runtime, so redirecting it
+    # (plus HOME and git's global/system config) points every write at TestDrive.
+    $script:savedUserProfile = $env:USERPROFILE
+    $script:savedHome = $env:HOME
+    $script:savedGlobal = $env:GIT_CONFIG_GLOBAL
+    $script:savedSystem = $env:GIT_CONFIG_SYSTEM
+
+    $script:testHome = Join-Path $TestDrive "home"
+    New-Item -ItemType Directory -Path $script:testHome -Force | Out-Null
+    $env:USERPROFILE = $script:testHome
+    $env:HOME = $script:testHome
+    $env:GIT_CONFIG_GLOBAL = Join-Path $script:testHome ".gitconfig"
+    $env:GIT_CONFIG_SYSTEM = Join-Path $script:testHome "no-system-config"
+
     $script:outputPath = Join-Path $script:testHome ".gitconfig"
+}
+
+AfterAll {
+    $env:USERPROFILE = $script:savedUserProfile
+    $env:HOME = $script:savedHome
+    $env:GIT_CONFIG_GLOBAL = $script:savedGlobal
+    $env:GIT_CONFIG_SYSTEM = $script:savedSystem
 }
 
 Describe "Initialize-GitConfig.ps1" {

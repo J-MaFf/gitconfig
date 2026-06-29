@@ -1,39 +1,48 @@
+# Discovery-time platform check. Pester evaluates an It's -Skip argument during
+# Discovery (before BeforeAll runs), so this must live at script scope here, not
+# in BeforeAll.
+$script:onWindows = if ($PSVersionTable.PSVersion.Major -ge 6) { $IsWindows } else { $true }
+
 BeforeAll {
-    # Setup variables
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
     $script:scriptPath = Join-Path $script:repoRoot "scripts\windows version\install.ps1"
-    $script:testHome = $env:USERPROFILE
-    if (-not $script:testHome) {
-        $script:testHome = $env:HOME  # Unix/Linux fallback
-    }
-    $script:testRepo = $script:repoRoot
+    $script:initGitScript = Join-Path $script:repoRoot "scripts\windows version\Initialize-GitConfig.ps1"
+    $script:initLocalScript = Join-Path $script:repoRoot "scripts\windows version\Initialize-LocalConfig.ps1"
 
-    # Check if running on Windows
-    if ($PSVersionTable.PSVersion.Major -ge 6) {
-        $script:platformIsWindows = $IsWindows
-    }
-    else {
-        $script:platformIsWindows = $true
-    }
+    # Sandbox HOME and git's config scopes so nothing here touches the real machine
+    # (#162). We deliberately do NOT run install.ps1: it mutates system-global state
+    # a HOME redirect cannot sandbox (the login scheduled task via Cleanup, and the
+    # real $PROFILE keybinding). The artifacts install produces - .gitconfig and
+    # .gitconfig.local - come from the generators below, which are safe against a
+    # temp HOME. Full install / symlink / scheduled-task coverage lives in
+    # Integration.Tests.ps1 (Tag 'Integration', excluded from the default run).
+    $script:savedUserProfile = $env:USERPROFILE
+    $script:savedHome = $env:HOME
+    $script:savedGlobal = $env:GIT_CONFIG_GLOBAL
+    $script:savedSystem = $env:GIT_CONFIG_SYSTEM
 
-    # Check if running as admin (Windows only)
-    if ($script:platformIsWindows) {
-        try {
-            $script:isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
-        }
-        catch {
-            $script:isAdmin = $false
-        }
-    }
-    else {
-        $script:isAdmin = $false
-    }
+    $script:testHome = Join-Path $TestDrive "home"
+    New-Item -ItemType Directory -Path $script:testHome -Force | Out-Null
+    $env:USERPROFILE = $script:testHome
+    $env:HOME = $script:testHome
+    $env:GIT_CONFIG_GLOBAL = Join-Path $script:testHome ".gitconfig"
+    $env:GIT_CONFIG_SYSTEM = Join-Path $script:testHome "no-system-config"
 
-    # Run setup if in interactive mode
-    if ($script:isAdmin -and [System.Environment]::UserInteractive) {
-        Write-Host "Running install.ps1 for testing..." -ForegroundColor Cyan
-        & $script:scriptPath -Force -ErrorAction SilentlyContinue | Out-Null
+    # Generate the config artifacts into the sandbox (Windows-only scripts).
+    # Recompute the platform check here: the discovery-time $script:onWindows used by
+    # -Skip does not carry into the Run-phase BeforeAll.
+    $isWindowsRun = if ($PSVersionTable.PSVersion.Major -ge 6) { $IsWindows } else { $true }
+    if ($isWindowsRun) {
+        & $script:initGitScript -Force | Out-Null
+        & $script:initLocalScript -Force | Out-Null
     }
+}
+
+AfterAll {
+    $env:USERPROFILE = $script:savedUserProfile
+    $env:HOME = $script:savedHome
+    $env:GIT_CONFIG_GLOBAL = $script:savedGlobal
+    $env:GIT_CONFIG_SYSTEM = $script:savedSystem
 }
 
 Describe "install.ps1" {
@@ -77,156 +86,81 @@ Describe "install.ps1" {
     }
 
     Context "Config Generation" {
-        It "Should generate .gitconfig in home directory" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $gitconfigPath = Join-Path $script:testHome ".gitconfig"
-            $gitconfigPath | Should -Exist
+        It "Should generate .gitconfig in home directory" -Skip:(-not $script:onWindows) {
+            (Join-Path $script:testHome ".gitconfig") | Should -Exist
         }
 
-        It "Generated .gitconfig should not be a symlink" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $gitconfigPath = Join-Path $script:testHome ".gitconfig"
-            $item = Get-Item $gitconfigPath
+        It "Generated .gitconfig should not be a symlink" -Skip:(-not $script:onWindows) {
+            $item = Get-Item (Join-Path $script:testHome ".gitconfig")
             $item.LinkType | Should -Not -Be "SymbolicLink"
         }
 
-        It "Generated .gitconfig should have no placeholders" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $gitconfigPath = Join-Path $script:testHome ".gitconfig"
-            $content = Get-Content $gitconfigPath -Raw
+        It "Generated .gitconfig should have no placeholders" -Skip:(-not $script:onWindows) {
+            $content = Get-Content (Join-Path $script:testHome ".gitconfig") -Raw
             $content | Should -Not -Match '\{\{REPO_PATH\}\}'
             $content | Should -Not -Match '\{\{HOME_DIR\}\}'
         }
     }
 
-    Context "Symlink Creation" {
-        It "Should create .gitignore_global symlink pointing to repository" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $gitignorePath = Join-Path $script:testHome ".gitignore_global"
-            $gitignorePath | Should -Exist
-
-            $item = Get-Item $gitignorePath
-            $item.LinkType | Should -Be "SymbolicLink"
-        }
-
-        It "Should create gitconfig_helper.py symlink pointing to repository" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $helperPath = Join-Path $script:testHome "gitconfig_helper.py"
-            $helperPath | Should -Exist
-
-            $item = Get-Item $helperPath
-            $item.LinkType | Should -Be "SymbolicLink"
-        }
-    }
-
     Context ".gitconfig.local Generation" {
-        It "Should create .gitconfig.local file" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
-            $localConfigPath | Should -Exist
+        # Only assertions about content that actually lives in .gitconfig.local.
+        # gpg.format / commit.gpgsign / user.signingKey come from the main
+        # .gitconfig (template), so they are verified in "Git Configuration" below
+        # via the effective config, not by grepping this file.
+        It "Should create .gitconfig.local file" -Skip:(-not $script:onWindows) {
+            (Join-Path $script:testHome ".gitconfig.local") | Should -Exist
         }
 
-        It "Should have valid INI format" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
+        It "Should have valid INI format" -Skip:(-not $script:onWindows) {
             $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
-
-            # Should not throw git config error
             $result = & git config -f $localConfigPath --list 2>$null
             $result | Should -Not -BeNullOrEmpty
         }
 
-        It "Should include [gpg] section with format = ssh" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
-            $content = Get-Content $localConfigPath -Raw
-
-            $content | Should -Match '\[gpg\]'
-            $content | Should -Match 'format\s*=\s*ssh'
-        }
-
-        It "Should include [gpg ssh] program path" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
-            $content = Get-Content $localConfigPath -Raw
-
+        It "Should include [gpg ssh] program path" -Skip:(-not $script:onWindows) {
+            $content = Get-Content (Join-Path $script:testHome ".gitconfig.local") -Raw
             $content | Should -Match '\[gpg\s+"ssh"\]'
             $content | Should -Match 'op-ssh-sign\.exe'
         }
 
-        It "Should use forward slashes in Windows paths" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
-            $content = Get-Content $localConfigPath -Raw
-
+        It "Should use forward slashes in Windows paths" -Skip:(-not $script:onWindows) {
+            $content = Get-Content (Join-Path $script:testHome ".gitconfig.local") -Raw
             # op-ssh-sign.exe path should use forward slashes for git config compatibility
             $content | Should -Match 'C:/Users/.*/AppData/.*/op-ssh-sign\.exe'
         }
 
-        It "Should include [commit] gpgsign = true" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
-            $content = Get-Content $localConfigPath -Raw
-
-            $content | Should -Match '\[commit\]'
-            $content | Should -Match 'gpgsign\s*=\s*true'
-        }
-
-        It "Should include [user] signingKey" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
-            $content = Get-Content $localConfigPath -Raw
-
-            $content | Should -Match '\[user\]'
-            $content | Should -Match 'signingKey\s*=\s*ssh-ed25519'
-        }
-
-        It "Should include [safe] directory entries" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $localConfigPath = Join-Path $script:testHome ".gitconfig.local"
-            $content = Get-Content $localConfigPath -Raw
-
+        It "Should include [safe] directory entries" -Skip:(-not $script:onWindows) {
+            $content = Get-Content (Join-Path $script:testHome ".gitconfig.local") -Raw
             $content | Should -Match '\[safe\]'
             $content | Should -Match 'directory\s*='
         }
     }
 
-    Context "Git Configuration" {
-        It "Should set gpg.format to ssh" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $result = & git config --get gpg.format 2>$null
-            $result | Should -Be "ssh"
+    Context "Git Configuration (effective)" {
+        # Read the effective config from the sandboxed GIT_CONFIG_GLOBAL (the
+        # generated .gitconfig + its included .gitconfig.local). Push-Location into
+        # the sandbox (not a git repo) so no repo-local config can shadow these.
+        BeforeAll { Push-Location $script:testHome }
+        AfterAll { Pop-Location }
+
+        It "Should set gpg.format to ssh" -Skip:(-not $script:onWindows) {
+            (& git config --get gpg.format 2>$null) | Should -Be "ssh"
         }
 
-        It "Should set commit.gpgsign to true" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
-            $result = & git config --get commit.gpgsign 2>$null
-            $result | Should -Be "true"
+        It "Should set commit.gpgsign to true" -Skip:(-not $script:onWindows) {
+            (& git config --get commit.gpgsign 2>$null) | Should -Be "true"
         }
 
-        It "Should set user.signingKey" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
+        It "Should set user.signingKey" -Skip:(-not $script:onWindows) {
             $result = & git config --get user.signingKey 2>$null
             $result | Should -Not -BeNullOrEmpty
             $result | Should -Match "ssh-ed25519"
         }
 
-        It "Should point gpg.ssh.program to op-ssh-sign.exe" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
+        It "Should point gpg.ssh.program to op-ssh-sign.exe" -Skip:(-not $script:onWindows) {
             $result = & git config --get gpg.ssh.program 2>$null
             $result | Should -Not -BeNullOrEmpty
             $result | Should -Match "op-ssh-sign\.exe"
         }
     }
-
-    Context "Scheduled Task Creation" {
-        It "Should create Update-GitConfig scheduled task" -Skip:(-not $script:platformIsWindows) {
-            # Note: This test is skipped when setup runs with -NoTask (which it does for testing)
-            # To fully test task creation, run install.ps1 -Force (without -NoTask)
-            # Scheduled tasks are Windows-only
-            $task = Get-ScheduledTask -TaskName "Update-GitConfig" -ErrorAction SilentlyContinue
-            if ($task) {
-                $task | Should -Not -BeNullOrEmpty
-            }
-            else {
-                # Task may not exist if setup was run with -NoTask
-                Set-ItResult -Skipped -Because "Setup was run with -NoTask (scheduled task creation skipped)"
-            }
-        }
-
-        It "Scheduled task should trigger at user logon" -Skip:(-not $script:platformIsWindows) {
-            # Scheduled tasks are Windows-only
-            $task = Get-ScheduledTask -TaskName "Update-GitConfig" -ErrorAction SilentlyContinue
-            if ($task) {
-                $triggers = $task.Triggers
-                $triggers | Should -Not -BeNullOrEmpty
-            }
-            else {
-                Set-ItResult -Skipped -Because "Setup was run with -NoTask (scheduled task creation skipped)"
-            }
-        }
-    }
 }
-
