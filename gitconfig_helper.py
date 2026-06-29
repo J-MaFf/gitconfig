@@ -359,7 +359,7 @@ def _require_skills_dir():
     if os.path.isdir(SKILLS_DIR):
         return True
     Console(stderr=True).print(
-        f"[red]git skill: {SKILLS_DIR} not found — the claude-skills repo isn't "
+        f"[red]git skill: {SKILLS_DIR} not found - the claude-skills repo isn't "
         f"installed on this machine.[/red]\n"
         f"[yellow]It's a separate repo that supplies the skills and the wrapper "
         f"scripts these aliases drive. Install it:[/yellow]\n"
