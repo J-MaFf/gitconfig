@@ -115,9 +115,10 @@ Write-Host ""
 # Create-if-missing: .gitconfig.local holds user-owned machine state (safe.directory
 # entries, etc.), so never clobber an existing one. Regenerate deliberately with -Force.
 $localConfigExists = Test-Path $localConfigPath
+$preserved = $localConfigExists -and -not $Force
 
 try {
-    if ($localConfigExists -and -not $Force) {
+    if ($preserved) {
         Write-Host "[SKIP] .gitconfig.local already exists; preserving machine-specific config" -ForegroundColor Yellow
         Write-Host "       (regenerate from template with: Initialize-LocalConfig.ps1 -Force)" -ForegroundColor DarkGray
     }
@@ -170,18 +171,22 @@ try {
     $allowedSignersPath = Join-Path $homeDir ".ssh\allowed_signers"
     Update-AllowedSigners -AllowedSignersPath $allowedSignersPath
 
-    Write-Host ""
-    Write-Host "Local configuration includes:" -ForegroundColor Cyan
-    Write-Host "  - SSH signing program path (op-ssh-sign.exe)" -ForegroundColor Gray
-    Write-Host "  - Allowed signers file for local signature verification" -ForegroundColor Gray
-    Write-Host "  - Network safe directories (10.210.3.10, KFWS9BDC01)" -ForegroundColor Gray
-    Write-Host "  - Local development directories" -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "To customize safe directories:" -ForegroundColor Cyan
-    Write-Host "  1. Edit $localConfigPath" -ForegroundColor Gray
-    Write-Host "  2. Add or modify entries in the [safe] section" -ForegroundColor Gray
-    Write-Host "  3. Save and reload git" -ForegroundColor Gray
-    Write-Host ""
+    # Describe the generated layout only when we actually wrote it; on the preserve
+    # path the user's file may differ, so this summary would be misleading.
+    if (-not $preserved) {
+        Write-Host ""
+        Write-Host "Local configuration includes:" -ForegroundColor Cyan
+        Write-Host "  - SSH signing program path (op-ssh-sign.exe)" -ForegroundColor Gray
+        Write-Host "  - Allowed signers file for local signature verification" -ForegroundColor Gray
+        Write-Host "  - Network safe directories (10.210.3.10, KFWS9BDC01)" -ForegroundColor Gray
+        Write-Host "  - Local development directories" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "To customize safe directories:" -ForegroundColor Cyan
+        Write-Host "  1. Edit $localConfigPath" -ForegroundColor Gray
+        Write-Host "  2. Add or modify entries in the [safe] section" -ForegroundColor Gray
+        Write-Host "  3. Save and reload git" -ForegroundColor Gray
+        Write-Host ""
+    }
 
     # Verify git can read the config. Validate the generated file directly with
     # --file (scope- and CWD-independent) rather than --local, which reads the
