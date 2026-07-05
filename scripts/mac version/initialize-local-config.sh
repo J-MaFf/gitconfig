@@ -148,6 +148,20 @@ CONFIG_CONTENT+="
 	directory = $HOME_DIR/Documents/Scripts/gitconfig
 "
 
+# On a shared Mac, /opt/homebrew can be owned by a different account. git then
+# refuses to read Homebrew's repo ("detected dubious ownership"), which breaks
+# `brew update` with "fatal: not in a git directory". Trust the repo whenever
+# it exists and belongs to someone else. HOMEBREW_REPO is overridable so tests
+# can point it at a sandbox path.
+HOMEBREW_REPO="${HOMEBREW_REPO:-/opt/homebrew}"
+if [ -d "$HOMEBREW_REPO/.git" ] && [ "$(file_owner_uid "$HOMEBREW_REPO")" != "$(id -u)" ]; then
+    echo "[INFO] $HOMEBREW_REPO is owned by another user — adding it as a safe directory so brew update works."
+    CONFIG_CONTENT+="	# Homebrew's repo is owned by another account on this shared machine;
+	# without this entry git's dubious-ownership check breaks \`brew update\`.
+	directory = $HOMEBREW_REPO
+"
+fi
+
 printf '%s\n' "$CONFIG_CONTENT" > "$LOCAL_CONFIG_PATH"
 echo "[OK] Created .gitconfig.local"
 echo ""

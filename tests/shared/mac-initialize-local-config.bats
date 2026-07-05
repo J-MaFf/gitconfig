@@ -1,10 +1,13 @@
 #!/usr/bin/env bats
 #
-# Bats suite for scripts/mac version/initialize-local-config.sh, focused on the
-# allowedSignersFile behavior (issue #116): on macOS, allowedSignersFile must be
-# written whenever signing is enabled — not only when 1Password's op-ssh-sign is
-# installed. Otherwise `git log --show-signature` reports "No signature" for a
-# file-based or literal signing key.
+# Bats suite for scripts/mac version/initialize-local-config.sh, covering:
+#   - allowedSignersFile behavior (issue #116): on macOS, allowedSignersFile must
+#     be written whenever signing is enabled — not only when 1Password's
+#     op-ssh-sign is installed. Otherwise `git log --show-signature` reports
+#     "No signature" for a file-based or literal signing key.
+#   - Homebrew safe.directory (issue #169): on a shared Mac where /opt/homebrew
+#     is owned by another account, the generated [safe] section must trust it
+#     or `brew update` fails with "fatal: not in a git directory".
 #
 # These tests run the real script in a mktemp sandbox with HOME and git config
 # redirected, so they never touch the developer's machine. op-ssh-sign is not on
@@ -78,4 +81,36 @@ teardown() {
     [ "$status" -eq 0 ]
     grep -qF 'excludesfile = ' "$SANDBOX/.gitconfig.local"
     grep -qF '[safe]' "$SANDBOX/.gitconfig.local"
+}
+
+@test "adds the Homebrew repo as a safe directory when it is owned by another user" {
+    mkdir -p "$SANDBOX/homebrew/.git"
+    # A non-root sandbox can't create a dir owned by someone else, so stub
+    # `id -u` to report a different uid instead — the same mismatch the script
+    # sees when /opt/homebrew belongs to another account.
+    mkdir -p "$SANDBOX/bin"
+    printf '#!/bin/sh\necho 999999\n' > "$SANDBOX/bin/id"
+    chmod +x "$SANDBOX/bin/id"
+
+    run env PATH="$SANDBOX/bin:$PATH" HOMEBREW_REPO="$SANDBOX/homebrew" \
+        bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+
+    # The entry is present and the file still parses as valid git config.
+    git config --file "$SANDBOX/.gitconfig.local" --get-all safe.directory \
+        | grep -qFx "$SANDBOX/homebrew"
+}
+
+@test "omits the Homebrew safe directory when the repo is owned by the current user" {
+    mkdir -p "$SANDBOX/homebrew/.git"
+
+    run env HOMEBREW_REPO="$SANDBOX/homebrew" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    ! grep -qF "directory = $SANDBOX/homebrew" "$SANDBOX/.gitconfig.local"
+}
+
+@test "omits the Homebrew safe directory when no Homebrew repo exists" {
+    run env HOMEBREW_REPO="$SANDBOX/no-such-brew" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    ! grep -qF 'no-such-brew' "$SANDBOX/.gitconfig.local"
 }

@@ -137,6 +137,13 @@ create_symlink() {
     fi
 }
 
+# Print the numeric uid that owns a path. BSD stat (macOS) and GNU stat (Linux)
+# disagree on flags, so try both.
+# Usage: file_owner_uid PATH
+file_owner_uid() {
+    stat -f %u "$1" 2>/dev/null || stat -c %u "$1" 2>/dev/null
+}
+
 # Upsert the current signing identity into an allowed_signers file so git can
 # verify SSH commit signatures locally. Without it, `git log --show-signature`
 # and `git verify-commit` report "No signature" even though commits are signed.
