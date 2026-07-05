@@ -84,6 +84,22 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
+# file_owner_uid  (the helper behind issue #169)
+# ---------------------------------------------------------------------------
+
+@test "file_owner_uid prints the owning uid of a path" {
+    run file_owner_uid "$TESTDIR"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(id -u)" ]
+}
+
+@test "file_owner_uid fails silently for a missing path" {
+    run file_owner_uid "$TESTDIR/does-not-exist"
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+}
+
+# ---------------------------------------------------------------------------
 # update_allowed_signers  (the helper behind issue #116)
 # ---------------------------------------------------------------------------
 
