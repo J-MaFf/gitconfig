@@ -8,6 +8,9 @@
 #   - Homebrew safe.directory (issue #169): on a shared Mac where /opt/homebrew
 #     is owned by another account, the generated [safe] section must trust it
 #     or `brew update` fails with "fatal: not in a git directory".
+#   - File-based signing (issue #171): an on-disk key (with optional no-agent
+#     wrapper) must be emitted as the signing config, or a regen reverts the
+#     machine to agent-based signing (Touch ID prompt per commit).
 #
 # These tests run the real script in a mktemp sandbox with HOME and git config
 # redirected, so they never touch the developer's machine. op-ssh-sign is not on
@@ -113,4 +116,59 @@ teardown() {
     run env HOMEBREW_REPO="$SANDBOX/no-such-brew" bash "$SCRIPT" --force
     [ "$status" -eq 0 ]
     ! grep -qF 'no-such-brew' "$SANDBOX/.gitconfig.local"
+}
+
+@test "emits file-based signing config when an on-disk key exists" {
+    mkdir -p "$SANDBOX/.ssh"
+    echo "fake private key" > "$SANDBOX/.ssh/claude_desktop"
+    echo "ssh-ed25519 AAAADISKKEY mac-comment" > "$SANDBOX/.ssh/claude_desktop.pub"
+    git config --global user.email "dev@example.com"
+    # Real machines resolve the fresh signingkey through ~/.gitconfig's include
+    # of ~/.gitconfig.local; mirror that so update_allowed_signers can see it.
+    printf '[include]\n\tpath = %s\n' "$SANDBOX/.gitconfig.local" >> "$GIT_CONFIG_GLOBAL"
+
+    run bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+
+    # The full file-based block is present and parses as valid git config.
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" user.signingkey)" = "$SANDBOX/.ssh/claude_desktop" ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" commit.gpgsign)" = "true" ]
+    grep -qF 'allowedSignersFile = ' "$SANDBOX/.gitconfig.local"
+    # No wrapper on disk, so no program override.
+    ! grep -qF 'program = ' "$SANDBOX/.gitconfig.local"
+    # The signing identity was registered for local verification.
+    grep -qF 'dev@example.com namespaces="git" ssh-ed25519 AAAADISKKEY' "$SANDBOX/.ssh/allowed_signers"
+}
+
+@test "adds the no-agent wrapper as gpg.ssh.program when present" {
+    mkdir -p "$SANDBOX/.ssh"
+    echo "fake private key" > "$SANDBOX/.ssh/claude_desktop"
+    echo "ssh-ed25519 AAAADISKKEY mac-comment" > "$SANDBOX/.ssh/claude_desktop.pub"
+    printf '#!/bin/sh\nexec env -u SSH_AUTH_SOCK ssh-keygen "$@"\n' > "$SANDBOX/.ssh/git-sign-no-agent"
+    chmod +x "$SANDBOX/.ssh/git-sign-no-agent"
+
+    run bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" gpg.ssh.program)" = "$SANDBOX/.ssh/git-sign-no-agent" ]
+}
+
+@test "falls back to id_ed25519_signing when claude_desktop is absent" {
+    mkdir -p "$SANDBOX/.ssh"
+    echo "fake private key" > "$SANDBOX/.ssh/id_ed25519_signing"
+    echo "ssh-ed25519 AAAALINUXSTYLE comment" > "$SANDBOX/.ssh/id_ed25519_signing.pub"
+
+    run bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" user.signingkey)" = "$SANDBOX/.ssh/id_ed25519_signing" ]
+}
+
+@test "ignores an on-disk key missing its .pub (falls through to prior behavior)" {
+    mkdir -p "$SANDBOX/.ssh"
+    echo "fake private key" > "$SANDBOX/.ssh/claude_desktop"   # no .pub
+
+    run bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    ! grep -qF 'signingkey = ' "$SANDBOX/.gitconfig.local"
+    # No key, no op-ssh-sign: the commented enable hint is shown instead.
+    grep -qF '# Uncomment and set program path' "$SANDBOX/.gitconfig.local"
 }

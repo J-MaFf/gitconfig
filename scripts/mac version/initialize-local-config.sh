@@ -34,7 +34,9 @@ OPTIONS:
 DESCRIPTION:
     Creates ~/.gitconfig.local with machine-specific settings including:
     - Global gitignore path
-    - SSH commit signing via 1Password (op-ssh-sign), if installed
+    - SSH commit signing: prefers an on-disk key file (~/.ssh/claude_desktop or
+      ~/.ssh/id_ed25519_signing, with the optional git-sign-no-agent wrapper);
+      falls back to 1Password (op-ssh-sign) if installed
     - Safe directory entries
 EOF
     exit 0
@@ -58,6 +60,23 @@ if [ -f "$LOCAL_CONFIG_PATH" ] && [ "$FORCE" = false ]; then
         exit 0
     fi
 fi
+
+# Detect an on-disk file-based signing key. This is the preferred setup: git
+# signs via ssh-keygen straight from the file — no SSH agent, no Touch ID
+# prompt, works unattended. Both the private key and its .pub must exist (the
+# .pub feeds allowed_signers); otherwise fall through to the other branches.
+SIGNING_KEY_FILE=""
+for candidate in "$HOME_DIR/.ssh/claude_desktop" "$HOME_DIR/.ssh/id_ed25519_signing"; do
+    if [ -f "$candidate" ] && [ -f "$candidate.pub" ]; then
+        SIGNING_KEY_FILE="$candidate"
+        break
+    fi
+done
+
+# Optional companion wrapper: unsets SSH_AUTH_SOCK so ssh-keygen signs from
+# disk even when the same key is loaded in the 1Password agent (which would
+# otherwise prompt for Touch ID on every commit).
+NO_AGENT_WRAPPER="$HOME_DIR/.ssh/git-sign-no-agent"
 
 # Detect op-ssh-sign (1Password SSH signing helper)
 OP_SSH_SIGN=""
@@ -86,7 +105,37 @@ CONFIG_CONTENT="# Machine-Specific Git Configuration (macOS)
 EXISTING_SIGNING_KEY="$(git config --get user.signingkey 2>/dev/null || true)"
 
 SIGNING_ENABLED=false
-if [ -n "$OP_SSH_SIGN" ]; then
+if [ -n "$SIGNING_KEY_FILE" ]; then
+    # File-based key wins over op-ssh-sign: agent-based signing prompts for
+    # Touch ID on every commit and hangs unattended runs (issue #171).
+    echo "[INFO] Detected on-disk SSH signing key: $SIGNING_KEY_FILE"
+    SIGNING_ENABLED=true
+    CONFIG_CONTENT+="
+[user]
+	# Sign with the on-disk private key file — no SSH agent, no Touch ID
+	# prompt. Must be the private key PATH (not the .pub): if the same key is
+	# also loaded in an agent, ssh-keygen would route a .pub through it.
+	signingkey = $SIGNING_KEY_FILE
+
+[gpg]
+	format = ssh
+
+[gpg \"ssh\"]
+	# Lets git verify SSH commit signatures locally (git log --show-signature)
+	allowedSignersFile = $HOME_DIR/.ssh/allowed_signers
+"
+    if [ -x "$NO_AGENT_WRAPPER" ]; then
+        echo "[INFO] Using no-agent signing wrapper: $NO_AGENT_WRAPPER"
+        CONFIG_CONTENT+="	# Sign via a wrapper that unsets SSH_AUTH_SOCK so ssh-keygen reads the
+	# private key from disk instead of the 1Password agent (Touch ID prompt).
+	program = $NO_AGENT_WRAPPER
+"
+    fi
+    CONFIG_CONTENT+="
+[commit]
+	gpgsign = true
+"
+elif [ -n "$OP_SSH_SIGN" ]; then
     echo "[INFO] Detected 1Password SSH signing helper: $OP_SSH_SIGN"
     SIGNING_ENABLED=true
     CONFIG_CONTENT+="
@@ -118,8 +167,9 @@ elif [ -n "$EXISTING_SIGNING_KEY" ]; then
 	allowedSignersFile = $HOME_DIR/.ssh/allowed_signers
 "
 else
-    echo "[INFO] op-ssh-sign not found and no signing key configured — skipping signing config."
-    echo "       Install 1Password CLI via Homebrew to enable commit signing:"
+    echo "[INFO] No signing key found and op-ssh-sign not installed — skipping signing config."
+    echo "       Preferred: create an on-disk key (~/.ssh/id_ed25519_signing), register it"
+    echo "       on GitHub as a signing key, then re-run this script. Or install 1Password:"
     echo "         brew install 1password-cli"
     CONFIG_CONTENT+="
 # Uncomment and set program path to enable SSH commit signing:
