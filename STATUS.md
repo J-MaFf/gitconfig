@@ -6,7 +6,7 @@ A cross-platform tool that generates a portable `~/.gitconfig` from a version-co
 
 ## Current State — 2026-07-05
 
-Healthy; `main` is clean. The mac `initialize-local-config.sh` regen-wipe bugs (Homebrew safe.directory, file-based signing) are fixed, beads works again after a fresh re-init on bd 1.1.0's native schema ([#172](https://github.com/J-MaFf/gitconfig/issues/172)), and the Pester helper suite is safe to run on macOS again ([#174](https://github.com/J-MaFf/gitconfig/issues/174)): 185/186 pass — the one remaining failure is the Windows Initialize-LocalConfig script exercised on a Unix host ([#176](https://github.com/J-MaFf/gitconfig/issues/176)).
+Healthy; `main` is clean and the full test suite is green on macOS (Pester 185 pass / 0 fail / 13 skip; bats 31/31). Recent work: the mac `initialize-local-config.sh` regen-wipe bugs are fixed (Homebrew safe.directory, file-based signing), beads runs on bd 1.1.0's native schema after a fresh re-init ([#172](https://github.com/J-MaFf/gitconfig/issues/172)), and the Pester helper suite is sandbox-safe on macOS ([#174](https://github.com/J-MaFf/gitconfig/issues/174)).
 
 ### Components
 
@@ -31,10 +31,11 @@ Healthy; `main` is clean. The mac `initialize-local-config.sh` regen-wipe bugs (
 | [#171](https://github.com/J-MaFf/gitconfig/issues/171) | Regen reverted mac signing to the agent-based key (Touch ID prompt, hangs unattended) | [#173](https://github.com/J-MaFf/gitconfig/pull/173) |
 | [#172](https://github.com/J-MaFf/gitconfig/issues/172) | beads DB stuck on schema v32; upstream migration chain broken (missing `wisps` table) | [#175](https://github.com/J-MaFf/gitconfig/pull/175) |
 | [#174](https://github.com/J-MaFf/gitconfig/issues/174) | Helper Pester tests hardcoded `python` and their git fixtures could escape onto the host repo | [#177](https://github.com/J-MaFf/gitconfig/pull/177) |
+| [#176](https://github.com/J-MaFf/gitconfig/issues/176) | Windows `Initialize-LocalConfig.ps1` verification test failed on macOS (mixed path separators) | [#178](https://github.com/J-MaFf/gitconfig/pull/178) |
 
 ### Open Issues
 
-- [#176](https://github.com/J-MaFf/gitconfig/issues/176) — the Windows `Initialize-LocalConfig.ps1` config-verification test fails on macOS (mixed path separators); recommend skipping Windows-script contexts on non-Windows hosts.
+None.
 
 ## Natural Next Steps
 
