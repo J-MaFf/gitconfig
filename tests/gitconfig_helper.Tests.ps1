@@ -1,9 +1,37 @@
-BeforeAll {
-    $script:repoRoot = Split-Path -Parent $PSScriptRoot
-    $script:helperScript = Join-Path $script:repoRoot "gitconfig_helper.py"
+# Resolve the Python interpreter per the repo rule: py -> python3 -> python.
+# Never bare `python` first — it's the WindowsApps stub on Windows and absent
+# on macOS/Linux. Script-body functions exist only during Pester's discovery
+# phase, so the same loop is inlined again in BeforeAll for the run phase.
+function Resolve-TestPython {
+    foreach ($name in 'py', 'python3', 'python') {
+        if (Get-Command $name -CommandType Application -ErrorAction SilentlyContinue) {
+            return $name
+        }
+    }
 }
 
-Describe "gitconfig_helper.py" {
+BeforeDiscovery { $script:python = Resolve-TestPython }
+
+BeforeAll {
+    # Inlined copy of Resolve-TestPython (discovery-only function; see above).
+    $script:python = foreach ($name in 'py', 'python3', 'python') {
+        if (Get-Command $name -CommandType Application -ErrorAction SilentlyContinue) {
+            $name
+            break
+        }
+    }
+    $script:repoRoot = Split-Path -Parent $PSScriptRoot
+    $script:helperScript = Join-Path $script:repoRoot "gitconfig_helper.py"
+    # Cross-platform temp root for throwaway git fixtures. $env:TEMP is
+    # Windows-only; on macOS it's empty, which turned fixture paths into
+    # unwritable root-level paths, left the fixture dirs null, and let the
+    # fixture git commands run against the developer's checkout (#174).
+    $script:tempRoot = [System.IO.Path]::GetTempPath()
+}
+
+# No interpreter anywhere -> skip the whole file with one clear reason instead
+# of 28 confusing CommandNotFound failures.
+Describe "gitconfig_helper.py" -Skip:(-not $script:python) {
 
     Context "Script Validation" {
         It "Script exists and is readable" {
@@ -12,7 +40,7 @@ Describe "gitconfig_helper.py" {
         }
 
         It "Script has valid Python syntax" {
-            & python -m py_compile $script:helperScript 2>&1
+            & $script:python -m py_compile $script:helperScript 2>&1
             $LASTEXITCODE | Should -Be 0
         }
 
@@ -35,28 +63,28 @@ import sys
 sys.path.insert(0, '$repoRootForward')
 import gitconfig_helper
 "@
-            & python -c $pythonCode 2>&1
+            & $script:python -c $pythonCode 2>&1
             $LASTEXITCODE | Should -Be 0
         }
     }
 
     Context "print_aliases Function" {
         It "Should accept 'print_aliases' function name" {
-            & python $script:helperScript print_aliases 2>&1
+            & $script:python $script:helperScript print_aliases 2>&1
             # Should complete without error (exit code 0)
             # Output might be empty if no aliases are configured
             $LASTEXITCODE | Should -Be 0
         }
 
         It "Should return formatted output when called" {
-            $result = & python $script:helperScript print_aliases 2>&1
+            $result = & $script:python $script:helperScript print_aliases 2>&1
             $output = $result -join "`n"
             # Should contain some output (either aliases or empty table)
             $output | Should -Not -BeNullOrEmpty
         }
 
         It "Should output contain 'Git Aliases' table header" {
-            $result = & python $script:helperScript print_aliases 2>&1
+            $result = & $script:python $script:helperScript print_aliases 2>&1
             $output = $result -join "`n"
             # The table should mention aliases
             ($output -like "*alias*" -or $output -like "*Git*") | Should -Be $true
@@ -72,11 +100,16 @@ import gitconfig_helper
         # update_all_main contexts below.
         BeforeEach {
             # Parent temp dir holds both the working repo and its bare "remote".
-            $script:cleanupParent = New-Item -ItemType Directory -Path "$env:TEMP\git_cleanup_$(Get-Random)" -Force
+            # -ErrorAction Stop everywhere: if fixture setup fails for ANY
+            # reason the test must abort here — a swallowed failure once let
+            # these git commands run against the developer's checkout (#174).
+            $script:cleanupPushed = $false
+            $script:cleanupParent = New-Item -ItemType Directory -Path (Join-Path $script:tempRoot "git_cleanup_$(Get-Random)") -Force -ErrorAction Stop
             $repo = Join-Path $script:cleanupParent "repo"
             $bare = Join-Path $script:cleanupParent "remote.git"
-            New-Item -ItemType Directory -Path $repo | Out-Null
-            Push-Location $repo
+            New-Item -ItemType Directory -Path $repo -ErrorAction Stop | Out-Null
+            Push-Location $repo -ErrorAction Stop
+            $script:cleanupPushed = $true
 
             & git init 2>&1 | Out-Null
             & git checkout -b main 2>&1 | Out-Null
@@ -108,12 +141,16 @@ import gitconfig_helper
         }
 
         AfterEach {
-            Pop-Location
-            Remove-Item -Path $script:cleanupParent -Recurse -Force -ErrorAction SilentlyContinue
+            # Pop only what BeforeEach pushed — an unconditional Pop-Location
+            # after a failed setup walks the stack past the caller's location.
+            if ($script:cleanupPushed) { Pop-Location }
+            if ($script:cleanupParent) {
+                Remove-Item -Path $script:cleanupParent -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
 
         It "Should accept 'cleanup' function name without arguments" {
-            $result = & python $script:helperScript cleanup 2>&1
+            $result = & $script:python $script:helperScript cleanup 2>&1
             # Should complete execution (may return 0 or non-zero depending on git state)
             $result | Should -Not -BeNullOrEmpty
 
@@ -124,7 +161,7 @@ import gitconfig_helper
         }
 
         It "Should accept --force flag" {
-            $result = & python $script:helperScript cleanup --force 2>&1
+            $result = & $script:python $script:helperScript cleanup --force 2>&1
             # Should complete execution with --force flag
             $result | Should -Not -BeNullOrEmpty
 
@@ -135,7 +172,7 @@ import gitconfig_helper
         }
 
         It "Should accept -f shorthand flag" {
-            $result = & python $script:helperScript cleanup -f 2>&1
+            $result = & $script:python $script:helperScript cleanup -f 2>&1
             # Should complete execution with -f flag
             $result | Should -Not -BeNullOrEmpty
 
@@ -148,8 +185,8 @@ import gitconfig_helper
         It "Should handle non-git directory gracefully" {
             $origDir = Get-Location
             try {
-                Set-Location $env:TEMP
-                $result = & python $helperScript cleanup 2>&1
+                Set-Location $script:tempRoot -ErrorAction Stop
+                $result = & $script:python $helperScript cleanup 2>&1
                 # Should either complete or show error message about not being in a git repo
                 $result | Should -Not -BeNullOrEmpty
             }
@@ -257,14 +294,14 @@ import gitconfig_helper
 
     Context "Error Handling" {
         It "Should handle missing function name gracefully" {
-            $result = & python $helperScript nonexistent_function 2>&1
+            $result = & $script:python $helperScript nonexistent_function 2>&1
             # Should display error message
             $output = $result -join "`n"
             ($output -match "not found" -or $output -match "Error") | Should -Be $true
         }
 
         It "Should handle no function name provided" {
-            $result = & python $helperScript 2>&1
+            $result = & $script:python $helperScript 2>&1
             # Should display error or usage message
             $output = $result -join "`n"
             $output | Should -Not -BeNullOrEmpty
@@ -294,9 +331,13 @@ import gitconfig_helper
 
     Context "switch_to_main Function" {
         BeforeEach {
-            # Create a temporary test repository
-            $script:testDir = New-Item -ItemType Directory -Path "$env:TEMP\git_test_$(Get-Random)" -Force
-            Push-Location $script:testDir
+            # Create a temporary test repository. -ErrorAction Stop so a failed
+            # setup aborts the test instead of letting the git fixture commands
+            # below run against the developer's checkout (#174).
+            $script:testDirPushed = $false
+            $script:testDir = New-Item -ItemType Directory -Path (Join-Path $script:tempRoot "git_test_$(Get-Random)") -Force -ErrorAction Stop
+            Push-Location $script:testDir -ErrorAction Stop
+            $script:testDirPushed = $true
 
             # Initialize git repo
             & git init 2>&1 | Out-Null
@@ -305,24 +346,30 @@ import gitconfig_helper
         }
 
         AfterEach {
-            # Clean up test repository
-            Pop-Location
-            Remove-Item -Path $script:testDir -Recurse -Force -ErrorAction SilentlyContinue
+            # Clean up test repository; pop only what BeforeEach pushed.
+            if ($script:testDirPushed) { Pop-Location }
+            if ($script:testDir) {
+                Remove-Item -Path $script:testDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
 
         It "Should fail when not in a git repository" {
-            Pop-Location
-            $tempDir = New-Item -ItemType Directory -Path "$env:TEMP\not_git_$(Get-Random)" -Force
-            Push-Location $tempDir
+            # No Pop-Location first: Push-Location moves absolutely, and popping
+            # the fixture frame here left AfterEach popping a frame it didn't
+            # own, walking the CWD back into the developer's checkout.
+            $tempDir = New-Item -ItemType Directory -Path (Join-Path $script:tempRoot "not_git_$(Get-Random)") -Force -ErrorAction Stop
+            Push-Location $tempDir -ErrorAction Stop
+            try {
+                $result = & $script:python $script:helperScript switch_to_main 2>&1
+                $output = $result -join "`n"
 
-            $result = & python $script:helperScript switch_to_main 2>&1
-            $output = $result -join "`n"
-
-            $output | Should -Match "not in a git repository"
-            $LASTEXITCODE | Should -Be 1
-
-            Pop-Location
-            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+                $output | Should -Match "not in a git repository"
+                $LASTEXITCODE | Should -Be 1
+            }
+            finally {
+                Pop-Location
+                Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
 
         It "Should fail when there are uncommitted changes" {
@@ -334,7 +381,7 @@ import gitconfig_helper
             # Make uncommitted changes
             Add-Content -Path "test.txt" -Value "uncommitted"
 
-            $result = & python $script:helperScript switch_to_main 2>&1
+            $result = & $script:python $script:helperScript switch_to_main 2>&1
             $output = $result -join "`n"
 
             $output | Should -Match "uncommitted changes"
@@ -344,7 +391,7 @@ import gitconfig_helper
 
         It "Should succeed when already on clean main branch" {
             # Create a bare repository to act as remote
-            $bareRepo = New-Item -ItemType Directory -Path "$env:TEMP\bare_$(Get-Random)" -Force
+            $bareRepo = New-Item -ItemType Directory -Path (Join-Path $script:tempRoot "bare_$(Get-Random)") -Force -ErrorAction Stop
             & git init --bare $bareRepo 2>&1 | Out-Null
 
             # Create initial commit
@@ -357,7 +404,7 @@ import gitconfig_helper
             & git push -u origin main 2>&1 | Out-Null
             & git branch -u origin/main 2>&1 | Out-Null
 
-            $result = & python $script:helperScript switch_to_main 2>&1
+            $result = & $script:python $script:helperScript switch_to_main 2>&1
             $output = $result -join "`n"
 
             # Should show we're already on main or processing successfully
@@ -398,14 +445,14 @@ import gitconfig_helper
 
             # When there's no remote configured, fetch doesn't error but pull may
             # The function should handle this gracefully with appropriate exit code
-            & python $script:helperScript switch_to_main 2>&1 | Out-Null
+            & $script:python $script:helperScript switch_to_main 2>&1 | Out-Null
             # With no valid remote, pull will fail and return exit code 1
             $LASTEXITCODE | Should -Be 1
         }
 
         It "Should return exit code 0 on success" {
             # Create a bare repository to act as remote
-            $bareRepo = New-Item -ItemType Directory -Path "$env:TEMP\bare_$(Get-Random)" -Force
+            $bareRepo = New-Item -ItemType Directory -Path (Join-Path $script:tempRoot "bare_$(Get-Random)") -Force -ErrorAction Stop
             & git init --bare $bareRepo 2>&1 | Out-Null
 
             New-Item -Path "test.txt" -Value "test" -Force | Out-Null
@@ -417,7 +464,7 @@ import gitconfig_helper
             & git push -u origin main 2>&1 | Out-Null
             & git branch -u origin/main 2>&1 | Out-Null
 
-            & python $script:helperScript switch_to_main 2>&1 | Out-Null
+            & $script:python $script:helperScript switch_to_main 2>&1 | Out-Null
             # Successful execution should always return exit code 0
             $LASTEXITCODE | Should -Be 0
 
@@ -432,7 +479,7 @@ import gitconfig_helper
             & git commit -m "Initial commit" 2>&1 | Out-Null
             Add-Content -Path "test.txt" -Value "uncommitted"
 
-            & python $script:helperScript switch_to_main 2>&1 | Out-Null
+            & $script:python $script:helperScript switch_to_main 2>&1 | Out-Null
             $LASTEXITCODE | Should -Be 1
         }
     }
@@ -440,13 +487,15 @@ import gitconfig_helper
     Context "update_all_main Function (git main --all)" {
         BeforeEach {
             # Parent directory that holds the child repos the sweep scans.
-            $script:parentDir = New-Item -ItemType Directory -Path "$env:TEMP\git_all_$(Get-Random)" -Force
+            # -ErrorAction Stop: abort on any setup failure rather than letting
+            # the fixture git commands run against the developer's checkout (#174).
+            $script:parentDir = New-Item -ItemType Directory -Path (Join-Path $script:tempRoot "git_all_$(Get-Random)") -Force -ErrorAction Stop
 
             # Clean child repo on main, wired to a bare remote so the
             # switch-to-main flow (fetch/pull/cleanup) succeeds.
             $script:cleanRepo = Join-Path $script:parentDir "clean"
-            New-Item -ItemType Directory -Path $script:cleanRepo | Out-Null
-            Push-Location $script:cleanRepo
+            New-Item -ItemType Directory -Path $script:cleanRepo -ErrorAction Stop | Out-Null
+            Push-Location $script:cleanRepo -ErrorAction Stop
             & git init 2>&1 | Out-Null
             & git checkout -b main 2>&1 | Out-Null
             & git config user.email "test@example.com" 2>&1 | Out-Null
@@ -463,8 +512,8 @@ import gitconfig_helper
 
             # Dirty child repo: on a feature branch with an uncommitted file.
             $script:dirtyRepo = Join-Path $script:parentDir "dirty"
-            New-Item -ItemType Directory -Path $script:dirtyRepo | Out-Null
-            Push-Location $script:dirtyRepo
+            New-Item -ItemType Directory -Path $script:dirtyRepo -ErrorAction Stop | Out-Null
+            Push-Location $script:dirtyRepo -ErrorAction Stop
             & git init 2>&1 | Out-Null
             & git checkout -b main 2>&1 | Out-Null
             & git config user.email "test@example.com" 2>&1 | Out-Null
@@ -479,12 +528,14 @@ import gitconfig_helper
         }
 
         AfterEach {
-            Remove-Item -Path $script:parentDir -Recurse -Force -ErrorAction SilentlyContinue
+            if ($script:parentDir) {
+                Remove-Item -Path $script:parentDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
 
         It "Should skip dirty repos with a triage report instead of switching them" {
             Push-Location $script:parentDir
-            $result = & python $script:helperScript switch_to_main --all 2>&1
+            $result = & $script:python $script:helperScript switch_to_main --all 2>&1
             $output = $result -join "`n"
             Pop-Location
 
@@ -499,7 +550,7 @@ import gitconfig_helper
 
         It "Should classify outcomes separately and not count skips as failures" {
             Push-Location $script:parentDir
-            $result = & python $script:helperScript switch_to_main --all 2>&1
+            $result = & $script:python $script:helperScript switch_to_main --all 2>&1
             $output = $result -join "`n"
             $exitCode = $LASTEXITCODE
             Pop-Location
@@ -545,7 +596,7 @@ import gitconfig_helper
         }
 
         It "Renders a grouped table with a Category column when plain" {
-            $result = & python $script:helperScript print_aliases --plain 2>&1
+            $result = & $script:python $script:helperScript print_aliases --plain 2>&1
             $output = $result -join "`n"
             $output | Should -Match "Git Aliases"
             $output | Should -Match "Category"
@@ -606,7 +657,7 @@ import gitconfig_helper
             # nothing should be printed (so the shell inserts an empty selection).
             $tmp = [System.IO.Path]::GetTempFileName()
             try {
-                $result = & python $script:helperScript print_aliases --out $tmp 2>&1
+                $result = & $script:python $script:helperScript print_aliases --out $tmp 2>&1
                 $output = ($result -join "`n").Trim()
                 $output | Should -Not -Match "Git Aliases"
                 $LASTEXITCODE | Should -Be 0
@@ -641,7 +692,7 @@ import gitconfig_helper
 
         It "Stays quiet (no reason) when piped, and still shows the table" {
             # stdout+stderr both captured (not TTYs) -> static table, no note.
-            $result = & python $script:helperScript print_aliases 2>&1
+            $result = & $script:python $script:helperScript print_aliases 2>&1
             $output = $result -join "`n"
             $output | Should -Match "Git Aliases"
             $output | Should -Not -Match "git alias:"
@@ -693,14 +744,14 @@ import gitconfig_helper
         }
 
         It "Rejects a missing issue number" {
-            $result = & python $script:helperScript start 2>&1
+            $result = & $script:python $script:helperScript start 2>&1
             $output = $result -join "`n"
             $output | Should -Match "Usage: git start"
             $LASTEXITCODE | Should -Be 1
         }
 
         It "Rejects a non-numeric issue number" {
-            $result = & python $script:helperScript start abc 2>&1
+            $result = & $script:python $script:helperScript start abc 2>&1
             $output = $result -join "`n"
             $output | Should -Match "Usage: git start"
             $LASTEXITCODE | Should -Be 1

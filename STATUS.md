@@ -6,7 +6,7 @@ A cross-platform tool that generates a portable `~/.gitconfig` from a version-co
 
 ## Current State — 2026-07-05
 
-Healthy; `main` is clean. The mac `initialize-local-config.sh` regen-wipe bugs (Homebrew safe.directory, file-based signing) are fixed, and beads is working again after a fresh re-init on bd 1.1.0's native schema ([#172](https://github.com/J-MaFf/gitconfig/issues/172)). Known issue: the Pester helper suite hardcodes `python` and its git fixtures can escape onto the host repo on macOS ([#174](https://github.com/J-MaFf/gitconfig/issues/174)) — avoid running it on macOS until fixed.
+Healthy; `main` is clean. The mac `initialize-local-config.sh` regen-wipe bugs (Homebrew safe.directory, file-based signing) are fixed, beads works again after a fresh re-init on bd 1.1.0's native schema ([#172](https://github.com/J-MaFf/gitconfig/issues/172)), and the Pester helper suite is safe to run on macOS again ([#174](https://github.com/J-MaFf/gitconfig/issues/174)): 185/186 pass — the one remaining failure is the Windows Initialize-LocalConfig script exercised on a Unix host ([#176](https://github.com/J-MaFf/gitconfig/issues/176)).
 
 ### Components
 
@@ -30,10 +30,11 @@ Healthy; `main` is clean. The mac `initialize-local-config.sh` regen-wipe bugs (
 | [#169](https://github.com/J-MaFf/gitconfig/issues/169) | Regen wiped the `/opt/homebrew` safe.directory entry on shared Macs, breaking `brew update` | [#170](https://github.com/J-MaFf/gitconfig/pull/170) |
 | [#171](https://github.com/J-MaFf/gitconfig/issues/171) | Regen reverted mac signing to the agent-based key (Touch ID prompt, hangs unattended) | [#173](https://github.com/J-MaFf/gitconfig/pull/173) |
 | [#172](https://github.com/J-MaFf/gitconfig/issues/172) | beads DB stuck on schema v32; upstream migration chain broken (missing `wisps` table) | [#175](https://github.com/J-MaFf/gitconfig/pull/175) |
+| [#174](https://github.com/J-MaFf/gitconfig/issues/174) | Helper Pester tests hardcoded `python` and their git fixtures could escape onto the host repo | [#177](https://github.com/J-MaFf/gitconfig/pull/177) |
 
 ### Open Issues
 
-- [#174](https://github.com/J-MaFf/gitconfig/issues/174) — `gitconfig_helper.Tests.ps1` hardcodes `python` (28 failures on macOS) **and its git fixtures can run against the host repo when setup fails** — an escaped run committed fixture data and renamed the checked-out branch to `main` on 2026-07-05. Fix in progress (bead `gitconfig-` prefix in the graph).
+- [#176](https://github.com/J-MaFf/gitconfig/issues/176) — the Windows `Initialize-LocalConfig.ps1` config-verification test fails on macOS (mixed path separators); recommend skipping Windows-script contexts on non-Windows hosts.
 
 ## Natural Next Steps
 
