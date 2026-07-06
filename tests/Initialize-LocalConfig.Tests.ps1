@@ -117,13 +117,21 @@ Describe "Initialize-LocalConfig.ps1" {
             $env:GIT_CONFIG_SYSTEM = $script:savedSystem
         }
 
-        It "Should verify the generated config (not WARN) when run outside a git repo" {
+        It "Should verify the generated config (not WARN) when run outside a git repo" -Skip:($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) {
             # Regression guard for #148: the script must validate the file it wrote
             # (git config --file ...), not the repo config (git config --local ...),
             # which errors when the current directory isn't a git repo. The sandbox
             # CWD is not a repo, so the old --local check printed a spurious WARN.
             # Capture all streams (*>&1) so Write-Host's information-stream output
             # lands in $out; 2>&1 alone would miss it.
+            #
+            # Windows-only (#176): the script under test builds USERPROFILE-relative
+            # paths with backslashes, so on Unix hosts verification reads a
+            # mixed-separator path and WARNs spuriously. The script never runs on
+            # Unix, so skip there instead of chasing Windows path semantics
+            # cross-platform. (The -Skip expression is discovery-safe: $IsWindows
+            # doesn't exist on Windows PowerShell 5.1, where the version guard
+            # short-circuits to "run".)
             Push-Location $script:sandbox
             try { $out = & $script:scriptPath -Force *>&1 } finally { Pop-Location }
             $text = $out | Out-String
