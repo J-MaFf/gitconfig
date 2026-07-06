@@ -39,7 +39,14 @@ This directory provides a complete Linux/Unix version of the gitconfig setup sys
 - **initialize-local-config.sh** - Creates machine-specific .gitconfig.local
   - Sets up safe directories
   - Configures gitignore path
+  - Configures an HTTPS credential helper: the GitHub CLI (`gh auth git-credential`)
+    when installed — so unattended HTTPS git (cron pulls, `bd dolt push`)
+    authenticates without prompting — falling back to the desktop keyring
+    (libsecret) where available (needs an unlocked keyring, so interactive
+    sessions rather than headless ones)
   - Linux-friendly paths (no Windows-specific settings)
+  - Refuses to run on macOS (use the mac version) — a mislabeled
+    .gitconfig.local is how osxkeychain ended up on a Linux server (#179)
 
 - **update-gitconfig.sh** - Runs git pull on the repository
   - Logs all operations with timestamps

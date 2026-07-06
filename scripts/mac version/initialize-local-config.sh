@@ -42,6 +42,18 @@ EOF
     exit 0
 fi
 
+# Guard: this script writes macOS-specific config (osxkeychain, op-ssh-sign
+# paths). Run on another OS it mislabels ~/.gitconfig.local and breaks HTTPS
+# auth there — that's how the Ubuntu server ended up with credential.helper =
+# osxkeychain (issue #179). Tests set GITCONFIG_ALLOW_CROSS_OS=1 to run the
+# script in a sandbox anywhere.
+if [ "$(uname -s)" != "Darwin" ] && [ "${GITCONFIG_ALLOW_CROSS_OS:-0}" != "1" ]; then
+    echo "[ERROR] This is the macOS script but this host is $(uname -s)." >&2
+    echo "        Use 'scripts/linux version/initialize-local-config.sh' instead," >&2
+    echo "        or set GITCONFIG_ALLOW_CROSS_OS=1 to override (tests/sandboxes)." >&2
+    exit 1
+fi
+
 HOME_DIR="$HOME"
 LOCAL_CONFIG_PATH="$HOME_DIR/.gitconfig.local"
 

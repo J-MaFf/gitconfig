@@ -28,11 +28,30 @@ setup() {
     export HOME="$SANDBOX"
     export GIT_CONFIG_GLOBAL="$SANDBOX/.gitconfig"
     export GIT_CONFIG_SYSTEM="$SANDBOX/no-system-config"
+    # The script refuses to run on a non-macOS host (issue #179); the sandbox
+    # makes cross-OS runs safe, so opt out of the guard for every test.
+    export GITCONFIG_ALLOW_CROSS_OS=1
     : > "$GIT_CONFIG_GLOBAL"
 }
 
 teardown() {
     rm -rf "$SANDBOX"
+}
+
+@test "refuses to run on a non-macOS host without the cross-OS override" {
+    # Stub uname so the guard sees a non-Darwin host regardless of the real
+    # OS — the suite mostly runs on macOS, where the guard would otherwise
+    # never fire and this test would go permanently dead.
+    mkdir -p "$SANDBOX/bin"
+    printf '#!/bin/sh\necho Linux\n' > "$SANDBOX/bin/uname"
+    chmod +x "$SANDBOX/bin/uname"
+
+    run env -u GITCONFIG_ALLOW_CROSS_OS PATH="$SANDBOX/bin:$PATH" \
+        bash "$SCRIPT" --force
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"macOS script"* ]]
+    # Nothing was written: the guard fires before any config generation.
+    [ ! -f "$SANDBOX/.gitconfig.local" ]
 }
 
 @test "writes allowedSignersFile when a literal signing key is configured (no 1Password)" {
