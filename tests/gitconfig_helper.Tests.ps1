@@ -1,7 +1,7 @@
 # Resolve the Python interpreter per the repo rule: py -> python3 -> python.
 # Never bare `python` first — it's the WindowsApps stub on Windows and absent
-# on macOS/Linux. Defined at script scope so it exists in BOTH Pester phases:
-# discovery (for -Skip below) and run (for the test bodies).
+# on macOS/Linux. Script-body functions exist only during Pester's discovery
+# phase, so the same loop is inlined again in BeforeAll for the run phase.
 function Resolve-TestPython {
     foreach ($name in 'py', 'python3', 'python') {
         if (Get-Command $name -CommandType Application -ErrorAction SilentlyContinue) {
@@ -13,7 +13,13 @@ function Resolve-TestPython {
 BeforeDiscovery { $script:python = Resolve-TestPython }
 
 BeforeAll {
-    $script:python = Resolve-TestPython
+    # Inlined copy of Resolve-TestPython (discovery-only function; see above).
+    $script:python = foreach ($name in 'py', 'python3', 'python') {
+        if (Get-Command $name -CommandType Application -ErrorAction SilentlyContinue) {
+            $name
+            break
+        }
+    }
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
     $script:helperScript = Join-Path $script:repoRoot "gitconfig_helper.py"
     # Cross-platform temp root for throwaway git fixtures. $env:TEMP is
