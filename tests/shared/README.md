@@ -7,7 +7,8 @@ linux setup scripts depend on. They complement the Windows-only Pester suite in
 | Suite | Runner | Covers |
 | --- | --- | --- |
 | `functions.bats` | [bats-core](https://github.com/bats-core/bats-core) | `scripts/shared/functions.sh` — `backup_file`, `create_symlink`, `file_owner_uid`, `update_allowed_signers`, `generate_gitconfig`, git-alias widget enable/disable |
-| `mac-initialize-local-config.bats` | bats-core | `scripts/mac version/initialize-local-config.sh` — always writes `allowedSignersFile` when signing is enabled ([#116](https://github.com/J-MaFf/gitconfig/issues/116)); trusts an other-owned Homebrew repo so `brew update` keeps working ([#169](https://github.com/J-MaFf/gitconfig/issues/169)); emits file-based no-agent signing config from an on-disk key ([#171](https://github.com/J-MaFf/gitconfig/issues/171)) |
+| `mac-initialize-local-config.bats` | bats-core | `scripts/mac version/initialize-local-config.sh` — always writes `allowedSignersFile` when signing is enabled ([#116](https://github.com/J-MaFf/gitconfig/issues/116)); trusts an other-owned Homebrew repo so `brew update` keeps working ([#169](https://github.com/J-MaFf/gitconfig/issues/169)); emits file-based no-agent signing config from an on-disk key ([#171](https://github.com/J-MaFf/gitconfig/issues/171)); refuses to run on a non-macOS host ([#179](https://github.com/J-MaFf/gitconfig/issues/179)) |
+| `linux-initialize-local-config.bats` | bats-core | `scripts/linux version/initialize-local-config.sh` — emits a Linux-appropriate HTTPS credential helper (gh CLI scoped to github.com, libsecret fallback, commented hint otherwise) and never osxkeychain; refuses to run on a macOS host ([#179](https://github.com/J-MaFf/gitconfig/issues/179)) |
 | `test_gitconfig_helper.py` | [pytest](https://docs.pytest.org/) | `gitconfig_helper.py` — `_slugify`, `LABEL_PREFIX` selection, `_have`, `_default_branch`, `get_git_aliases` |
 
 ## Running

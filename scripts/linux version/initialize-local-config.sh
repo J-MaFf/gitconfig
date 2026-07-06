@@ -63,6 +63,17 @@ EOF
     exit 0
 fi
 
+# Guard: this script writes Linux-specific config. Running the wrong platform's
+# script mislabels ~/.gitconfig.local — the macOS one applied credential.helper
+# = osxkeychain on the Ubuntu server and broke all HTTPS git auth (issue #179).
+# Tests set GITCONFIG_ALLOW_CROSS_OS=1 to run the script in a sandbox anywhere.
+if [ "$(uname -s)" = "Darwin" ] && [ "${GITCONFIG_ALLOW_CROSS_OS:-0}" != "1" ]; then
+    echo "[ERROR] This is the Linux script but this host is macOS." >&2
+    echo "        Use 'scripts/mac version/initialize-local-config.sh' instead," >&2
+    echo "        or set GITCONFIG_ALLOW_CROSS_OS=1 to override (tests/sandboxes)." >&2
+    exit 1
+fi
+
 HOME_DIR="$HOME"
 LOCAL_CONFIG_PATH="$HOME_DIR/.gitconfig.local"
 
@@ -123,6 +134,71 @@ else
 # 	format = ssh
 # [commit]
 # 	gpgsign = true
+"
+fi
+
+# HTTPS credential helper (issue #179). Without one, unattended git over HTTPS
+# fails ("could not read Username for 'https://github.com'") — e.g. `bd dolt push`
+# or cron pulls of private repos. Prefer the GitHub CLI helper (token managed by
+# `gh auth login`, scoped to github.com like `gh auth setup-git` does); fall back
+# to libsecret where a distro ships it; otherwise leave a commented hint.
+# GITCONFIG_GH_BIN / GITCONFIG_LIBSECRET_BIN are test seams (like HOMEBREW_REPO
+# in the macOS script): set to a path to force that helper, set to the empty
+# string to simulate "not installed". Unset means autodetect.
+if [ -n "${GITCONFIG_GH_BIN+set}" ]; then
+    GH_PATH="$GITCONFIG_GH_BIN"
+else
+    GH_PATH="$(command -v gh 2>/dev/null || true)"
+fi
+
+if [ -n "${GITCONFIG_LIBSECRET_BIN+set}" ]; then
+    LIBSECRET_HELPER="$GITCONFIG_LIBSECRET_BIN"
+else
+    LIBSECRET_HELPER="$(command -v git-credential-libsecret 2>/dev/null || true)"
+    if [ -z "$LIBSECRET_HELPER" ]; then
+        # Some distros ship the helper in git's exec path without a PATH entry.
+        GIT_EXEC_PATH_DIR="$(git --exec-path 2>/dev/null || true)"
+        if [ -n "$GIT_EXEC_PATH_DIR" ] && [ -x "$GIT_EXEC_PATH_DIR/git-credential-libsecret" ]; then
+            LIBSECRET_HELPER="$GIT_EXEC_PATH_DIR/git-credential-libsecret"
+        fi
+    fi
+fi
+
+if [ -n "$GH_PATH" ]; then
+    echo "[INFO] Using GitHub CLI credential helper: $GH_PATH"
+    echo "       Run 'gh auth login' once if you haven't — the helper reads gh's token."
+    CONFIG_CONTENT+="
+[credential \"https://github.com\"]
+	# HTTPS auth from the gh CLI token, so unattended git over HTTPS (e.g.
+	# \`bd dolt push\`, cron pulls of private repos) never prompts. The empty
+	# helper line resets any helpers inherited from other config levels.
+	helper =
+	helper = !$GH_PATH auth git-credential
+
+[credential \"https://gist.github.com\"]
+	helper =
+	helper = !$GH_PATH auth git-credential
+"
+elif [ -n "$LIBSECRET_HELPER" ]; then
+    echo "[INFO] Using libsecret credential helper: $LIBSECRET_HELPER"
+    CONFIG_CONTENT+="
+[credential]
+	# HTTPS auth from the desktop keyring via libsecret — no prompt once a
+	# token has been stored (first interactive push/pull saves it). The empty
+	# helper line resets any helpers inherited from other config levels, so a
+	# stale one can't answer first with an expired credential (issue #179).
+	helper =
+	helper = $LIBSECRET_HELPER
+"
+else
+    echo "[INFO] No credential helper found (gh CLI or libsecret) — skipping."
+    echo "       Install the GitHub CLI (https://cli.github.com) and run 'gh auth login',"
+    echo "       then re-run this script to enable unattended HTTPS auth."
+    CONFIG_CONTENT+="
+# Uncomment to enable HTTPS auth via the GitHub CLI (after 'gh auth login'):
+# [credential \"https://github.com\"]
+# 	helper =
+# 	helper = !gh auth git-credential
 "
 fi
 
