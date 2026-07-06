@@ -6,7 +6,7 @@ A cross-platform tool that generates a portable `~/.gitconfig` from a version-co
 
 ## Current State — 2026-07-06
 
-Healthy; `main` is clean. Last full suite run on macOS (2026-07-05) was green (Pester 185 pass / 0 fail / 13 skip; bats 31/31); [#180](https://github.com/J-MaFf/gitconfig/pull/180) grows the bats suites to 41 tests (new Linux local-config suite + mac guard test — validated on Linux via a plain-bash sandbox replay; rerun `bats tests/shared/` on the Mac to reconfirm). Recent work: Linux now gets a proper HTTPS credential helper and the platform scripts refuse cross-OS runs ([#179](https://github.com/J-MaFf/gitconfig/issues/179)), the mac `initialize-local-config.sh` regen-wipe bugs are fixed (Homebrew safe.directory, file-based signing), beads runs on bd 1.1.0's native schema after a fresh re-init ([#172](https://github.com/J-MaFf/gitconfig/issues/172)), and the Pester helper suite is sandbox-safe on macOS ([#174](https://github.com/J-MaFf/gitconfig/issues/174)).
+Healthy; `main` is clean. Last full suite run on macOS (2026-07-05) was green (Pester 185 pass / 0 fail / 13 skip; bats 31/31); [#180](https://github.com/J-MaFf/gitconfig/pull/180) grows the bats suites to 41 tests (new Linux local-config suite + mac guard test — validated on Linux via a plain-bash sandbox replay; rerun `bats tests/shared/` on the Mac to reconfirm). Recent work: the mac credential block gained the same reset-line hardening as Linux ([#183](https://github.com/J-MaFf/gitconfig/issues/183)), Linux now gets a proper HTTPS credential helper and the platform scripts refuse cross-OS runs ([#179](https://github.com/J-MaFf/gitconfig/issues/179)), the mac `initialize-local-config.sh` regen-wipe bugs are fixed (Homebrew safe.directory, file-based signing), beads runs on bd 1.1.0's native schema after a fresh re-init ([#172](https://github.com/J-MaFf/gitconfig/issues/172)), and the Pester helper suite is sandbox-safe on macOS ([#174](https://github.com/J-MaFf/gitconfig/issues/174)).
 
 ### Components
 
@@ -23,6 +23,7 @@ Healthy; `main` is clean. Last full suite run on macOS (2026-07-05) was green (P
 
 | Issue | Description | PR |
 |-------|-------------|----|
+| [#183](https://github.com/J-MaFf/gitconfig/issues/183) | Mac credential block lacked the empty helper reset line (multi-valued accumulation) | [#184](https://github.com/J-MaFf/gitconfig/pull/184) |
 | [#160](https://github.com/J-MaFf/gitconfig/issues/160) | Login task "No Python interpreter found" (WindowsApps alias stub) | [#161](https://github.com/J-MaFf/gitconfig/pull/161) |
 | [#163](https://github.com/J-MaFf/gitconfig/issues/163) | Non-ASCII em-dashes failing Encoding tests | [#164](https://github.com/J-MaFf/gitconfig/pull/164) |
 | [#165](https://github.com/J-MaFf/gitconfig/issues/165) | `install.ps1` overwrote existing `~/.gitconfig.local` | [#166](https://github.com/J-MaFf/gitconfig/pull/166) |
