@@ -200,6 +200,11 @@ CONFIG_CONTENT+="
 	# launchd sync) authenticate from the macOS login keychain — no prompt and
 	# no 1Password dependency. Store a token once with:
 	#   git credential-osxkeychain store
+	# The empty helper line resets helpers inherited from other config levels:
+	# credential.helper is multi-valued and accumulates, so a stale helper from
+	# a migrated other-platform config would otherwise answer first (issue #183,
+	# mirroring the Linux blocks from #180).
+	helper =
 	helper = osxkeychain
 "
 

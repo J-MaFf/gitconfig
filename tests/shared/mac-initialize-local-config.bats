@@ -191,3 +191,21 @@ teardown() {
     # No key, no op-ssh-sign: the commented enable hint is shown instead.
     grep -qF '# Uncomment and set program path' "$SANDBOX/.gitconfig.local"
 }
+
+@test "emits the empty reset helper line before osxkeychain (issue #183)" {
+    run bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+
+    # credential.helper is multi-valued: without the bare reset line first, a
+    # stale helper inherited from a migrated other-platform config would still
+    # run ahead of osxkeychain. The first helper entry must be the empty reset.
+    first_helper="$(awk '/^\[credential\]/{f=1; next} f && /helper =/{print; exit}' "$SANDBOX/.gitconfig.local")"
+    [ "$first_helper" = "	helper =" ]
+    grep -qF 'helper = osxkeychain' "$SANDBOX/.gitconfig.local"
+
+    # git parses the pair as reset + osxkeychain: the empty value clears any
+    # inherited helpers, so the effective list is exactly one non-empty value,
+    # and it is osxkeychain (last in the list).
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get-all credential.helper | grep -c .)" = "1" ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get-all credential.helper | tail -1)" = "osxkeychain" ]
+}
