@@ -203,7 +203,9 @@ teardown() {
     [ "$first_helper" = "	helper =" ]
     grep -qF 'helper = osxkeychain' "$SANDBOX/.gitconfig.local"
 
-    # git parses the pair as reset + osxkeychain: the effective list ends with
-    # exactly one non-empty value.
+    # git parses the pair as reset + osxkeychain: the empty value clears any
+    # inherited helpers, so the effective list is exactly one non-empty value,
+    # and it is osxkeychain (last in the list).
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get-all credential.helper | grep -c .)" = "1" ]
     [ "$(git config --file "$SANDBOX/.gitconfig.local" --get-all credential.helper | tail -1)" = "osxkeychain" ]
 }
