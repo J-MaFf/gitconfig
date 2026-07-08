@@ -4,9 +4,10 @@
 
 A cross-platform tool that generates a portable `~/.gitconfig` from a version-controlled template (`.gitconfig.template`), layers machine-specific overrides via `~/.gitconfig.local`, and keeps it converged on Windows through a login scheduled task. Helper logic (`gitconfig_helper.py`) backs the custom git aliases. Windows setup is PowerShell + Pester; macOS/Linux are bash.
 
-## Current State — 2026-07-06
+## Current State — 2026-07-08
 
-Healthy; `main` is clean. Last full suite run on macOS (2026-07-05) was green (Pester 185 pass / 0 fail / 13 skip; bats 31/31); [#180](https://github.com/J-MaFf/gitconfig/pull/180) grows the bats suites to 41 tests (new Linux local-config suite + mac guard test — validated on Linux via a plain-bash sandbox replay; rerun `bats tests/shared/` on the Mac to reconfirm). Recent work: the mac credential block gained the same reset-line hardening as Linux ([#183](https://github.com/J-MaFf/gitconfig/issues/183)), Linux now gets a proper HTTPS credential helper and the platform scripts refuse cross-OS runs ([#179](https://github.com/J-MaFf/gitconfig/issues/179)), the mac `initialize-local-config.sh` regen-wipe bugs are fixed (Homebrew safe.directory, file-based signing), beads runs on bd 1.1.0's native schema after a fresh re-init ([#172](https://github.com/J-MaFf/gitconfig/issues/172)), and the Pester helper suite is sandbox-safe on macOS ([#174](https://github.com/J-MaFf/gitconfig/issues/174)).
+Healthy; `main` is clean. Latest unit-suite run on the Windows work PC (2026-07-08) was green (Pester 199 pass / 0 fail / 18 integration excluded); last full macOS run (2026-07-05) was also green (Pester 185 pass / 0 fail / 13 skip; bats 31/31);
+[#186](https://github.com/J-MaFf/gitconfig/issues/186) bakes `core.longpaths = true` into the Windows-generated `~/.gitconfig.local` — template regeneration had silently wiped the hand-set global copy, breaking beads' `bd dolt push` with "Filename too long"; [#180](https://github.com/J-MaFf/gitconfig/pull/180) grows the bats suites to 41 tests (new Linux local-config suite + mac guard test — validated on Linux via a plain-bash sandbox replay; rerun `bats tests/shared/` on the Mac to reconfirm). Recent work: the mac credential block gained the same reset-line hardening as Linux ([#183](https://github.com/J-MaFf/gitconfig/issues/183)), Linux now gets a proper HTTPS credential helper and the platform scripts refuse cross-OS runs ([#179](https://github.com/J-MaFf/gitconfig/issues/179)), the mac `initialize-local-config.sh` regen-wipe bugs are fixed (Homebrew safe.directory, file-based signing), beads runs on bd 1.1.0's native schema after a fresh re-init ([#172](https://github.com/J-MaFf/gitconfig/issues/172)), and the Pester helper suite is sandbox-safe on macOS ([#174](https://github.com/J-MaFf/gitconfig/issues/174)).
 
 ### Components
 
@@ -34,6 +35,7 @@ Healthy; `main` is clean. Last full suite run on macOS (2026-07-05) was green (P
 | [#174](https://github.com/J-MaFf/gitconfig/issues/174) | Helper Pester tests hardcoded `python` and their git fixtures could escape onto the host repo | [#177](https://github.com/J-MaFf/gitconfig/pull/177) |
 | [#176](https://github.com/J-MaFf/gitconfig/issues/176) | Windows `Initialize-LocalConfig.ps1` verification test failed on macOS (mixed path separators) | [#178](https://github.com/J-MaFf/gitconfig/pull/178) |
 | [#179](https://github.com/J-MaFf/gitconfig/issues/179) | Generated gitconfig applied `credential.helper=osxkeychain` on Linux, breaking HTTPS git auth | [#180](https://github.com/J-MaFf/gitconfig/pull/180) |
+| [#186](https://github.com/J-MaFf/gitconfig/issues/186) | Windows-generated config lacked `core.longpaths`; template regen wiped the hand-set global, breaking `bd dolt push` ("Filename too long") | [#187](https://github.com/J-MaFf/gitconfig/pull/187) |
 
 ### Open Issues
 

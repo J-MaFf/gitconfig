@@ -130,6 +130,12 @@ try {
 [core]
 	# Use global gitignore file
 	excludesfile = $($homeDir -replace '\\', '/')/.gitignore_global
+	# Long path support: some tools nest repos deeper than Windows MAX_PATH
+	# (e.g. Dolt's git-remote-cache behind beads' 'bd dolt push'), and stock
+	# Git for Windows then fails with "Filename too long". Lives here rather
+	# than in .gitconfig.template because it is Windows-specific and this file
+	# is never clobbered by template regeneration (see issue #186).
+	longpaths = true
 
 [gpg "ssh"]
 	# Machine-specific SSH signing program path
@@ -178,6 +184,7 @@ try {
         Write-Host "Local configuration includes:" -ForegroundColor Cyan
         Write-Host "  - SSH signing program path (op-ssh-sign.exe)" -ForegroundColor Gray
         Write-Host "  - Allowed signers file for local signature verification" -ForegroundColor Gray
+        Write-Host "  - Long path support (core.longpaths) for deeply nested repos" -ForegroundColor Gray
         Write-Host "  - Network safe directories (10.210.3.10, KFWS9BDC01)" -ForegroundColor Gray
         Write-Host "  - Local development directories" -ForegroundColor Gray
         Write-Host ""
