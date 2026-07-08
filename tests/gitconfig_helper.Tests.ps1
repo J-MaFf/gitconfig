@@ -235,6 +235,17 @@ import gitconfig_helper
             $scriptContent | Should -Match 'def _run_skill_script\('
         }
 
+        It "skill dispatcher prefers pwsh and gates PS7-only scripts (#188)" {
+            # publish-skill.ps1 declares '#Requires -Version 7'; Windows PowerShell
+            # 5.1 refuses to start it, so the dispatcher must resolve pwsh first.
+            # Falling back to 'powershell' is allowed only for the WinPS-compatible
+            # scripts (sync/status); PS7-only scripts get an actionable error.
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'shutil\.which\("pwsh"\)'
+            $scriptContent | Should -Match 'PS7_SCRIPTS\s*=\s*\{"publish-skill"\}'
+            $scriptContent | Should -Not -Match 'cmd = \["powershell"'
+        }
+
         It "list_skills reads a description and a last-updated date per skill" {
             $scriptContent = Get-Content $helperScript -Raw
             $scriptContent | Should -Match 'def _read_skill_description\('
