@@ -235,6 +235,20 @@ import gitconfig_helper
             $scriptContent | Should -Match 'def _run_skill_script\('
         }
 
+        It "renders skill sync/status in Python with a wrapper fallback (#190)" {
+            # The rich view computes drift live via skill-audit and shows only the
+            # last scheduled run's stamp + pull result from the log - it must not
+            # replay the stale [drift] flag next to fresh state (the contradiction
+            # #190 fixed). Wrappers stay wired as the fallback path.
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'def skill_sync\('
+            $scriptContent | Should -Match 'def skill_status\('
+            $scriptContent | Should -Match 'def _last_background_sync\('
+            $scriptContent | Should -Match 'def _audit_summary\('
+            $scriptContent | Should -Match 'def _skill_sync_or_status\('
+            $scriptContent | Should -Match 'no such ref was fetched'
+        }
+
         It "skill dispatcher prefers pwsh and gates PS7-only scripts (#188)" {
             # publish-skill.ps1 declares '#Requires -Version 7'; Windows PowerShell
             # 5.1 refuses to start it, so the dispatcher must resolve pwsh first.
