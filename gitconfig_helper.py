@@ -432,16 +432,36 @@ SKILL_USAGE = (
 )
 
 
+# Wrapper scripts that declare `#Requires -Version 7`: Windows PowerShell 5.1
+# refuses to even start them, so they must run under pwsh. The sync/status
+# scripts deliberately stay WinPS-compatible (the scheduled tasks invoke
+# `powershell`) and may fall back when pwsh is absent.
+PS7_SCRIPTS = {"publish-skill"}
+
+
 def _run_skill_script(base):
     """Run a claude-skills wrapper script (~/.claude/skills/scripts/<base>.{ps1,sh}).
 
-    Picks the per-OS variant: PowerShell on Windows, bash elsewhere. Returns the
-    script's exit code, or 1 if the expected script file is missing.
+    Picks the per-OS variant: PowerShell on Windows, bash elsewhere. On Windows,
+    prefers PowerShell 7 (pwsh) and falls back to Windows PowerShell only for
+    scripts that don't require PS7 - publish-skill.ps1 declares
+    `#Requires -Version 7`, so launching it under `powershell` dies before the
+    script runs (#188). Returns the script's exit code, or 1 if the expected
+    script file is missing or a PS7-only script has no pwsh to run under.
     """
     scripts_dir = os.path.join(SKILLS_DIR, "scripts")
     if sys.platform == "win32":
         script = os.path.join(scripts_dir, base + ".ps1")
-        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
+        shell = shutil.which("pwsh")
+        if not shell:
+            if base in PS7_SCRIPTS:
+                Console(stderr=True).print(
+                    f"[red]git skill: {base}.ps1 requires PowerShell 7, and pwsh was "
+                    f"not found on PATH - install it: winget install Microsoft.PowerShell[/red]"
+                )
+                return 1
+            shell = "powershell"
+        cmd = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
     else:
         script = os.path.join(scripts_dir, base + ".sh")
         cmd = ["bash", script]
