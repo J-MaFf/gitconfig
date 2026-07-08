@@ -145,6 +145,48 @@ Describe "Initialize-LocalConfig.ps1" {
         }
     }
 
+    Context "generated [core] settings" {
+        BeforeEach {
+            # Same sandbox isolation as the other contexts.
+            $script:sandbox = Join-Path $TestDrive ([guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Path $script:sandbox -Force | Out-Null
+
+            $script:savedUserProfile = $env:USERPROFILE
+            $script:savedHome = $env:HOME
+            $script:savedGlobal = $env:GIT_CONFIG_GLOBAL
+            $script:savedSystem = $env:GIT_CONFIG_SYSTEM
+
+            $env:USERPROFILE = $script:sandbox
+            $env:HOME = $script:sandbox
+            $env:GIT_CONFIG_GLOBAL = Join-Path $script:sandbox ".gitconfig"
+            $env:GIT_CONFIG_SYSTEM = Join-Path $script:sandbox "no-system-config"
+
+            git config --global user.email "sandbox@example.com" 2>&1 | Out-Null
+            git config --global user.signingkey "ssh-ed25519 AAAASANDBOXKEY test-comment" 2>&1 | Out-Null
+        }
+
+        AfterEach {
+            $env:USERPROFILE = $script:savedUserProfile
+            $env:HOME = $script:savedHome
+            $env:GIT_CONFIG_GLOBAL = $script:savedGlobal
+            $env:GIT_CONFIG_SYSTEM = $script:savedSystem
+        }
+
+        It "Should enable core.longpaths in the generated .gitconfig.local" {
+            # Regression guard for #186: core.longpaths=true must come from the
+            # never-clobbered local config, not a hand-set global that template
+            # regeneration (git selfupdate) silently wipes. Without it, deeply
+            # nested repos (Dolt's git-remote-cache behind beads' bd dolt push)
+            # fail with "Filename too long" on Windows.
+            Push-Location $script:sandbox
+            try { & $script:scriptPath -Force 2>&1 | Out-Null } finally { Pop-Location }
+
+            $local = Join-Path $script:sandbox ".gitconfig.local"
+            $local | Should -Exist
+            git config --file $local --get core.longpaths | Should -Be 'true'
+        }
+    }
+
     Context "create-if-missing (preserve existing .gitconfig.local)" {
         BeforeEach {
             # Same sandbox isolation as the other contexts.
