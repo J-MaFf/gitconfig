@@ -35,9 +35,10 @@
 	#   sync      pull-only refresh: pull --ff-only (flags unpublished work, never publishes)
 	#   status    this machine's sync state (last background sync + local changes)
 	#   publish   publish new/edited skills via a PR (its main is branch-protected)
-	# `list` runs in Python; sync/status/publish delegate to the per-OS wrapper
-	# scripts in ~/.claude/skills/scripts (kept in the claude-skills repo so tweaks
-	# sync without touching this alias). `git skill` with no argument prints usage.
+	# list/sync/status render in Python (rich); publish delegates to the per-OS
+	# wrapper script in ~/.claude/skills/scripts (kept in the claude-skills repo so
+	# tweaks sync without touching this alias). sync/status fall back to their
+	# wrappers there if the rich view fails. `git skill` with no argument prints usage.
 	# Runs from any directory.
 	skill = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py skill \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 	# Pull the latest gitconfig repo and reinstall ~/.gitconfig from the template

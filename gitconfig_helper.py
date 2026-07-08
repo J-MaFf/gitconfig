@@ -352,6 +352,10 @@ def _skill_last_updated(skills_dir, name, skill_md_path):
 # depends on that repo being installed there.
 SKILLS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "skills")
 
+# Log written by the scheduled background syncs (claude-sync wrappers from the
+# claude-skills setup scripts). Read-only here.
+SYNC_LOG = os.path.join(os.path.expanduser("~"), ".claude", "skills-sync.log")
+
 
 def _require_skills_dir():
     """Return True if ~/.claude/skills exists, else print an actionable pointer to
@@ -473,6 +477,199 @@ def _run_skill_script(base):
     return subprocess.run(cmd).returncode
 
 
+def _last_background_sync():
+    """Parse the newest entry from the background-sync log (~/.claude/skills-sync.log).
+
+    Each scheduled run appends a '[<stamp>] sync' header, the git output, a
+    Windows CLAUDE.md copy line, and a '[drift]' flag when *that run* saw
+    unpublished work. Only the stamp and the pull result stay true afterwards -
+    drift must be re-computed live (replaying the stale flag next to fresh
+    state is exactly the contradiction #190 fixes) - so that's all we return.
+
+    Returns (stamp, result) or None when there is no log/entry yet.
+    """
+    try:
+        with open(SYNC_LOG, encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    idx = None
+    for i in range(len(lines) - 1, -1, -1):
+        if "] sync" in lines[i]:
+            idx = i
+            break
+    if idx is None:
+        return None
+    m = re.match(r"^\[([^\]]+)\]", lines[idx])
+    stamp = m.group(1).strip() if m else "unknown time"
+    block = [line.strip() for line in lines[idx + 1:]]
+    if any(line.startswith("Already up to date") for line in block):
+        result = "already up to date"
+    elif any(line.startswith(("Updating ", "Fast-forward")) for line in block):
+        result = "pulled new commits"
+    else:
+        result = "completed"
+    return stamp, result
+
+
+def _audit_summary(no_fetch):
+    """Run skill-audit --summary --strict and return (lines, actionable) or None.
+
+    skill-audit (in the claude-skills repo) is the single source of truth for
+    local skill state; --strict exits non-zero when something needs publishing.
+    Its summary output is the counts line, sometimes preceded by an
+    ahead/behind line. None means the audit script is missing or won't launch.
+    """
+    scripts_dir = os.path.join(SKILLS_DIR, "scripts")
+    if sys.platform == "win32":
+        script = os.path.join(scripts_dir, "skill-audit.ps1")
+        # The audit stays WinPS-compatible by design, so plain powershell is a
+        # fine fallback when pwsh is absent.
+        shell = shutil.which("pwsh") or "powershell"
+        cmd = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+               script, "-Summary", "-Strict"]
+        if no_fetch:
+            cmd.append("-NoFetch")
+    else:
+        script = os.path.join(scripts_dir, "skill-audit.sh")
+        cmd = ["bash", script, "--summary", "--strict"]
+        if no_fetch:
+            cmd.append("--no-fetch")
+    if not os.path.isfile(script):
+        return None
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+    except OSError:
+        return None
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
+    return lines, proc.returncode != 0
+
+
+# skill-audit's --summary counts line, e.g.
+# "7 aligned, 0 drifted, 0 untracked, 0 problem(s), 0 duplicate name(s)"
+_AUDIT_COUNTS_RE = re.compile(
+    r"(?P<aligned>\d+) aligned, (?P<drifted>\d+) drifted, (?P<untracked>\d+) untracked, "
+    r"(?P<problems>\d+) problem\(s\), (?P<dupes>\d+) duplicate name\(s\)"
+)
+
+
+def _render_skill_state(console, no_fetch):
+    """Print the LIVE skill state: colored audit counts + the publish nudge.
+
+    Zero counts stay quiet (green aligned only); anything actionable gets its
+    own color so the eye lands on it. This is the only place drift is shown -
+    always computed now, never replayed from the log.
+    """
+    audit = _audit_summary(no_fetch)
+    if audit is None:
+        console.print("  [yellow][!] skill-audit not found - can't check local state[/yellow]")
+        return
+    lines, actionable = audit
+    for line in lines:
+        m = _AUDIT_COUNTS_RE.search(line)
+        if not m:
+            # e.g. "origin/main: 1 behind, 1 ahead" - context, shown as-is
+            console.print(f"  [dim]{escape(line.strip())}[/dim]")
+            continue
+        parts = [f"[green]{m['aligned']} aligned[/green]"]
+        if int(m["drifted"]):
+            parts.append(f"[yellow]{m['drifted']} drifted[/yellow]")
+        if int(m["untracked"]):
+            parts.append(f"[yellow]{m['untracked']} untracked[/yellow]")
+        if int(m["problems"]):
+            parts.append(f"[red]{m['problems']} problem(s)[/red]")
+        if int(m["dupes"]):
+            parts.append(f"[red]{m['dupes']} duplicate name(s)[/red]")
+        console.print("  Skills: " + ", ".join(parts))
+    if actionable:
+        console.print(
+            "  [yellow][!] Unpublished local changes - publish with: git skill publish[/yellow]"
+        )
+    else:
+        console.print("  [green][OK] Nothing to publish from this machine[/green]")
+
+
+def _print_skill_header(console, title):
+    """Print the repo line, a not-on-main warning, and the last scheduled sync."""
+    branch = run_git("-C", SKILLS_DIR, "rev-parse", "--abbrev-ref", "HEAD")
+    branch_name = branch.stdout.strip() if branch.returncode == 0 else "?"
+    console.print(f"[bold]{title}[/bold]  [dim]{SKILLS_DIR} (branch: {branch_name})[/dim]")
+    if branch_name not in ("main", "?"):
+        console.print(
+            f"  [yellow][!] On branch '{branch_name}', not main - sync pulls the current branch[/yellow]"
+        )
+    last = _last_background_sync()
+    if last:
+        console.print(f"  Last scheduled sync: [dim]{last[0]}[/dim] - {last[1]}")
+    else:
+        console.print(
+            "  [dim]No background-sync log yet (scheduled sync may not be installed)[/dim]"
+        )
+
+
+def skill_status():
+    """`git skill status`: repo header + live state (fetches to compare remote)."""
+    console = Console()
+    _print_skill_header(console, "Claude skills")
+    _render_skill_state(console, no_fetch=False)
+    return 0
+
+
+def skill_sync():
+    """`git skill sync`: pull --ff-only, then the live state - once.
+
+    The old wrapper printed identical before/after state blocks around the
+    pull and replayed the last scheduled run's raw log (stale [drift] flag,
+    CLAUDE.md copy noise) as if it were current. Here the pull output itself
+    shows what changed, and state/drift appear once, computed live (#190).
+    """
+    console = Console()
+    _print_skill_header(console, "Claude skills sync")
+    console.print("  Pulling [dim](git pull --ff-only)[/dim] ...")
+    proc = subprocess.run(
+        ["git", "-C", SKILLS_DIR, "pull", "--ff-only"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    out = (proc.stdout + "\n" + proc.stderr).strip()
+    if proc.returncode == 0:
+        if "Already up to date" in out:
+            console.print("  [green]Already up to date[/green]")
+        else:
+            for line in out.splitlines():
+                console.print(f"    {escape(line)}")
+    else:
+        for line in out.splitlines():
+            console.print(f"    [red]{escape(line)}[/red]")
+        console.print("  [red][!] Pull failed - resolve and re-run[/red]")
+        if "no such ref was fetched" in out:
+            console.print(
+                "  [yellow]Hint: this branch's upstream is gone (its PR probably merged "
+                "and the branch was deleted) - switch back with: "
+                "git -C ~/.claude/skills checkout main[/yellow]"
+            )
+    _render_skill_state(console, no_fetch=True)
+    return proc.returncode
+
+
+def _skill_sync_or_status(sub):
+    """Run the rich sync/status view; fall back to the wrapper script if it breaks.
+
+    The wrappers in claude-skills remain fully functional for direct use, so any
+    failure in the Python view (odd log encoding, audit hiccup) degrades to the
+    old plain-text output instead of leaving the user with a stack trace.
+    """
+    try:
+        return skill_sync() if sub == "sync" else skill_status()
+    except Exception as exc:  # noqa: BLE001 - degrade to the wrapper on any failure
+        Console(stderr=True).print(
+            f"[yellow]git skill {sub}: rich view failed ({exc}); "
+            f"falling back to the wrapper script[/yellow]"
+        )
+        return _run_skill_script(SKILL_SCRIPTS[sub])
+
+
 def skill(args):
     """Dispatch a `git skill <subcommand>` invocation.
 
@@ -484,8 +681,9 @@ def skill(args):
       status    Show this machine's ~/.claude/skills sync state.
       publish   Publish new/edited skills via a PR with auto-merge.
 
-    `list` is handled here in Python; sync/status/publish delegate to the per-OS
-    wrapper scripts shipped in the claude-skills repo (see SKILL_SCRIPTS).
+    list/sync/status render here in Python (rich); publish delegates to the
+    per-OS wrapper script shipped in the claude-skills repo (see SKILL_SCRIPTS).
+    sync/status fall back to their wrappers if the rich view fails.
     """
     sub = args[0] if args else ""
     if sub in ("", "help", "-h", "--help"):
@@ -502,6 +700,8 @@ def skill(args):
         return 1
     if sub == "list":
         return list_skills()
+    if sub in ("sync", "status"):
+        return _skill_sync_or_status(sub)
     return _run_skill_script(SKILL_SCRIPTS[sub])
 
 
