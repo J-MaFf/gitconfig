@@ -20,6 +20,13 @@
 # Run with:  bats tests/shared/mac-initialize-local-config.bats
 # Requires:  bats-core and git.
 
+# `run ! cmd` (used for the negated-grep assertions below) needs bats >= 1.5 to
+# parse the `!` as a "must fail" status check. A bare `! grep ...` is exempt from
+# bats' errexit/ERR-trap machinery, so a mid-test one whose condition is violated
+# is silently swallowed — only a terminal `!` fails the test (issue #182). The
+# pragma also silences the BW02 warning that `run`'s flag syntax emits otherwise.
+bats_require_minimum_version 1.5.0
+
 setup() {
     REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     SCRIPT="$REPO_ROOT/scripts/mac version/initialize-local-config.sh"
@@ -92,7 +99,7 @@ teardown() {
     [ "$status" -eq 0 ]
 
     # No active signing block, no allowed_signers file — unchanged prior behavior.
-    ! grep -qF 'allowedSignersFile = ' "$SANDBOX/.gitconfig.local"
+    run ! grep -qF 'allowedSignersFile = ' "$SANDBOX/.gitconfig.local"
     [ ! -f "$SANDBOX/.ssh/allowed_signers" ]
     # The commented "how to enable" hint is still shown.
     grep -qF '# Uncomment and set program path' "$SANDBOX/.gitconfig.local"
@@ -128,13 +135,13 @@ teardown() {
 
     run env HOMEBREW_REPO="$SANDBOX/homebrew" bash "$SCRIPT" --force
     [ "$status" -eq 0 ]
-    ! grep -qF "directory = $SANDBOX/homebrew" "$SANDBOX/.gitconfig.local"
+    run ! grep -qF "directory = $SANDBOX/homebrew" "$SANDBOX/.gitconfig.local"
 }
 
 @test "omits the Homebrew safe directory when no Homebrew repo exists" {
     run env HOMEBREW_REPO="$SANDBOX/no-such-brew" bash "$SCRIPT" --force
     [ "$status" -eq 0 ]
-    ! grep -qF 'no-such-brew' "$SANDBOX/.gitconfig.local"
+    run ! grep -qF 'no-such-brew' "$SANDBOX/.gitconfig.local"
 }
 
 @test "emits file-based signing config when an on-disk key exists" {
@@ -154,7 +161,7 @@ teardown() {
     [ "$(git config --file "$SANDBOX/.gitconfig.local" commit.gpgsign)" = "true" ]
     grep -qF 'allowedSignersFile = ' "$SANDBOX/.gitconfig.local"
     # No wrapper on disk, so no program override.
-    ! grep -qF 'program = ' "$SANDBOX/.gitconfig.local"
+    run ! grep -qF 'program = ' "$SANDBOX/.gitconfig.local"
     # The signing identity was registered for local verification.
     grep -qF 'dev@example.com namespaces="git" ssh-ed25519 AAAADISKKEY' "$SANDBOX/.ssh/allowed_signers"
 }
@@ -187,7 +194,7 @@ teardown() {
 
     run bash "$SCRIPT" --force
     [ "$status" -eq 0 ]
-    ! grep -qF 'signingkey = ' "$SANDBOX/.gitconfig.local"
+    run ! grep -qF 'signingkey = ' "$SANDBOX/.gitconfig.local"
     # No key, no op-ssh-sign: the commented enable hint is shown instead.
     grep -qF '# Uncomment and set program path' "$SANDBOX/.gitconfig.local"
 }
