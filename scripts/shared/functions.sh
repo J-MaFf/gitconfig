@@ -139,9 +139,15 @@ create_symlink() {
 
 # Print the numeric uid that owns a path. BSD stat (macOS) and GNU stat (Linux)
 # disagree on flags, so try both.
+# GNU form (-c) MUST come first: on Linux `stat -f` means --file-system, so
+# `stat -f %u` dumps a filesystem-info block to stdout and only then exits
+# non-zero — the `2>/dev/null` hides the stderr but the garbage is on stdout, so
+# a BSD-first order returns "<filesystem block>\n<uid>" on Linux. `stat -c` fails
+# cleanly on macOS (no stdout, error to stderr), so GNU-first is safe both ways
+# and preserves the non-zero exit for a missing path (issue #195).
 # Usage: file_owner_uid PATH
 file_owner_uid() {
-    stat -f %u "$1" 2>/dev/null || stat -c %u "$1" 2>/dev/null
+    stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null
 }
 
 # Upsert the current signing identity into an allowed_signers file so git can

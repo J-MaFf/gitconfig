@@ -42,12 +42,11 @@ Healthy; `main` is clean. [#185](https://github.com/J-MaFf/gitconfig/pull/185) l
 | [#190](https://github.com/J-MaFf/gitconfig/issues/190) | `git skill sync`/`status` output was confusing: stale `[drift]` log replay contradicted live state, copy-noise, duplicate before/after blocks | [#191](https://github.com/J-MaFf/gitconfig/pull/191) |
 | [#181](https://github.com/J-MaFf/gitconfig/issues/181) | Wrong-platform `install.sh` displaced `~/.gitconfig.local` — STEP 0 cleanup ran before the platform guard | [#185](https://github.com/J-MaFf/gitconfig/pull/185) |
 | [#182](https://github.com/J-MaFf/gitconfig/issues/182) | Dead mid-test `! grep` bats assertions were silently swallowed; converted to `run ! grep` (position-independent) | [#194](https://github.com/J-MaFf/gitconfig/pull/194) |
+| [#195](https://github.com/J-MaFf/gitconfig/issues/195) | `file_owner_uid` tried BSD `stat -f %u` first, returning filesystem garbage on Linux (2 cross-OS bats tests failed); GNU `-c` first now. Dup #193 | [#196](https://github.com/J-MaFf/gitconfig/pull/196) |
 
 ### Open Issues
 
-| Issue | Description |
-|-------|-------------|
-| [#193](https://github.com/J-MaFf/gitconfig/issues/193) | `file_owner_uid` uses BSD `stat -f %u` first, so the mac/functions bats suites fail 2 tests on a Linux host (test-only; mac production caller is `uname`-guarded) |
+None.
 
 ## Natural Next Steps
 
