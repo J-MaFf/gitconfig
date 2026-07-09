@@ -4,9 +4,9 @@
 
 A cross-platform tool that generates a portable `~/.gitconfig` from a version-controlled template (`.gitconfig.template`), layers machine-specific overrides via `~/.gitconfig.local`, and keeps it converged on Windows through a login scheduled task. Helper logic (`gitconfig_helper.py`) backs the custom git aliases. Windows setup is PowerShell + Pester; macOS/Linux are bash.
 
-## Current State — 2026-07-08
+## Current State — 2026-07-09
 
-Healthy; `main` is clean. Latest unit-suite run on the Windows work PC (2026-07-08) was green (Pester 199 pass / 0 fail / 18 integration excluded); last full macOS run (2026-07-05) was also green (Pester 185 pass / 0 fail / 13 skip; bats 31/31);
+Healthy; `main` is clean. [#185](https://github.com/J-MaFf/gitconfig/pull/185) landed the wrong-platform `install.sh` guard (STEP 0 no longer displaces `~/.gitconfig.local` before the OS check); [#194](https://github.com/J-MaFf/gitconfig/pull/194) hardens the shared bats suites by converting every negated-`grep` assertion to `run ! grep` (dead mid-test `! grep` checks were silently swallowed). Latest unit-suite run on the Windows work PC (2026-07-08) was green (Pester 199 pass / 0 fail / 18 integration excluded); last full macOS run (2026-07-05) was also green (Pester 185 pass / 0 fail / 13 skip; bats 31/31);
 [#186](https://github.com/J-MaFf/gitconfig/issues/186) bakes `core.longpaths = true` into the Windows-generated `~/.gitconfig.local` — template regeneration had silently wiped the hand-set global copy, breaking beads' `bd dolt push` with "Filename too long";
 [#188](https://github.com/J-MaFf/gitconfig/issues/188) fixes `git skill publish` on Windows — the dispatcher launched wrapper scripts with Windows PowerShell 5.1, which refuses `publish-skill.ps1`'s `#Requires -Version 7`; it now prefers pwsh;
 [#190](https://github.com/J-MaFf/gitconfig/issues/190) re-renders `git skill sync`/`status` in Python with rich — live drift only (no stale log replay), colored counts, one state block, actionable pull-failure hints; [#180](https://github.com/J-MaFf/gitconfig/pull/180) grows the bats suites to 41 tests (new Linux local-config suite + mac guard test — validated on Linux via a plain-bash sandbox replay; rerun `bats tests/shared/` on the Mac to reconfirm). Recent work: the mac credential block gained the same reset-line hardening as Linux ([#183](https://github.com/J-MaFf/gitconfig/issues/183)), Linux now gets a proper HTTPS credential helper and the platform scripts refuse cross-OS runs ([#179](https://github.com/J-MaFf/gitconfig/issues/179)), the mac `initialize-local-config.sh` regen-wipe bugs are fixed (Homebrew safe.directory, file-based signing), beads runs on bd 1.1.0's native schema after a fresh re-init ([#172](https://github.com/J-MaFf/gitconfig/issues/172)), and the Pester helper suite is sandbox-safe on macOS ([#174](https://github.com/J-MaFf/gitconfig/issues/174)).
@@ -40,10 +40,14 @@ Healthy; `main` is clean. Latest unit-suite run on the Windows work PC (2026-07-
 | [#186](https://github.com/J-MaFf/gitconfig/issues/186) | Windows-generated config lacked `core.longpaths`; template regen wiped the hand-set global, breaking `bd dolt push` ("Filename too long") | [#187](https://github.com/J-MaFf/gitconfig/pull/187) |
 | [#188](https://github.com/J-MaFf/gitconfig/issues/188) | `git skill publish` died on Windows: dispatcher used PowerShell 5.1, which refuses `publish-skill.ps1`'s `#Requires -Version 7` | [#189](https://github.com/J-MaFf/gitconfig/pull/189) |
 | [#190](https://github.com/J-MaFf/gitconfig/issues/190) | `git skill sync`/`status` output was confusing: stale `[drift]` log replay contradicted live state, copy-noise, duplicate before/after blocks | [#191](https://github.com/J-MaFf/gitconfig/pull/191) |
+| [#181](https://github.com/J-MaFf/gitconfig/issues/181) | Wrong-platform `install.sh` displaced `~/.gitconfig.local` — STEP 0 cleanup ran before the platform guard | [#185](https://github.com/J-MaFf/gitconfig/pull/185) |
+| [#182](https://github.com/J-MaFf/gitconfig/issues/182) | Dead mid-test `! grep` bats assertions were silently swallowed; converted to `run ! grep` (position-independent) | [#194](https://github.com/J-MaFf/gitconfig/pull/194) |
 
 ### Open Issues
 
-None.
+| Issue | Description |
+|-------|-------------|
+| [#193](https://github.com/J-MaFf/gitconfig/issues/193) | `file_owner_uid` uses BSD `stat -f %u` first, so the mac/functions bats suites fail 2 tests on a Linux host (test-only; mac production caller is `uname`-guarded) |
 
 ## Natural Next Steps
 

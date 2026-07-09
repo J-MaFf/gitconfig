@@ -7,6 +7,13 @@
 # Run with:  bats tests/shared/functions.bats
 # Requires:  bats-core (https://github.com/bats-core/bats-core) and git.
 
+# `run ! cmd` (used for the negated-grep assertions below) needs bats >= 1.5 to
+# parse the `!` as a "must fail" status check. A bare `! grep ...` is exempt from
+# bats' errexit/ERR-trap machinery, so a mid-test one whose condition is violated
+# is silently swallowed — only a terminal `!` fails the test (issue #182). The
+# pragma also silences the BW02 warning that `run`'s flag syntax emits otherwise.
+bats_require_minimum_version 1.5.0
+
 setup() {
     REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     # shellcheck source=../../scripts/shared/functions.sh
@@ -113,7 +120,7 @@ teardown() {
     [ -f "$signers" ]
     # Email + git namespace + normalized "<type> <base64>" (comment dropped).
     grep -qF 'dev@example.com namespaces="git" ssh-ed25519 AAAATESTKEY' "$signers"
-    ! grep -q 'a-comment' "$signers"
+    run ! grep -q 'a-comment' "$signers"
 }
 
 @test "update_allowed_signers is idempotent (no duplicate lines)" {
@@ -176,7 +183,7 @@ teardown() {
     [ -f "$HOME_DIR/.gitconfig" ]
     grep -qF "repo = $repo" "$HOME_DIR/.gitconfig"
     grep -qF "home = $HOME_DIR" "$HOME_DIR/.gitconfig"
-    ! grep -q '{{' "$HOME_DIR/.gitconfig"
+    run ! grep -q '{{' "$HOME_DIR/.gitconfig"
 }
 
 @test "generate_gitconfig errors when the template is missing" {
@@ -225,8 +232,8 @@ teardown() {
     enable_git_alias_widget "$REPO_ROOT" "$HOME_DIR"
     run disable_git_alias_widget "$HOME_DIR"
     [ "$status" -eq 0 ]
-    ! grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$HOME_DIR/.bashrc"
-    ! grep -qF "$GIT_ALIAS_WIDGET_END" "$HOME_DIR/.bashrc"
+    run ! grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$HOME_DIR/.bashrc"
+    run ! grep -qF "$GIT_ALIAS_WIDGET_END" "$HOME_DIR/.bashrc"
 }
 
 @test "disable_git_alias_widget preserves surrounding rc content" {
@@ -236,5 +243,5 @@ teardown() {
     disable_git_alias_widget "$HOME_DIR"
     grep -qF 'export FOO=1' "$HOME_DIR/.bashrc"
     grep -qF 'export BAR=2' "$HOME_DIR/.bashrc"
-    ! grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$HOME_DIR/.bashrc"
+    run ! grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$HOME_DIR/.bashrc"
 }

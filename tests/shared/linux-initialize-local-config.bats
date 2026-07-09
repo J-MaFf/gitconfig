@@ -18,6 +18,13 @@
 # Run with:  bats tests/shared/linux-initialize-local-config.bats
 # Requires:  bats-core and git.
 
+# `run ! cmd` (used for the negated-grep assertions below) needs bats >= 1.5 to
+# parse the `!` as a "must fail" status check. A bare `! grep ...` is exempt from
+# bats' errexit/ERR-trap machinery, so a mid-test one whose condition is violated
+# is silently swallowed — only a terminal `!` fails the test (issue #182). The
+# pragma also silences the BW02 warning that `run`'s flag syntax emits otherwise.
+bats_require_minimum_version 1.5.0
+
 setup() {
     REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     SCRIPT="$REPO_ROOT/scripts/linux version/initialize-local-config.sh"
@@ -75,7 +82,7 @@ make_fake_gh() {
     [ "$(git config --file "$SANDBOX/.gitconfig.local" credential.helper)" = \
         "$SANDBOX/bin/git-credential-libsecret" ]
     # gh-specific scoped sections are absent.
-    ! grep -qF 'credential "https://github.com"' "$SANDBOX/.gitconfig.local"
+    run ! grep -qF 'credential "https://github.com"' "$SANDBOX/.gitconfig.local"
 }
 
 @test "prefers gh over libsecret when both are installed" {
@@ -89,7 +96,7 @@ make_fake_gh() {
     [ "$status" -eq 0 ]
 
     grep -qF "helper = !$SANDBOX/bin/gh auth git-credential" "$SANDBOX/.gitconfig.local"
-    ! grep -qF 'git-credential-libsecret' "$SANDBOX/.gitconfig.local"
+    run ! grep -qF 'git-credential-libsecret' "$SANDBOX/.gitconfig.local"
 }
 
 @test "leaves a commented hint when no credential helper is available" {
@@ -114,7 +121,7 @@ make_fake_gh() {
     run env GITCONFIG_GH_BIN="$SANDBOX/bin/gh" GITCONFIG_LIBSECRET_BIN="" \
         bash "$SCRIPT" --force
     [ "$status" -eq 0 ]
-    ! grep -qF 'osxkeychain' "$SANDBOX/.gitconfig.local"
+    run ! grep -qF 'osxkeychain' "$SANDBOX/.gitconfig.local"
 }
 
 @test "always includes the core excludesfile and safe directory" {
