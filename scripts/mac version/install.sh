@@ -54,6 +54,19 @@ EOF
     exit 0
 fi
 
+# Guard: refuse to run the macOS installer on a non-macOS host BEFORE STEP 0's
+# destructive cleanup. cleanup-gitconfig.sh --force moves an existing correct
+# ~/.gitconfig.local aside, and the guard inside initialize-local-config.sh
+# (STEP 3) only fires afterwards — so running the wrong installer would displace
+# the local config and then abort mid-install (issue #181). Fail first instead.
+# Tests set GITCONFIG_ALLOW_CROSS_OS=1 to run in a sandbox anywhere.
+if [ "$(uname -s)" != "Darwin" ] && [ "${GITCONFIG_ALLOW_CROSS_OS:-0}" != "1" ]; then
+    echo "[ERROR] This is the macOS installer but this host is $(uname -s)." >&2
+    echo "        Use 'scripts/linux version/install.sh' instead," >&2
+    echo "        or set GITCONFIG_ALLOW_CROSS_OS=1 to override (tests/sandboxes)." >&2
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 HOME_DIR="$HOME"
