@@ -83,6 +83,18 @@ Describe "install.ps1" {
             $functions | Should -Match "pip install"
             $functions | Should -Match "\[WARN\].*pip"
         }
+
+        It "STEP 7 verification should reuse Resolve-Python, not a separate first-hit Get-Command chain" {
+            # Regression for #200: a standalone `Get-Command py / python3 / python`
+            # chain can return a 0-byte WindowsApps stub that Resolve-Python
+            # (used by STEP 6's Install-PythonDeps) deliberately treats as a
+            # last resort, not a first choice - producing spurious
+            # "[WARN] Python 'rich' not importable" right after STEP 6 succeeded
+            # via the correctly resolved interpreter.
+            $scriptContent = Get-Content $script:scriptPath -Raw
+            $scriptContent | Should -Match "(?m)^\s*\`$pyCmd\s*=\s*Resolve-Python\s*$"
+            $scriptContent | Should -Not -Match "elseif\s*\(Get-Command\s+python3"
+        }
     }
 
     Context "Config Generation" {
