@@ -71,7 +71,13 @@ Describe "Update-GitConfig.ps1" {
         }
 
         It "Should be a valid PowerShell script" {
-            { $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content $script:scriptPath -Raw), [ref]$null) } | Should -Not -Throw
+            # PSParser::Tokenize never throws on syntax errors (it reports them
+            # via the discarded [ref] parameter), so a Should -Not -Throw around
+            # it is vacuous - an unparseable script would still pass (#201).
+            # Capture and count parse errors instead.
+            $parseErrors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($script:scriptPath, [ref]$null, [ref]$parseErrors)
+            $parseErrors.Count | Should -Be 0
         }
 
         It "Should accept RepoPath parameter" {
