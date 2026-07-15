@@ -74,5 +74,68 @@ Describe "Functions.ps1" -Tag 'Unit' {
                 $env:LOCALAPPDATA = $oldLocalAppData
             }
         }
+
+        It "prefers a real interpreter over a WindowsApps stub found alongside it" -Skip:(-not $platformIsWindows) {
+            # Regression for #199: stubs are set aside and probed LAST as a
+            # Store-only fallback, not skipped outright - a stub found
+            # alongside a real interpreter must not win just because it was
+            # discovered first. A genuine app-execution-alias reparse point
+            # can't be fabricated in a test fixture (it's an OS-level MSIX
+            # registration), so this uses an intentionally-broken 0-byte file
+            # at a path shaped like the real one - if the real candidate is
+            # returned, the broken stub was never allowed to win, regardless
+            # of whether it was even probed.
+            $realDir = Join-Path $TestDrive "real-python"
+            New-Item -ItemType Directory -Force -Path $realDir | Out-Null
+            @('@echo off', 'exit /b 0') | Set-Content -Path (Join-Path $realDir "python.cmd") -Encoding ascii
+
+            $stubDir = Join-Path $TestDrive "stub\Microsoft\WindowsApps"
+            New-Item -ItemType Directory -Force -Path $stubDir | Out-Null
+            New-Item -ItemType File -Path (Join-Path $stubDir "python.exe") -Force | Out-Null
+
+            $oldPath = $env:Path
+            $oldLocalAppData = $env:LOCALAPPDATA
+            try {
+                # Stub dir listed FIRST on PATH so Get-Command would return it
+                # before the real one if ordering were not enforced correctly.
+                $env:Path = "$stubDir;$realDir"
+                $env:LOCALAPPDATA = Join-Path $TestDrive "empty-localappdata-2"
+
+                . $script:functionsPath
+                $resolved = Resolve-Python
+
+                $resolved | Should -Be (Join-Path $realDir "python.cmd")
+            }
+            finally {
+                $env:Path = $oldPath
+                $env:LOCALAPPDATA = $oldLocalAppData
+            }
+        }
+
+        It "does not crash when a WindowsApps stub fails to launch" -Skip:(-not $platformIsWindows) {
+            # A truly-invalid 0-byte file (the closest a test fixture can get
+            # to an app-execution-alias reparse point) throws when invoked,
+            # not just exits non-zero. Without the try/catch around the probe,
+            # a broken stub would crash Resolve-Python - and with it,
+            # Install-PythonDeps's best-effort caller chain.
+            $stubDir = Join-Path $TestDrive "crash-stub\Microsoft\WindowsApps"
+            New-Item -ItemType Directory -Force -Path $stubDir | Out-Null
+            New-Item -ItemType File -Path (Join-Path $stubDir "python.exe") -Force | Out-Null
+
+            $oldPath = $env:Path
+            $oldLocalAppData = $env:LOCALAPPDATA
+            try {
+                $env:Path = $stubDir
+                $env:LOCALAPPDATA = Join-Path $TestDrive "empty-localappdata-3"
+
+                . $script:functionsPath
+                { $script:resolved = Resolve-Python } | Should -Not -Throw
+                $script:resolved | Should -BeNullOrEmpty
+            }
+            finally {
+                $env:Path = $oldPath
+                $env:LOCALAPPDATA = $oldLocalAppData
+            }
+        }
     }
 }

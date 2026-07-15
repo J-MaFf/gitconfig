@@ -15,12 +15,14 @@
 # Why this is more than a simple Get-Command: the Python Install Manager
 # (PyManager) and the Store register their entry points as 0-byte "app execution
 # alias" reparse points under %LOCALAPPDATA%\Microsoft\WindowsApps. A working
-# alias and the not-installed placeholder are indistinguishable (both 0 bytes),
-# and an argument-less run of the placeholder opens the Store install prompt,
-# so we don't probe them: enumerate ALL matches (Get-Command -All), skip 0-byte
-# WindowsApps stubs, and add the real launcher install paths as explicit
-# fallbacks. Known gap: a Store-only install has no launcher fallback and is
-# never resolved - see #199.
+# alias and the not-installed placeholder are indistinguishable by size (both
+# 0 bytes), and an argument-less run of the placeholder opens the Store install
+# prompt - so we never probe them FIRST: enumerate ALL matches (Get-Command
+# -All), set 0-byte WindowsApps stubs aside, and add the real launcher install
+# paths as explicit fallbacks. If none of those resolve, fall back to probing
+# the WindowsApps stubs LAST (#199): with a non-empty -c argument a placeholder
+# just prints a message and exits 9009 (no UI), so this is safe and it's the
+# only way to resolve a Store-only install with no launcher.
 #
 # The probe must pass a NON-EMPTY -c argument: Windows PowerShell 5.1 (which
 # runs the login scheduled task) silently drops empty-string arguments to
@@ -29,14 +31,19 @@
 # why the old probe looked fine when tested interactively.
 function Resolve-Python {
     $candidates = [System.Collections.Generic.List[string]]::new()
+    $stubs = [System.Collections.Generic.List[string]]::new()
 
     foreach ($cmd in 'py', 'python3', 'python') {
         foreach ($g in @(Get-Command $cmd -All -ErrorAction SilentlyContinue)) {
             $src = $g.Source
             if (-not $src) { continue }
-            # Skip 0-byte WindowsApps app-execution-alias stubs (working and
-            # placeholder aliases are indistinguishable at 0 bytes; #199).
-            if ($src -like '*\Microsoft\WindowsApps\*' -and (Test-Path $src) -and ((Get-Item $src).Length -eq 0)) { continue }
+            # Set aside 0-byte WindowsApps app-execution-alias stubs rather than
+            # skipping them outright - they're probed last, below, as the only
+            # way to resolve a Store-only install (#199).
+            if ($src -like '*\Microsoft\WindowsApps\*' -and (Test-Path $src) -and ((Get-Item $src).Length -eq 0)) {
+                if (-not $stubs.Contains($src)) { $stubs.Add($src) }
+                continue
+            }
             if (-not $candidates.Contains($src)) { $candidates.Add($src) }
         }
     }
@@ -52,10 +59,21 @@ function Resolve-Python {
         }
     }
 
-    foreach ($cand in $candidates) {
-        # $null = : a candidate that writes to stdout (e.g. a .cmd wrapper
-        # echoing commands) must not leak into the function's return value.
-        $null = & $cand -c 'pass' 2>$null
+    # Real paths first, WindowsApps stubs last: a stub found alongside a real
+    # interpreter shouldn't win the resolution just because it was probed first.
+    foreach ($cand in (@($candidates) + @($stubs))) {
+        try {
+            # $null = : a candidate that writes to stdout (e.g. a .cmd wrapper
+            # echoing commands) must not leak into the function's return value.
+            # try/catch: a stub is probed here specifically because it might be
+            # broken (that's the whole reason it was previously skipped
+            # outright) - a launch failure must be treated as "this candidate
+            # doesn't work", not crash Resolve-Python's best-effort caller chain.
+            $null = & $cand -c 'pass' 2>$null
+        }
+        catch {
+            continue
+        }
         if ($LASTEXITCODE -eq 0) { return $cand }
     }
     return $null
