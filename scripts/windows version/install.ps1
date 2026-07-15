@@ -218,10 +218,12 @@ foreach ($file in $verifyFiles) {
     else                  { Write-Host "[FAIL] $file missing" -ForegroundColor Red }
 }
 
-$pyCmd = if (Get-Command py -ErrorAction SilentlyContinue)      { "py" }
-         elseif (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" }
-         elseif (Get-Command python -ErrorAction SilentlyContinue)  { "python" }
-         else { $null }
+# Resolve-Python (Functions.ps1, dot-sourced in STEP 6) skips 0-byte
+# WindowsApps app-execution-alias stubs that a plain first-hit Get-Command
+# would happily return - reuse it here instead of re-resolving with weaker
+# logic, so verification can't fail against a candidate STEP 6 already knew
+# to avoid (#200).
+$pyCmd = Resolve-Python
 
 if ($pyCmd) {
     try {
