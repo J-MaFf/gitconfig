@@ -17,7 +17,12 @@ Describe "Functions.ps1" -Tag 'Unit' {
         }
 
         It "Should be a valid PowerShell script" {
-            { $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content $script:functionsPath -Raw), [ref]$null) } | Should -Not -Throw
+            # PSParser::Tokenize never throws on syntax errors (it reports them
+            # via the discarded [ref] parameter), so a Should -Not -Throw around
+            # it is vacuous (#201). Capture and count parse errors instead.
+            $parseErrors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile($script:functionsPath, [ref]$null, [ref]$parseErrors)
+            $parseErrors.Count | Should -Be 0
         }
     }
 
@@ -31,8 +36,8 @@ Describe "Functions.ps1" -Tag 'Unit' {
             # Anchor to line starts so comments mentioning the old probe
             # don't count as code.
             $content = Get-Content $script:functionsPath -Raw
-            $content | Should -Not -Match "(?m)^\s*&\s+\`$cand\s+-c\s+''"
-            $content | Should -Match "(?m)^\s*&\s+\`$cand\s+-c\s+'pass'"
+            $content | Should -Not -Match "(?m)^\s*(\`$null\s*=\s*)?&\s+\`$cand\s+-c\s+''"
+            $content | Should -Match "(?m)^\s*(\`$null\s*=\s*)?&\s+\`$cand\s+-c\s+'pass'"
         }
 
         It "accepts a working interpreter that requires the -c argument to be present" -Skip:(-not $platformIsWindows) {

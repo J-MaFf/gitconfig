@@ -14,10 +14,13 @@
 #
 # Why this is more than a simple Get-Command: the Python Install Manager
 # (PyManager) and the Store register their entry points as 0-byte "app execution
-# alias" reparse points under %LOCALAPPDATA%\Microsoft\WindowsApps. Invoking a
-# Store stub when no Python is installed pops the install prompt, so we never
-# run them: enumerate ALL matches (Get-Command -All), skip 0-byte WindowsApps
-# stubs, and add the real launcher install paths as explicit fallbacks.
+# alias" reparse points under %LOCALAPPDATA%\Microsoft\WindowsApps. A working
+# alias and the not-installed placeholder are indistinguishable (both 0 bytes),
+# and an argument-less run of the placeholder opens the Store install prompt,
+# so we don't probe them: enumerate ALL matches (Get-Command -All), skip 0-byte
+# WindowsApps stubs, and add the real launcher install paths as explicit
+# fallbacks. Known gap: a Store-only install has no launcher fallback and is
+# never resolved - see #199.
 #
 # The probe must pass a NON-EMPTY -c argument: Windows PowerShell 5.1 (which
 # runs the login scheduled task) silently drops empty-string arguments to
@@ -31,8 +34,8 @@ function Resolve-Python {
         foreach ($g in @(Get-Command $cmd -All -ErrorAction SilentlyContinue)) {
             $src = $g.Source
             if (-not $src) { continue }
-            # Skip 0-byte WindowsApps app-execution-alias stubs (don't even run
-            # them - invoking a Store stub can pop the install prompt).
+            # Skip 0-byte WindowsApps app-execution-alias stubs (working and
+            # placeholder aliases are indistinguishable at 0 bytes; #199).
             if ($src -like '*\Microsoft\WindowsApps\*' -and (Test-Path $src) -and ((Get-Item $src).Length -eq 0)) { continue }
             if (-not $candidates.Contains($src)) { $candidates.Add($src) }
         }
@@ -50,7 +53,9 @@ function Resolve-Python {
     }
 
     foreach ($cand in $candidates) {
-        & $cand -c 'pass' 2>$null
+        # $null = : a candidate that writes to stdout (e.g. a .cmd wrapper
+        # echoing commands) must not leak into the function's return value.
+        $null = & $cand -c 'pass' 2>$null
         if ($LASTEXITCODE -eq 0) { return $cand }
     }
     return $null
