@@ -17,6 +17,28 @@ BeforeAll {
 
     # Choose PowerShell executable based on platform
     $script:pwshExe = if ($script:platformIsWindows) { "powershell" } else { "pwsh" }
+
+    # Resolve the Python interpreter per the repo rule: py -> python3 -> python.
+    # Never bare `python` first - it's the WindowsApps stub on Windows (exits
+    # 9009 or pops the Store prompt) and absent on macOS/Linux (#202). Mirrors
+    # gitconfig_helper.Tests.ps1's Resolve-TestPython; kept local here since
+    # this file's platform reach (macOS/Linux/Windows) doesn't match
+    # Resolve-Python in the Windows-only Functions.ps1.
+    $script:python = foreach ($name in 'py', 'python3', 'python') {
+        if (Get-Command $name -CommandType Application -ErrorAction SilentlyContinue) {
+            $name
+            break
+        }
+    }
+}
+
+Describe "Integration.Tests.ps1 Python resolution" -Tag 'Unit' {
+    # Static check so a regression is caught by the default (Integration-excluded)
+    # suite, not only when someone opts into -IncludeIntegration (#202).
+    It "does not invoke bare 'python' - must resolve via py -> python3 -> python" {
+        $content = Get-Content $PSCommandPath -Raw
+        $content | Should -Not -Match "(?m)^\s*&\s+python\s"
+    }
 }
 
 Describe "GitConfig Integration" -Tag 'Integration' {
@@ -136,8 +158,12 @@ Describe "GitConfig Helper Script" -Tag 'Integration' {
     }
 
     It "gitconfig_helper.py should be valid Python" {
+        if (-not $script:python) {
+            Set-ItResult -Skipped -Because "no Python interpreter found (py/python3/python)"
+            return
+        }
         $helperPath = Join-Path $script:repoRoot "gitconfig_helper.py"
-        & python -m py_compile $helperPath 2>&1 | Out-Null
+        & $script:python -m py_compile $helperPath 2>&1 | Out-Null
         $LASTEXITCODE | Should -Be 0
     }
 }
