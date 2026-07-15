@@ -14,13 +14,16 @@
 #
 # Why this is more than a simple Get-Command: the Python Install Manager
 # (PyManager) and the Store register their entry points as 0-byte "app execution
-# alias" reparse points under %LOCALAPPDATA%\Microsoft\WindowsApps. Those aliases
-# only resolve in an interactive desktop session, so they FAIL in a scheduled
-# task running hidden at logon (`py -c ''` returns non-zero). Since py/python3/
-# python all point at the same WindowsApps stubs, the old loop returned $null
-# even though a real interpreter was installed. We therefore enumerate ALL
-# matches (Get-Command -All), skip 0-byte WindowsApps stubs, and add the real
-# launcher install paths as explicit fallbacks.
+# alias" reparse points under %LOCALAPPDATA%\Microsoft\WindowsApps. Invoking a
+# Store stub when no Python is installed pops the install prompt, so we never
+# run them: enumerate ALL matches (Get-Command -All), skip 0-byte WindowsApps
+# stubs, and add the real launcher install paths as explicit fallbacks.
+#
+# The probe must pass a NON-EMPTY -c argument: Windows PowerShell 5.1 (which
+# runs the login scheduled task) silently drops empty-string arguments to
+# native commands, so `& $cand -c ''` became `py -c` (exit 2) and every
+# working candidate was rejected (#197). pwsh 7 passes '' correctly, which is
+# why the old probe looked fine when tested interactively.
 function Resolve-Python {
     $candidates = [System.Collections.Generic.List[string]]::new()
 
@@ -47,7 +50,7 @@ function Resolve-Python {
     }
 
     foreach ($cand in $candidates) {
-        & $cand -c '' 2>$null
+        & $cand -c 'pass' 2>$null
         if ($LASTEXITCODE -eq 0) { return $cand }
     }
     return $null
