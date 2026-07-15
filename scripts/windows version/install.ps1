@@ -218,11 +218,12 @@ foreach ($file in $verifyFiles) {
     else                  { Write-Host "[FAIL] $file missing" -ForegroundColor Red }
 }
 
-# Resolve-Python (Functions.ps1, dot-sourced in STEP 6) skips 0-byte
-# WindowsApps app-execution-alias stubs that a plain first-hit Get-Command
-# would happily return - reuse it here instead of re-resolving with weaker
-# logic, so verification can't fail against a candidate STEP 6 already knew
-# to avoid (#200).
+# Resolve-Python (Functions.ps1, dot-sourced in STEP 6) treats 0-byte
+# WindowsApps app-execution-alias stubs specially (deprioritized or skipped
+# depending on what else is available), unlike a plain first-hit Get-Command
+# chain, which would happily return one. Reuse it here instead of
+# re-resolving with weaker logic, so verification can't fail against a
+# candidate STEP 6 already knew to avoid (#200).
 $pyCmd = Resolve-Python
 
 if ($pyCmd) {
