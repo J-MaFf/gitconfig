@@ -432,6 +432,7 @@ SKILL_USAGE = (
     "  list      List installed skills (name, description, last updated)\n"
     "  sync      Pull ~/.claude/skills (--ff-only); never publishes local work\n"
     "  status    Show this machine's ~/.claude/skills sync state\n"
+    "  diff      Show the full diff of drifted skill(s) (all, or one by name)\n"
     "  publish   Publish new/edited skills via a PR (auto-merge)"
 )
 
@@ -554,6 +555,67 @@ _AUDIT_COUNTS_RE = re.compile(
     r"(?P<problems>\d+) problem\(s\), (?P<dupes>\d+) duplicate name\(s\)"
 )
 
+# skill-audit's non-summary "[!] Drifted (N)" section lists one bullet per
+# drifted skill directory, e.g. "   - my-skill - uncommitted local edits".
+_DRIFTED_ITEM_RE = re.compile(r"^\s*-\s*(?P<name>\S+)\s+-\s+uncommitted local edits\s*$")
+
+
+def _audit_full():
+    """Run skill-audit's full (non-summary) report and return its stdout lines, or None.
+
+    Mirrors `_audit_summary()`'s script-path/shell-selection logic (prefer pwsh,
+    fall back to powershell on Windows since skill-audit.ps1 is WinPS-compatible;
+    bash elsewhere) but omits -Summary so the sectioned report - including the
+    "[!] Drifted (N)" section skill_diff() parses - is included. Always run with
+    the no-fetch flag: diffing is a local working-tree-vs-HEAD comparison, so no
+    network call is needed (#see skill_diff). None means the audit script is
+    missing or won't launch.
+    """
+    scripts_dir = os.path.join(SKILLS_DIR, "scripts")
+    if sys.platform == "win32":
+        script = os.path.join(scripts_dir, "skill-audit.ps1")
+        shell = shutil.which("pwsh") or "powershell"
+        cmd = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+               script, "-NoFetch"]
+    else:
+        script = os.path.join(scripts_dir, "skill-audit.sh")
+        cmd = ["bash", script, "--no-fetch"]
+    if not os.path.isfile(script):
+        return None
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+    except OSError:
+        return None
+    return proc.stdout.splitlines()
+
+
+def _drifted_skill_names():
+    """Return the list of currently-drifted skill directory names, or None.
+
+    Parses the "[!] Drifted (N)" section out of skill-audit's full report
+    (`_audit_full()`) rather than reimplementing the aligned/drifted/untracked
+    classification here - skill-audit stays the single source of truth for
+    local skill state. None means skill-audit couldn't be run at all.
+    """
+    lines = _audit_full()
+    if lines is None:
+        return None
+    names = []
+    in_drifted = False
+    for line in lines:
+        if re.match(r"^\[!\]\s+Drifted\s+\(\d+\)\s*$", line.strip()):
+            in_drifted = True
+            continue
+        if in_drifted:
+            if not line.strip():
+                break
+            m = _DRIFTED_ITEM_RE.match(line)
+            if m:
+                names.append(m["name"])
+    return names
+
 
 def _render_skill_state(console, no_fetch):
     """Print the LIVE skill state: colored audit counts + the publish nudge.
@@ -670,6 +732,55 @@ def _skill_sync_or_status(sub):
         return _run_skill_script(SKILL_SCRIPTS[sub])
 
 
+def skill_diff(args):
+    """`git skill diff [<skill-name>]`: print the full diff of drifted skill(s).
+
+    Drifted skills (tracked, already-published skills with uncommitted local
+    edits) are discovered by parsing skill-audit's full report (see
+    `_drifted_skill_names()`), never by reimplementing the classification here.
+    With no argument, prints a header + `git diff` block for every drifted
+    skill. With a skill name, scopes to that one skill and errors if it isn't
+    currently drifted. No network call is made (diff is a local comparison).
+    """
+    console = Console()
+    target = args[0] if args else None
+    if target in ("help", "-h", "--help"):
+        console.print(SKILL_USAGE)
+        return 0
+
+    names = _drifted_skill_names()
+    if names is None:
+        console.print("  [yellow][!] skill-audit not found - can't check local state[/yellow]")
+        return 1
+
+    if target is not None:
+        if target not in names:
+            Console(stderr=True).print(
+                f"[red]git skill diff: '{target}' is not drifted (aligned, "
+                f"untracked, unknown, or misspelled) - nothing to diff[/red]"
+            )
+            return 1
+        names = [target]
+
+    if not names:
+        console.print("  [green][OK] No drifted skills - nothing to diff[/green]")
+        return 0
+
+    for name in names:
+        console.print(f"[bold]{escape(name)}[/bold]")
+        proc = subprocess.run(
+            ["git", "-C", SKILLS_DIR, "diff", "--", name],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        for line in proc.stdout.splitlines():
+            console.print(escape(line))
+        if proc.stderr.strip():
+            for line in proc.stderr.splitlines():
+                console.print(f"[red]{escape(line)}[/red]")
+        console.print("")
+    return 0
+
+
 def skill(args):
     """Dispatch a `git skill <subcommand>` invocation.
 
@@ -679,20 +790,22 @@ def skill(args):
       sync      Pull ~/.claude/skills (--ff-only); flags unpublished local
                 work but never publishes it (publish with `publish`).
       status    Show this machine's ~/.claude/skills sync state.
+      diff      Show the full diff of drifted skill(s) (all, or one by name).
       publish   Publish new/edited skills via a PR with auto-merge.
 
-    list/sync/status render here in Python (rich); publish delegates to the
-    per-OS wrapper script shipped in the claude-skills repo (see SKILL_SCRIPTS).
-    sync/status fall back to their wrappers if the rich view fails.
+    list/sync/status/diff render here in Python (rich); publish delegates to
+    the per-OS wrapper script shipped in the claude-skills repo (see
+    SKILL_SCRIPTS). sync/status fall back to their wrappers if the rich view
+    fails.
     """
     sub = args[0] if args else ""
     if sub in ("", "help", "-h", "--help"):
         Console().print(SKILL_USAGE)
         return 0
-    if sub != "list" and sub not in SKILL_SCRIPTS:
+    if sub not in ("list", "diff") and sub not in SKILL_SCRIPTS:
         Console(stderr=True).print(
             f"[red]git skill: unknown subcommand '{sub}' "
-            f"(try: list, sync, status, publish)[/red]"
+            f"(try: list, sync, status, diff, publish)[/red]"
         )
         return 1
     # All real subcommands need the claude-skills repo at ~/.claude/skills.
@@ -700,6 +813,8 @@ def skill(args):
         return 1
     if sub == "list":
         return list_skills()
+    if sub == "diff":
+        return skill_diff(args[1:])
     if sub in ("sync", "status"):
         return _skill_sync_or_status(sub)
     return _run_skill_script(SKILL_SCRIPTS[sub])

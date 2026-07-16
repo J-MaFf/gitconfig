@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `git skill diff` subcommand: prints the full diff of drifted skill(s) in `~/.claude/skills` (all of them, or one by name via `git skill diff <name>`), so you can review exactly what changed before running `git skill publish`. Drifted skills are discovered by parsing `skill-audit`'s existing report rather than reimplementing its classification logic; no network fetch is made (diff is a local comparison) ([#208](https://github.com/J-MaFf/gitconfig/issues/208)).
 - Adopted **beads (`bd`)** as the Dolt-backed task/memory layer beneath GitHub Issues ([#152](https://github.com/J-MaFf/gitconfig/issues/152)). The bead graph syncs via `refs/dolt/data` on `origin`; `.beads/config.yaml` and `.beads/metadata.json` are tracked while the JSONL exports and embedded Dolt DB are gitignored (dolt-only sync).
 
 ### Fixed

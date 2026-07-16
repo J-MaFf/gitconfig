@@ -267,6 +267,56 @@ import gitconfig_helper
             # last-updated uses the skills repo git log, short date format
             $scriptContent | Should -Match '--format=%cs'
         }
+
+        It "defines skill_diff and wires it into the dispatcher and usage banner" {
+            # `git skill diff` shows drifted skills' full diffs; it must route
+            # through the dispatcher and appear in the SKILL_USAGE banner like the
+            # other real subcommands (list/sync/status/publish).
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'def skill_diff\('
+            $scriptContent | Should -Match 'if sub == "diff":'
+            $scriptContent | Should -Match 'return skill_diff\(args\[1:\]\)'
+            $scriptContent | Should -Match '(?m)^\s*"\s*diff\s+Show the full diff of drifted skill'
+        }
+
+        It "skill_diff derives drifted names from skill-audit's report, not git status directly" {
+            # R5/C8: no reimplementation of the aligned/drifted/untracked
+            # classification - drifted names must come from parsing skill-audit's
+            # non-summary "[!] Drifted (N)" section.
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'def _drifted_skill_names\('
+            $scriptContent | Should -Match 'def _audit_full\('
+            $scriptContent | Should -Match '_DRIFTED_ITEM_RE'
+            $scriptContent | Should -Match 'Drifted'
+        }
+
+        It "skill_diff follows the _audit_summary pwsh/powershell script-selection pattern" {
+            # R6/C9: skill-audit.ps1 is WinPS-compatible (not in PS7_SCRIPTS), so
+            # _audit_full must prefer pwsh and fall back to powershell, matching
+            # _audit_summary(), rather than requiring PS7.
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1200}shutil\.which\("pwsh"\) or "powershell"'
+            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1200}skill-audit\.ps1'
+            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1400}skill-audit\.sh'
+        }
+
+        It "skill_diff never fetches from the skills remote (local diff only, #R8)" {
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1200}-NoFetch'
+            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1400}--no-fetch'
+            $scriptContent | Should -Not -Match 'def skill_diff\([\s\S]{0,2000}?git fetch'
+        }
+
+        It "skill_diff escapes diff output before printing with rich (#R10)" {
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'def skill_diff\([\s\S]{0,2000}?escape\(line\)'
+        }
+
+        It "skill_diff errors on a non-drifted or unknown skill name (#R3)" {
+            $scriptContent = Get-Content $helperScript -Raw
+            $scriptContent | Should -Match 'is not drifted'
+            $scriptContent | Should -Match 'def skill_diff\([\s\S]{0,2000}?return 1'
+        }
     }
 
     Context "get_git_aliases Function" {
