@@ -566,6 +566,16 @@ import gitconfig_helper
             # the fixture git commands run against the developer's checkout (#174).
             $script:parentDir = New-Item -ItemType Directory -Path (Join-Path $script:tempRoot "git_all_$(Get-Random)") -Force -ErrorAction Stop
 
+            # The sweep scans the Scripts root derived from the helper's own
+            # location (its file's grandparent directory), not the current
+            # working directory. Run a COPY of the helper placed at
+            # <parent>/gitconfig/gitconfig_helper.py so the derived root is
+            # $parentDir -- this sandboxes the sweep to the fixture repos and
+            # keeps it away from the developer's real Scripts tree.
+            $helperDir = New-Item -ItemType Directory -Path (Join-Path $script:parentDir "gitconfig") -ErrorAction Stop
+            Copy-Item -Path $script:helperScript -Destination $helperDir -ErrorAction Stop
+            $script:sandboxHelper = Join-Path $helperDir "gitconfig_helper.py"
+
             # Clean child repo on main, wired to a bare remote so the
             # switch-to-main flow (fetch/pull/cleanup) succeeds.
             $script:cleanRepo = Join-Path $script:parentDir "clean"
@@ -609,8 +619,10 @@ import gitconfig_helper
         }
 
         It "Should skip dirty repos with a triage report instead of switching them" {
-            Push-Location $script:parentDir
-            $result = & $script:python $script:helperScript switch_to_main --all 2>&1
+            # Run from tempRoot (OUTSIDE the derived root) to pin that the scan
+            # target comes from the helper's location, not the CWD.
+            Push-Location $script:tempRoot
+            $result = & $script:python $script:sandboxHelper switch_to_main --all 2>&1
             $output = $result -join "`n"
             Pop-Location
 
@@ -624,8 +636,8 @@ import gitconfig_helper
         }
 
         It "Should classify outcomes separately and not count skips as failures" {
-            Push-Location $script:parentDir
-            $result = & $script:python $script:helperScript switch_to_main --all 2>&1
+            Push-Location $script:tempRoot
+            $result = & $script:python $script:sandboxHelper switch_to_main --all 2>&1
             $output = $result -join "`n"
             $exitCode = $LASTEXITCODE
             Pop-Location

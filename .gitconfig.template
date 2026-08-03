@@ -26,7 +26,8 @@
 	cleanup = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 	# Switch to main with error handling: fetch, check for uncommitted changes,
 	# checkout main, and pull. Detects and reports merge conflicts.
-	# Pass --all (or -a) to run this for every git repo in immediate subdirectories.
+	# Pass --all (or -a) to run this for every git repo in immediate subdirectories
+	# of the Scripts root (the parent of this repo), regardless of where it runs.
 	main = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 	# Manage machine-specific git configuration
 	localconfig = !git config --file ~/.gitconfig.local
@@ -82,6 +83,13 @@
 	pr = !gh pr view --web
 	# Show the status of your pull requests
 	prs = !gh pr status
+	# List open GitHub issues. Default: the current repo, as a rich table.
+	#   --all/-a       every GitHub repo you own, account-wide (adds a repo column)
+	#   --local        with --all: only git repos on disk under the Scripts root
+	#   --mine/-m      only issues assigned to you
+	#   --label/-l X   only issues with label X
+	#   --web/-w       open in the browser instead of printing a table
+	issues = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py issues \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 
 [init]
 	defaultBranch = main
