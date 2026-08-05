@@ -11,6 +11,7 @@ BeforeDiscovery {
         @{ Alias = 'main' }
         @{ Alias = 'start' }
         @{ Alias = 'skill' }
+        @{ Alias = 'issues' }
     )
 
     # Simple (non-helper) aliases added for the categorized browser. Each must be

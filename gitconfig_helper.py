@@ -11,6 +11,8 @@ import subprocess
 import re
 import json
 import shutil
+import webbrowser
+from datetime import datetime, timezone
 
 try:
     from rich.console import Console
@@ -213,7 +215,7 @@ ALIAS_METADATA = {
     # Branch & Sync
     "branches": ("Branch & Sync", "Download all remote branches and create local tracking branches"),
     "cleanup": ("Branch & Sync", "Delete branches with deleted remotes (merged). Use --force for local-only too"),
-    "main": ("Branch & Sync", "Switch to main (fetch, pull, cleanup). Use --all/-a for every repo in subdirectories"),
+    "main": ("Branch & Sync", "Switch to main (fetch, pull, cleanup). Use --all/-a for every repo in the Scripts root"),
     "nb": ("Branch & Sync", "Create and switch to a new branch (git nb <name>)"),
     "pushf": ("Branch & Sync", "Force-push the current branch safely (--force-with-lease)"),
     "sync": ("Branch & Sync", "Update the current branch with rebase and autostash"),
@@ -221,6 +223,7 @@ ALIAS_METADATA = {
     # GitHub
     "pr": ("GitHub", "Open the current branch's pull request in the browser"),
     "prs": ("GitHub", "Show the status of your pull requests"),
+    "issues": ("GitHub", "List open GitHub issues: current repo by default, --all/-a for every repo you own account-wide"),
     # Maintenance
     "localconfig": ("Maintenance", "Edit machine-specific git config (~/.gitconfig.local)"),
     "selfupdate": ("Maintenance", "Pull this repo and reinstall ~/.gitconfig from the template"),
@@ -1058,15 +1061,45 @@ def _dirty_triage_lines(default_branch):
     ]
 
 
-def update_all_main():
-    """Run the switch-to-main flow for every git repo in immediate subdirectories.
+def _scripts_root():
+    """Return the derived Scripts root: the parent of this repo's directory.
 
-    Scans the direct child directories of the current working directory. For each
-    git repo that is clean, runs switch_to_main() (fetch, switch to main, pull,
-    branch cleanup). Repos with a dirty working tree are NOT switched -- instead a
-    triage report (branch position vs origin/main, last-commit age, working-tree
-    breakdown) is printed so the user can judge stale-vs-active themselves. The
-    working tree is never mutated.
+    gitconfig_helper.py lives in <ScriptsRoot>/gitconfig/, so the root is this
+    file's grandparent directory -- ~/Documents/Scripts on a standard install on
+    any OS. No hardcoded path and no per-OS branching; it self-adapts if the
+    repo is cloned elsewhere.
+    """
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _scripts_root_repos():
+    """Return (scripts_root, repo_names) for git repos under the Scripts root.
+
+    Scans the immediate subdirectories of _scripts_root() -- the current working
+    directory is irrelevant. A subdirectory counts as a git repo when it
+    contains a .git entry, which may be a directory or a file (the latter for
+    worktrees/submodules). Names are sorted for stable output. Shared by
+    `git main --all` and `git issues --all --local`.
+    """
+    root = _scripts_root()
+    repos = []
+    for entry in sorted(os.scandir(root), key=lambda e: e.name):
+        if entry.is_dir() and os.path.exists(os.path.join(entry.path, ".git")):
+            repos.append(entry.name)
+    return root, repos
+
+
+def update_all_main():
+    """Run the switch-to-main flow for every git repo under the Scripts root.
+
+    Scans the immediate subdirectories of the derived Scripts root (the parent
+    of the repo containing this helper -- see _scripts_root_repos()), regardless
+    of the current working directory. For each git repo that is clean, runs
+    switch_to_main() (fetch, switch to main, pull, branch cleanup). Repos with a
+    dirty working tree are NOT switched -- instead a triage report (branch
+    position vs origin/main, last-commit age, working-tree breakdown) is printed
+    so the user can judge stale-vs-active themselves. The working tree is never
+    mutated.
 
     Prints a per-repo header and a final summary table classifying each repo as
     OK, Skipped (dirty), or Failed. Returns 0 if no repo failed (skips don't
@@ -1076,16 +1109,11 @@ def update_all_main():
 
     original_cwd = os.getcwd()
 
-    # Collect immediate subdirectories that are git repositories (a .git entry
-    # may be a directory or a file, the latter for worktrees/submodules).
-    repos = []
-    for entry in sorted(os.scandir("."), key=lambda e: e.name):
-        if entry.is_dir() and os.path.exists(os.path.join(entry.path, ".git")):
-            repos.append(entry.name)
+    root, repos = _scripts_root_repos()
 
     if not repos:
         console.print(
-            "[yellow]No git repositories found in immediate subdirectories.[/yellow]"
+            f"[yellow]No git repositories found in immediate subdirectories of {root}.[/yellow]"
         )
         return 1
 
@@ -1093,7 +1121,7 @@ def update_all_main():
     for repo in repos:
         console.print(f"\n[bold]-- {repo} --[/bold]")
         try:
-            os.chdir(repo)
+            os.chdir(os.path.join(root, repo))
             # Detect a dirty working tree up front (no fetch needed for status).
             # If dirty, skip the switch and print a triage report instead of
             # touching the working tree; otherwise hand off to switch_to_main.
@@ -1141,6 +1169,243 @@ def update_all_main():
     )
 
     return 0 if failed_count == 0 else 1
+
+
+# Fields requested from gh's --json output for `git issues` (repo modes; the
+# account-wide search adds "repository"), and the fixed result cap (no --limit
+# flag by design).
+ISSUE_FIELDS = "number,title,labels,updatedAt"
+ISSUE_LIMIT = 50
+
+
+def _run_gh(*args, cwd=None):
+    """Run a GitHub CLI command, capturing output (mirrors run_git)."""
+    return subprocess.run(
+        ["gh", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=cwd,
+    )
+
+
+def _relative_age(iso_timestamp):
+    """Render an ISO-8601 timestamp (from gh --json) as a short relative age."""
+    try:
+        dt = datetime.fromisoformat(str(iso_timestamp).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return "?"
+    seconds = max(int((datetime.now(timezone.utc) - dt).total_seconds()), 0)
+    if seconds < 3600:
+        return f"{max(seconds // 60, 1)}m ago"
+    if seconds < 86400:
+        return f"{seconds // 3600}h ago"
+    days = seconds // 86400
+    if days < 365:
+        return f"{days}d ago"
+    return f"{days // 365}y ago"
+
+
+def _issue_row(issue, repo=None):
+    """Build one table row from a gh --json issue dict (leading repo cell optional)."""
+    labels = ", ".join(
+        str(label.get("name", "")) for label in issue.get("labels") or []
+    )
+    row = [
+        f"#{issue.get('number', '?')}",
+        escape(str(issue.get("title", ""))),
+        escape(labels),
+        _relative_age(issue.get("updatedAt")),
+    ]
+    if repo is not None:
+        row.insert(0, escape(str(repo)))
+    return row
+
+
+def _print_issues_table(console, rows, title, repo_column=False):
+    """Render open issues as a rich table (repo column only in --all modes)."""
+    table = Table(title=title, show_lines=True, header_style="bold yellow")
+    if repo_column:
+        table.add_column("Repo", justify="left", style="green", no_wrap=True)
+    table.add_column("#", justify="right", style="cyan", no_wrap=True)
+    table.add_column("Title", justify="left", style="magenta")
+    table.add_column("Labels", justify="left")
+    table.add_column("Updated", justify="left", no_wrap=True)
+    for row in rows:
+        table.add_row(*row)
+    console.print(table)
+
+
+def _repo_open_issues(repo_dir=None, mine=False, label=None):
+    """Fetch one repo's open issues via `gh issue list --json`.
+
+    Returns (issues, None) on success or (None, error_message) on failure --
+    e.g. no GitHub remote, or gh not authenticated. repo_dir (when given) is
+    passed to gh as its working directory so the --local scan never chdirs.
+    """
+    cmd = [
+        "issue", "list", "--state", "open",
+        "--json", ISSUE_FIELDS, "--limit", str(ISSUE_LIMIT),
+    ]
+    if mine:
+        cmd += ["--assignee", "@me"]
+    if label:
+        cmd += ["--label", label]
+    proc = _run_gh(*cmd, cwd=repo_dir)
+    if proc.returncode != 0:
+        return None, proc.stderr.strip() or f"gh exited with code {proc.returncode}"
+    try:
+        return json.loads(proc.stdout), None
+    except json.JSONDecodeError:
+        return None, "unexpected response from gh issue list"
+
+
+def list_issues(args):
+    """`git issues`: list open GitHub issues via the GitHub CLI.
+
+    Modes:
+      (default)       open issues in the current repo (gh issue list)
+      --all / -a      open issues across every GitHub repo owned by the
+                      authenticated user (gh api user + gh search issues);
+                      works from any directory
+      --all --local   restrict --all to git repos in immediate subdirectories
+                      of the Scripts root (shared with `git main --all` via
+                      _scripts_root_repos()), regardless of the current
+                      working directory
+
+    Filters compose with every mode: --mine/-m (assigned to you) and
+    --label <name>/-l <name>. --web/-w opens the browser instead of printing a
+    table (repo mode: gh issue list --web; --all: the account-wide issues
+    search page); it cannot be combined with --local.
+    """
+    console = Console()
+
+    all_mode = "--all" in args or "-a" in args
+    local = "--local" in args
+    web = "--web" in args or "-w" in args
+    mine = "--mine" in args or "-m" in args
+
+    label = None
+    for flag in ("--label", "-l"):
+        if flag in args:
+            idx = args.index(flag)
+            if idx + 1 >= len(args) or args[idx + 1].startswith("-"):
+                console.print(f"[red]Usage: git issues {flag} <name>[/red]")
+                return 1
+            label = args[idx + 1]
+            break
+
+    if local and not all_mode:
+        console.print(
+            "[red]Usage: --local only applies with --all (git issues --all --local)[/red]"
+        )
+        return 1
+    if web and local:
+        console.print("[red]Usage: --web cannot be combined with --local[/red]")
+        return 1
+    if not _have("gh"):
+        console.print("[red]Error: the GitHub CLI ('gh') is required for git issues[/red]")
+        return 1
+
+    # Default mode: the current repo's open issues.
+    if not all_mode:
+        if run_git("rev-parse", "--git-dir").returncode != 0:
+            console.print("[red]Error: Not in a git repository[/red]")
+            return 1
+        if web:
+            cmd = ["issue", "list", "--web"]
+            if mine:
+                cmd += ["--assignee", "@me"]
+            if label:
+                cmd += ["--label", label]
+            proc = _run_gh(*cmd)
+            if proc.returncode != 0:
+                console.print("[red]Error: gh issue list --web failed[/red]")
+                console.print(f"[red]{proc.stderr.strip()}[/red]")
+                return 1
+            return 0
+        issues, err = _repo_open_issues(mine=mine, label=label)
+        if issues is None:
+            console.print("[red]Error: could not list this repo's issues[/red]")
+            console.print(f"[red]{err}[/red]")
+            return 1
+        if not issues:
+            console.print("[green]No open issues[/green]")
+            return 0
+        _print_issues_table(
+            console, [_issue_row(issue) for issue in issues], "Open Issues"
+        )
+        return 0
+
+    # --all --local: scan the Scripts root's git repos on disk.
+    if local:
+        root, repos = _scripts_root_repos()
+        if not repos:
+            console.print(
+                f"[yellow]No git repositories found in immediate subdirectories of {root}.[/yellow]"
+            )
+            return 0
+        rows = []
+        for repo in repos:
+            issues, err = _repo_open_issues(
+                repo_dir=os.path.join(root, repo), mine=mine, label=label
+            )
+            if issues is None:
+                console.print(f"[yellow]Skipping '{repo}': {err}[/yellow]")
+                continue
+            rows.extend(_issue_row(issue, repo=repo) for issue in issues)
+        if not rows:
+            console.print("[green]No open issues[/green]")
+            return 0
+        _print_issues_table(
+            console, rows, f"Open Issues - repos under {root}", repo_column=True
+        )
+        return 0
+
+    # --all: account-wide, via the authenticated user's login.
+    login_proc = _run_gh("api", "user", "--jq", ".login")
+    login = login_proc.stdout.strip()
+    if login_proc.returncode != 0 or not login:
+        console.print("[red]Error: could not resolve your GitHub login[/red]")
+        console.print(f"[red]{login_proc.stderr.strip()}[/red]")
+        return 1
+
+    if web:
+        url = f"https://github.com/issues?q=is:open+is:issue+user:{login}"
+        console.print(f"[cyan]Opening[/cyan] {url}")
+        webbrowser.open(url)
+        return 0
+
+    cmd = [
+        "search", "issues", "--owner", login, "--state", "open",
+        "--json", ISSUE_FIELDS + ",repository", "--limit", str(ISSUE_LIMIT),
+    ]
+    if mine:
+        cmd += ["--assignee", login]
+    if label:
+        cmd += ["--label", label]
+    proc = _run_gh(*cmd)
+    if proc.returncode != 0:
+        console.print("[red]Error: gh search issues failed[/red]")
+        console.print(f"[red]{proc.stderr.strip()}[/red]")
+        return 1
+    try:
+        issues = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        console.print("[red]Error: unexpected response from gh search issues[/red]")
+        return 1
+    if not issues:
+        console.print("[green]No open issues[/green]")
+        return 0
+    rows = [
+        _issue_row(issue, repo=(issue.get("repository") or {}).get("name", "?"))
+        for issue in issues
+    ]
+    _print_issues_table(
+        console, rows, f"Open Issues - all repos owned by {login}", repo_column=True
+    )
+    return 0
 
 
 def _print_aliases_table(aliases):
@@ -1518,6 +1783,8 @@ if __name__ == "__main__":
             sys.exit(update_all_main())
         elif function_name == "skill":
             sys.exit(skill(sys.argv[2:]))
+        elif function_name == "issues":
+            sys.exit(list_issues(sys.argv[2:]))
         else:
             print(f"Function {function_name} not found.")
     else:
