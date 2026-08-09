@@ -79,6 +79,85 @@ function Resolve-Python {
     return $null
 }
 
+# True when the host console can render an in-place spinner: stdout must not
+# be redirected, the session must be interactive, and the host must expose a
+# real RawUI console. CI runners, piped/redirected output, and the login
+# scheduled task (non-interactive) all fail at least one check and get a plain
+# one-line fallback instead - an animated spinner would just spew carriage
+# returns into their logs (#210).
+function Test-ConsoleSpinnerSupport {
+    if ([System.Console]::IsOutputRedirected) { return $false }
+    if (-not [System.Environment]::UserInteractive) { return $false }
+    if (-not $Host.UI -or -not $Host.UI.RawUI) { return $false }
+    try {
+        # Hosts without a real console (e.g. some remoting/CI hosts) throw here.
+        $null = $Host.UI.RawUI.WindowSize
+    }
+    catch { return $false }
+    return $true
+}
+
+# Run `pip install --quiet <packages>` showing an animated | / - \ spinner
+# while it blocks: a cold install of rich/textual can take many seconds with
+# zero output, which made install.ps1 STEP 6 look hung (#210). pip runs in a
+# background job so the foreground can animate; the job swallows pip's output
+# just like the old inline `2>$null` calls did. Without a real console (see
+# Test-ConsoleSpinnerSupport) - or if job startup fails - the install runs
+# synchronously behind a single plain status line (routed via -Logger so the
+# login task's log picks it up), emitting no control characters. Returns $true
+# when pip exited 0. Dependency-free by design: no modules, no Python changes.
+function Invoke-PipInstall {
+    param(
+        [Parameter(Mandatory)][string]$Python,
+        [Parameter(Mandatory)][string[]]$Packages,
+        [scriptblock]$Logger = { param($m) Write-Host $m }
+    )
+
+    $activity = "Installing $($Packages -join ' ')"
+    if ($activity.Length -gt 60) { $activity = $activity.Substring(0, 57) + '...' }
+
+    $job = $null
+    if (Test-ConsoleSpinnerSupport) {
+        try {
+            $job = Start-Job -ScriptBlock {
+                param($exe, $pkgs)
+                & $exe -m pip install --quiet @pkgs *> $null
+                $LASTEXITCODE
+            } -ArgumentList $Python, $Packages
+        }
+        catch {
+            # Job infrastructure unavailable - fall through to the plain path.
+            $job = $null
+        }
+    }
+
+    if (-not $job) {
+        & $Logger "$activity (this can take a minute)..."
+        & $Python -m pip install --quiet @Packages 2>$null
+        return ($LASTEXITCODE -eq 0)
+    }
+
+    $frames = '|', '/', '-', '\'
+    $i = 0
+    try {
+        while ($job.State -eq 'Running') {
+            Write-Host -NoNewline ("`r  [{0}] {1}" -f $frames[$i % $frames.Count], $activity)
+            $i++
+            Start-Sleep -Milliseconds 150
+        }
+    }
+    finally {
+        # Blank the spinner line so the final [OK]/[WARN] message starts clean.
+        Write-Host -NoNewline ("`r{0}`r" -f (' ' * ($activity.Length + 8)))
+    }
+
+    $null = Wait-Job $job
+    # The job's only output is the $LASTEXITCODE it emitted after pip finished.
+    $exit = Receive-Job $job -ErrorAction SilentlyContinue | Select-Object -Last 1
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
+    return ($exit -eq 0)
+}
+
 # Install the Python dependencies declared in pyproject.toml (read via
 # scripts/shared/deps.py): the required deps (rich) plus the optional 'tui' group
 # (textual). Idempotent - only installs what is not already importable. A failed
@@ -117,11 +196,9 @@ function Install-PythonDeps {
         # Try required + optional together; if that fails, make sure the required
         # land even when an optional dep is unavailable.
         if ($needOptional.Count -gt 0) {
-            & $py -m pip install --quiet $needRequired $needOptional 2>$null
-            if ($LASTEXITCODE -eq 0) { & $say "[OK] Installed Python deps: $($needRequired -join ' ') $($needOptional -join ' ')"; return }
+            if (Invoke-PipInstall -Python $py -Packages ($needRequired + $needOptional) -Logger $Logger) { & $say "[OK] Installed Python deps: $($needRequired -join ' ') $($needOptional -join ' ')"; return }
         }
-        & $py -m pip install --quiet $needRequired 2>$null
-        if ($LASTEXITCODE -eq 0) {
+        if (Invoke-PipInstall -Python $py -Packages $needRequired -Logger $Logger) {
             if ($needOptional.Count -gt 0) { & $say "[OK] Installed required Python deps: $($needRequired -join ' ') (optional unavailable; 'git alias' uses the static table)" }
             else { & $say "[OK] Installed required Python deps: $($needRequired -join ' ')" }
         }
@@ -130,8 +207,7 @@ function Install-PythonDeps {
         }
     }
     elseif ($needOptional.Count -gt 0) {
-        & $py -m pip install --quiet $needOptional 2>$null
-        if ($LASTEXITCODE -eq 0) { & $say "[OK] Installed optional Python deps: $($needOptional -join ' ')" }
+        if (Invoke-PipInstall -Python $py -Packages $needOptional -Logger $Logger) { & $say "[OK] Installed optional Python deps: $($needOptional -join ' ')" }
         else { & $say "[WARN] Optional Python deps unavailable ($($needOptional -join ' ')); 'git alias' uses the static table" }
     }
 }
