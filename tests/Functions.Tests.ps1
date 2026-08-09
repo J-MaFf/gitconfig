@@ -138,4 +138,77 @@ Describe "Functions.ps1" -Tag 'Unit' {
             }
         }
     }
+
+    Context "Invoke-PipInstall progress (#210)" {
+        BeforeAll {
+            . $script:functionsPath
+
+            $script:isWindowsHost = if ($PSVersionTable.PSVersion.Major -ge 6) { $IsWindows } else { $true }
+
+            # Cross-platform fake interpreter: ignores its arguments
+            # (`-m pip install --quiet ...`) and exits with the requested code,
+            # standing in for pip succeeding or failing.
+            function New-FakePip {
+                param([Parameter(Mandatory)][int]$ExitCode)
+                if ($script:isWindowsHost) {
+                    $path = Join-Path $TestDrive "fake-pip-$ExitCode.cmd"
+                    @('@echo off', "exit /b $ExitCode") | Set-Content -Path $path -Encoding ascii
+                }
+                else {
+                    $path = Join-Path $TestDrive "fake-pip-$ExitCode.sh"
+                    @('#!/bin/sh', "exit $ExitCode") | Set-Content -Path $path -Encoding ascii
+                    & chmod +x $path
+                }
+                return $path
+            }
+        }
+
+        It "routes every pip install in Install-PythonDeps through Invoke-PipInstall" {
+            # The spinner only covers all install paths (install.ps1 STEP 6 and
+            # the login auto-update) if no call site regresses to a raw inline
+            # `& $py -m pip install`. Invoke-PipInstall's own internals use
+            # different variable names, so this pattern pins the call sites.
+            $content = Get-Content $script:functionsPath -Raw
+            $content | Should -Not -Match '(?m)^\s*&\s*\$py\s+-m\s+pip\s+install'
+            $content | Should -Match 'Invoke-PipInstall -Python \$py'
+        }
+
+        It "Test-ConsoleSpinnerSupport never throws and returns a boolean" {
+            # The probe runs on every host (CI, scheduled task, interactive);
+            # whatever it decides, it must decide cleanly.
+            { $script:spinnerSupported = Test-ConsoleSpinnerSupport } | Should -Not -Throw
+            $script:spinnerSupported | Should -BeOfType [bool]
+        }
+
+        It "emits a single plain status line via -Logger and returns `$true on success when no console is available" {
+            Mock Test-ConsoleSpinnerSupport { $false }
+            $script:messages = @()
+
+            $result = Invoke-PipInstall -Python (New-FakePip -ExitCode 0) -Packages @('rich') -Logger { param($m) $script:messages += $m }
+
+            $result | Should -BeTrue
+            $script:messages.Count | Should -Be 1
+            $script:messages[0] | Should -Match 'Installing rich'
+            # No control characters may reach redirected logs (CI, login task).
+            $script:messages[0] | Should -Not -Match "`r"
+        }
+
+        It "returns `$false when pip fails on the plain fallback path" {
+            Mock Test-ConsoleSpinnerSupport { $false }
+            $script:messages = @()
+
+            $result = Invoke-PipInstall -Python (New-FakePip -ExitCode 1) -Packages @('rich', 'textual') -Logger { param($m) $script:messages += $m }
+
+            $result | Should -BeFalse
+            # The interim status line still shows; the caller owns the [WARN].
+            $script:messages.Count | Should -Be 1
+        }
+
+        It "returns the pip exit status from the background job on the spinner path" {
+            Mock Test-ConsoleSpinnerSupport { $true }
+
+            Invoke-PipInstall -Python (New-FakePip -ExitCode 0) -Packages @('rich') | Should -BeTrue
+            Invoke-PipInstall -Python (New-FakePip -ExitCode 3) -Packages @('rich') | Should -BeFalse
+        }
+    }
 }
