@@ -4,7 +4,7 @@
 
 A cross-platform tool that generates a portable `~/.gitconfig` from a version-controlled template (`.gitconfig.template`), layers machine-specific overrides via `~/.gitconfig.local`, and keeps it converged on Windows through a login scheduled task. Helper logic (`gitconfig_helper.py`) backs the custom git aliases. Windows setup is PowerShell + Pester; macOS/Linux are bash.
 
-## Current State — 2026-08-09
+## Current State — 2026-08-10
 
 Healthy; `main` is clean. [#210](https://github.com/J-MaFf/gitconfig/issues/210) (`install.ps1` STEP 6 pip-install progress spinner — `Install-PythonDeps` now animates the wait via a background pip job, with a plain-line fallback for non-interactive/redirected runs) is implemented and awaiting PR review/merge; the spinner path still wants a visual check on a real Windows machine. [#208](https://github.com/J-MaFf/gitconfig/issues/208) (`git skill diff` subcommand — shows the full diff of drifted skill(s) in `~/.claude/skills`, so you can review changes before publishing) is implemented and awaiting PR review/merge.
 
@@ -50,6 +50,7 @@ Four follow-up fixes from the #198 adversarial review landed: [#203](https://git
 | [#200](https://github.com/J-MaFf/gitconfig/issues/200) | `install.ps1` STEP 7 re-resolved Python with a weaker first-hit chain instead of reusing `Resolve-Python` | [#204](https://github.com/J-MaFf/gitconfig/pull/204) |
 | [#201](https://github.com/J-MaFf/gitconfig/issues/201) | Vacuous `PSParser::Tokenize` parse assertion in `Update-GitConfig.Tests.ps1` could never fail | [#205](https://github.com/J-MaFf/gitconfig/pull/205) |
 | [#202](https://github.com/J-MaFf/gitconfig/issues/202) | `Integration.Tests.ps1` invoked bare `python`, bypassing the repo's resolution rule | [#206](https://github.com/J-MaFf/gitconfig/pull/206) |
+| [#214](https://github.com/J-MaFf/gitconfig/issues/214) | Adopt shared reusable claude.yml workflow from J-MaFf/.github | [#215](https://github.com/J-MaFf/gitconfig/pull/215) |
 
 ### Open Issues
 
