@@ -620,6 +620,77 @@ def _drifted_skill_names():
     return names
 
 
+def _is_skill_path(path):
+    """True if a repo-relative path lives inside a skill directory.
+
+    A skill directory is a top-level folder containing SKILL.md, which is
+    exactly what skill-audit walks - so anything under one is already counted
+    in its drifted/untracked totals and must not be reported twice.
+    """
+    top = path.replace("\\", "/").split("/", 1)[0]
+    return os.path.isfile(os.path.join(SKILLS_DIR, top, "SKILL.md"))
+
+
+def _repo_dirt_paths():
+    """Return sorted uncommitted paths in SKILLS_DIR that skill-audit can't see.
+
+    skill-audit classifies skill *directories* only, so uncommitted changes to
+    anything else in the repo (.claude-plugin/, scripts/, top-level docs, a
+    directory rename) leave `git skill status` reporting "nothing to publish"
+    while `git update` skips the repo as dirty - the two commands disagree and
+    the scheduled sync silently stops fast-forwarding (#217). This is the same
+    repo-wide `git status --porcelain` that update_all_repos() gates on, minus
+    the paths the audit already accounts for. None means status couldn't run.
+    """
+    result = run_git("-C", SKILLS_DIR, "status", "--porcelain")
+    if result.returncode != 0:
+        return None
+    paths = set()
+    for line in result.stdout.splitlines():
+        # Porcelain v1: two status columns, a space, then the path - or
+        # "old -> new" when the index column is R/C. Only split on those: an
+        # untracked file may legitimately be named "a -> b". Quotes appear
+        # around paths that need them.
+        if len(line) < 4:
+            continue
+        entry = line[3:]
+        parts = entry.split(" -> ") if line[0] in "RC" else [entry]
+        for path in parts:
+            path = path.strip().strip('"')
+            if path and not _is_skill_path(path):
+                paths.add(path)
+    return sorted(paths)
+
+
+def _render_repo_dirt(console):
+    """Report uncommitted non-skill changes in the skills repo. True if any.
+
+    Named with its consequence: this dirt is what makes `git update` print
+    "Skipped (dirty)" for claude-skills, which is otherwise invisible from
+    here - the skill counts stay green and the repo quietly stops syncing.
+    """
+    dirt = _repo_dirt_paths()
+    if dirt is None:
+        # Say so rather than skipping quietly - a silent check is the exact
+        # failure mode this function exists to fix.
+        console.print("  [yellow][!] Couldn't read the repo's status - dirt unchecked[/yellow]")
+        return False
+    if not dirt:
+        return False
+    console.print(
+        f"  [yellow]{len(dirt)} uncommitted file(s) outside skill folders:[/yellow]"
+    )
+    for path in dirt[:5]:
+        console.print(f"    [yellow]- {escape(path)}[/yellow]")
+    if len(dirt) > 5:
+        console.print(f"    [dim]... and {len(dirt) - 5} more[/dim]")
+    # Kept to one 80-column line so it doesn't wrap mid-sentence in a terminal.
+    console.print(
+        "  [yellow][!] Blocks the sync - `git update` skips this repo as dirty[/yellow]"
+    )
+    return True
+
+
 def _render_skill_state(console, no_fetch):
     """Print the LIVE skill state: colored audit counts + the publish nudge.
 
@@ -630,6 +701,8 @@ def _render_skill_state(console, no_fetch):
     audit = _audit_summary(no_fetch)
     if audit is None:
         console.print("  [yellow][!] skill-audit not found - can't check local state[/yellow]")
+        # Still worth a repo-wide check: it needs git, not the audit script.
+        _render_repo_dirt(console)
         return
     lines, actionable = audit
     for line in lines:
@@ -648,10 +721,15 @@ def _render_skill_state(console, no_fetch):
         if int(m["dupes"]):
             parts.append(f"[red]{m['dupes']} duplicate name(s)[/red]")
         console.print("  Skills: " + ", ".join(parts))
+    dirty = _render_repo_dirt(console)
     if actionable:
         console.print(
             "  [yellow][!] Unpublished local changes - publish with: git skill publish[/yellow]"
         )
+    elif dirty:
+        # Skills really are all published - but a bare green "nothing to do"
+        # under a dirt warning reads as an all-clear, so scope it explicitly.
+        console.print("  [dim][OK] No skill changes to publish[/dim]")
     else:
         console.print("  [green][OK] Nothing to publish from this machine[/green]")
 

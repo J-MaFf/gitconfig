@@ -230,5 +230,103 @@ class TestSkillCrossRepoGuard:
         assert helper.skill(["bogus"]) == 1
 
 
+# --------------------------------------------------------------------------
+# _repo_dirt_paths / _render_repo_dirt
+# --------------------------------------------------------------------------
+
+class TestRepoDirt:
+    """`git skill status` used to report only what skill-audit sees (skill
+    directories), so uncommitted changes anywhere else in the skills repo left
+    it printing "nothing to publish" while `git update` skipped the repo as
+    dirty. The repo-wide check must catch those and only those."""
+
+    @staticmethod
+    def _patch_status(helper, monkeypatch, stdout, returncode=0):
+        class _Result:
+            def __init__(self):
+                self.stdout = stdout
+                self.stderr = ""
+                self.returncode = returncode
+
+        monkeypatch.setattr(helper, "run_git", lambda *a, **k: _Result())
+
+    @staticmethod
+    def _make_skill(tmp_path, name):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "SKILL.md").write_text("---\nname: x\n---\n")
+
+    def test_reports_non_skill_paths(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        self._patch_status(
+            helper, monkeypatch, " M .claude-plugin/marketplace.json\n?? notes.txt\n"
+        )
+        assert helper._repo_dirt_paths() == [".claude-plugin/marketplace.json", "notes.txt"]
+
+    def test_ignores_paths_inside_skill_dirs(self, helper, tmp_path, monkeypatch):
+        # Drift inside a skill folder is already counted by skill-audit;
+        # reporting it here too would double-count it.
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        self._make_skill(tmp_path, "my-skill")
+        self._patch_status(helper, monkeypatch, " M my-skill/SKILL.md\n")
+        assert helper._repo_dirt_paths() == []
+
+    def test_rename_reports_both_sides(self, helper, tmp_path, monkeypatch):
+        # The bug that motivated this: .claude-plugin/ renamed to
+        # .claude-plugin.offtest/ - git may report it as a rename entry.
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        self._patch_status(
+            helper, monkeypatch, "R  .claude-plugin/a.txt -> .claude-plugin.offtest/a.txt\n"
+        )
+        assert helper._repo_dirt_paths() == [
+            ".claude-plugin.offtest/a.txt",
+            ".claude-plugin/a.txt",
+        ]
+
+    def test_arrow_in_untracked_filename_is_not_split(self, helper, tmp_path, monkeypatch):
+        # Only R/C entries carry "old -> new"; an untracked file may just be
+        # named that way, and splitting it would invent two phantom paths.
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        self._patch_status(helper, monkeypatch, "?? a -> b.txt\n")
+        assert helper._repo_dirt_paths() == ["a -> b.txt"]
+
+    def test_quoted_paths_are_unquoted(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        self._patch_status(helper, monkeypatch, '?? "dir with spaces/file.txt"\n')
+        assert helper._repo_dirt_paths() == ["dir with spaces/file.txt"]
+
+    def test_clean_tree_is_empty(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        self._patch_status(helper, monkeypatch, "")
+        assert helper._repo_dirt_paths() == []
+
+    def test_git_failure_returns_none(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        self._patch_status(helper, monkeypatch, "", returncode=128)
+        assert helper._repo_dirt_paths() is None
+
+    def test_render_returns_false_when_clean(self, helper, monkeypatch):
+        monkeypatch.setattr(helper, "_repo_dirt_paths", lambda: [])
+        assert helper._render_repo_dirt(helper.Console()) is False
+
+    def test_render_says_so_when_status_unavailable(self, helper, monkeypatch, capsys):
+        monkeypatch.setattr(helper, "_repo_dirt_paths", lambda: None)
+        assert helper._render_repo_dirt(helper.Console()) is False
+        assert "unchecked" in capsys.readouterr().out
+
+    def test_render_warns_and_names_the_consequence(self, helper, monkeypatch, capsys):
+        monkeypatch.setattr(helper, "_repo_dirt_paths", lambda: [".claude-plugin/a.json"])
+        assert helper._render_repo_dirt(helper.Console()) is True
+        out = capsys.readouterr().out
+        assert ".claude-plugin/a.json" in out
+        assert "git update" in out
+
+    def test_render_truncates_long_lists(self, helper, monkeypatch, capsys):
+        monkeypatch.setattr(helper, "_repo_dirt_paths", lambda: [f"f{i}.txt" for i in range(8)])
+        assert helper._render_repo_dirt(helper.Console()) is True
+        out = capsys.readouterr().out
+        assert "8 uncommitted file(s)" in out
+        assert "and 3 more" in out
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
