@@ -648,10 +648,14 @@ def _repo_dirt_paths():
     paths = set()
     for line in result.stdout.splitlines():
         # Porcelain v1: two status columns, a space, then the path - or
-        # "old -> new" for a rename/copy. Quotes appear when a path needs them.
+        # "old -> new" when the index column is R/C. Only split on those: an
+        # untracked file may legitimately be named "a -> b". Quotes appear
+        # around paths that need them.
         if len(line) < 4:
             continue
-        for path in line[3:].split(" -> "):
+        entry = line[3:]
+        parts = entry.split(" -> ") if line[0] in "RC" else [entry]
+        for path in parts:
             path = path.strip().strip('"')
             if path and not _is_skill_path(path):
                 paths.add(path)
@@ -666,6 +670,11 @@ def _render_repo_dirt(console):
     here - the skill counts stay green and the repo quietly stops syncing.
     """
     dirt = _repo_dirt_paths()
+    if dirt is None:
+        # Say so rather than skipping quietly - a silent check is the exact
+        # failure mode this function exists to fix.
+        console.print("  [yellow][!] Couldn't read the repo's status - dirt unchecked[/yellow]")
+        return False
     if not dirt:
         return False
     console.print(

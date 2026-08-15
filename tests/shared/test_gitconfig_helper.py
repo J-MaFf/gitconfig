@@ -282,6 +282,13 @@ class TestRepoDirt:
             ".claude-plugin/a.txt",
         ]
 
+    def test_arrow_in_untracked_filename_is_not_split(self, helper, tmp_path, monkeypatch):
+        # Only R/C entries carry "old -> new"; an untracked file may just be
+        # named that way, and splitting it would invent two phantom paths.
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        self._patch_status(helper, monkeypatch, "?? a -> b.txt\n")
+        assert helper._repo_dirt_paths() == ["a -> b.txt"]
+
     def test_quoted_paths_are_unquoted(self, helper, tmp_path, monkeypatch):
         monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
         self._patch_status(helper, monkeypatch, '?? "dir with spaces/file.txt"\n')
@@ -301,9 +308,10 @@ class TestRepoDirt:
         monkeypatch.setattr(helper, "_repo_dirt_paths", lambda: [])
         assert helper._render_repo_dirt(helper.Console()) is False
 
-    def test_render_returns_false_when_status_unavailable(self, helper, monkeypatch):
+    def test_render_says_so_when_status_unavailable(self, helper, monkeypatch, capsys):
         monkeypatch.setattr(helper, "_repo_dirt_paths", lambda: None)
         assert helper._render_repo_dirt(helper.Console()) is False
+        assert "unchecked" in capsys.readouterr().out
 
     def test_render_warns_and_names_the_consequence(self, helper, monkeypatch, capsys):
         monkeypatch.setattr(helper, "_repo_dirt_paths", lambda: [".claude-plugin/a.json"])
