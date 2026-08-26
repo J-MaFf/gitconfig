@@ -1,0 +1,36 @@
+name: Pester Tests
+
+# Runs the non-integration Pester suite (tests/run-tests.ps1) on every pull
+# request, on the self-hosted Windows runner already connected to this repo.
+# Integration tests are never run here (they mutate real machine state).
+# This check does not gate merges (no required_status_checks) until the
+# suite's cross-file flakiness/hang is diagnosed separately.
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure Pester 5.0+ is installed
+        shell: pwsh
+        run: |
+          $pester = Get-Module -ListAvailable -Name Pester |
+            Where-Object { $_.Version -ge [Version]'5.0' } |
+            Select-Object -First 1
+          if (-not $pester) {
+            Write-Host "Pester 5.0+ not found - installing..."
+            Install-Module -Name Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+          else {
+            Write-Host "Pester $($pester.Version) already installed."
+          }
+
+      - name: Run Pester test suite
+        shell: pwsh
+        run: ./tests/run-tests.ps1
