@@ -76,6 +76,29 @@ $initLocalScript   = Join-Path $scriptsDir "Initialize-LocalConfig.ps1"
 $initSymlinksScript = Join-Path $scriptsDir "Initialize-Symlinks.ps1"
 $registerTaskScript = Join-Path $scriptsDir "Register-LoginTask.ps1"
 
+# Preflight: Python powers the 'git alias' browser (its rich/textual
+# dependencies); the core gitconfig install works fine without it. Detect
+# it once, up front, before touching any files, so a missing interpreter is
+# a single clear choice instead of scattered warnings later in the run.
+# Dot-source Functions.ps1 here to reuse Resolve-Python (STEP 6 dot-sources
+# it again before Install-PythonDeps - harmless, not worth threading a
+# guard through).
+. (Join-Path $scriptDir 'Functions.ps1')
+if (-not (Resolve-Python)) {
+    Write-Host "[WARN] Python not found - it powers the 'git alias' browser (rich/textual); the core gitconfig install works fine without it." -ForegroundColor Yellow
+    if ($Force) {
+        Write-Host "[OK] Continuing without Python (-Force)" -ForegroundColor Green
+    }
+    else {
+        $pythonResponse = Read-Host "Continue anyway? (y/n)"
+        if ($pythonResponse -ne "y") {
+            Write-Host "Setup cancelled." -ForegroundColor Yellow
+            exit 0
+        }
+    }
+    Write-Host ""
+}
+
 Write-Host "GitConfig Setup" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host "Repository: $repoRoot" -ForegroundColor Green

@@ -218,18 +218,3 @@ Write-Host "Your .gitignore_global and gitconfig_helper.py are now symlinked fro
 Write-Host "Any changes pushed to the repository will be reflected in your home directory." -ForegroundColor Cyan
 Write-Host ""
 
-# Test the symlink by running 'git alias'
-Write-Host "Testing symlink setup..." -ForegroundColor Cyan
-try {
-    git alias 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "[OK] Symlinks verified! Git aliases are working." -ForegroundColor Green
-    }
-    else {
-        Write-Host "[WARN] git alias command failed. Verify symlinks manually with: git alias" -ForegroundColor Yellow
-    }
-}
-catch {
-    Write-Host "[WARN] Could not test symlinks. Verify manually with: git alias" -ForegroundColor Yellow
-}
-
