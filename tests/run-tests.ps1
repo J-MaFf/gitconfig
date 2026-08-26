@@ -83,11 +83,16 @@ else {
     Write-Host "Running on non-Windows platform. Windows-specific tests will be skipped." -ForegroundColor Yellow
 }
 
-# Build Pester configuration using Pester 5 Configuration object
+# Build Pester configuration using Pester 5 Configuration object.
+# Run.PassThru is always $true here regardless of the -PassThru switch: the
+# exit-code check below needs the results object no matter what, or
+# $results is $null and `$results.FailedCount -gt 0` silently evaluates to
+# $false - every run "succeeds" even with real failures. -PassThru only
+# controls whether $results is returned to the caller (see bottom of file).
 $pesterConfig = @{
     Run          = @{
         Path     = $Path
-        PassThru = $PassThru
+        PassThru = $true
     }
     Output       = @{
         Verbosity = 'Detailed'
