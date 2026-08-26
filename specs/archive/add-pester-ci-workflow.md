@@ -2,7 +2,14 @@
 
 > **Completed 2026-08-26.** Built via the forge generator/evaluator loop; all 9 acceptance
 > criteria (C1-C9, C-final) passed on round 1. Shipped in
-> [PR #222](https://github.com/J-MaFf/gitconfig/pull/222) (`Fixes #221`).
+> [PR #222](https://github.com/J-MaFf/gitconfig/pull/222) (`Fixes #221`). The workflow's own
+> first real trigger on `GH-RUNNER-FLAUI` then exposed a real, pre-existing bug this spec's
+> criteria didn't catch: `tests/run-tests.ps1` always exited 0 regardless of test results when
+> called without `-PassThru` (its own primary documented usage) — `Invoke-Pester`'s
+> `Run.PassThru` config was wired to the script's own `-PassThru` switch instead of always
+> being requested internally, so the exit-code check silently no-op'd. Fixed in the same PR
+> and re-verified on the real runner (same 61 pre-existing failures now correctly produce a
+> failed job instead of a false "success").
 
 ## Goal
 
