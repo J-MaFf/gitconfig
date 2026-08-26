@@ -1,7 +1,8 @@
 # Spec: CI workflow to run the Pester suite on the self-hosted Windows runner
 
 > **Completed 2026-08-26.** Built via the forge generator/evaluator loop; all 9 acceptance
-> criteria (C1-C9, C-final) passed on round 1. Shipped in PR #TBD (`Fixes #221`).
+> criteria (C1-C9, C-final) passed on round 1. Shipped in
+> [PR #222](https://github.com/J-MaFf/gitconfig/pull/222) (`Fixes #221`).
 
 ## Goal
 
