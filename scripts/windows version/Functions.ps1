@@ -362,10 +362,26 @@ function Get-DroppedGitConfigKeys {
     finally {
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
     }
+    # A key missing from the new content is dropped. For a multi-valued key
+    # (safe.directory, credential helpers) a missing exact value is dropped too.
+    # A single-valued key the template simply changes is not reported.
     $newSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
-    foreach ($line in $new) { [void]$newSet.Add($line) }
+    $newCount = @{}
+    $oldCount = @{}
+    foreach ($line in $new) {
+        [void]$newSet.Add($line)
+        $k = ($line -split '=', 2)[0]
+        $newCount[$k] = 1 + [int]$newCount[$k]
+    }
+    foreach ($line in $old) {
+        $k = ($line -split '=', 2)[0]
+        $oldCount[$k] = 1 + [int]$oldCount[$k]
+    }
     $dropped = foreach ($line in $old) {
-        if (-not $newSet.Contains($line)) { ($line -split '=', 2)[0] }
+        $k = ($line -split '=', 2)[0]
+        if (-not $newCount.ContainsKey($k)) { $k; continue }
+        $multi = ($oldCount[$k] -gt 1) -or ($newCount[$k] -gt 1)
+        if ($multi -and -not $newSet.Contains($line)) { $k }
     }
     return @($dropped | Sort-Object -Unique)
 }

@@ -357,6 +357,23 @@ backups_of() {
     [[ "$output" != *"user.name"* ]]
 }
 
+@test "generate_gitconfig doesn't flag a value the template changed, but does flag a lost multi-value" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo"
+    printf '[alias]\n\tst = status\n[safe]\n\tdirectory = /a\n' > "$repo/.gitconfig.template"
+    printf '[alias]\n\tst = status -sb\n[safe]\n\tdirectory = /a\n' > "$HOME_DIR/.gitconfig"
+    run generate_gitconfig "$repo" "$HOME_DIR" true
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"[WARN]"* ]]
+
+    printf '[alias]\n\tst = status\n[safe]\n\tdirectory = /a\n\tdirectory = /b\n' > "$HOME_DIR/.gitconfig"
+    run generate_gitconfig "$repo" "$HOME_DIR" true
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[WARN]"* ]]
+    [[ "$output" == *"safe.directory"* ]]
+    [[ "$output" != *"alias.st"* ]]
+}
+
 @test "generate_gitconfig replaces a ~/.gitconfig symlink into the repo instead of writing through it" {
     local repo="$TESTDIR/repo"
     mkdir -p "$repo"

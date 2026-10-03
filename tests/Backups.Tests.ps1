@@ -175,6 +175,15 @@ Describe "Backup helpers (Functions.ps1)" -Tag 'Unit' {
         ($dropped -join ' ') | Should -Not -Match "secret-helper-value"
         @(Get-DroppedGitConfigKeys -ExistingPath $existing -NewContent (Get-Content -LiteralPath $existing -Raw)).Count | Should -Be 0
     }
+
+    It "Get-DroppedGitConfigKeys ignores a template-changed single value but reports a lost multi-value" {
+        $existing = Join-Path $script:dir ".gitconfig"
+        Set-Content -LiteralPath $existing -Value "[alias]`n`tst = status -sb`n[safe]`n`tdirectory = /a`n`tdirectory = /b"
+        $dropped = @(Get-DroppedGitConfigKeys -ExistingPath $existing -NewContent "[alias]`n`tst = status`n[safe]`n`tdirectory = /a`n")
+        $dropped | Should -Not -Contain "alias.st"
+        $dropped | Should -Contain "safe.directory"
+        @(Get-DroppedGitConfigKeys -ExistingPath $existing -NewContent "[alias]`n`tst = status`n[safe]`n`tdirectory = /a`n`tdirectory = /b`n").Count | Should -Be 0
+    }
 }
 
 Describe "Initialize-GitConfig.ps1 backups and dropped-setting warning" -Tag 'Unit' {

@@ -84,25 +84,32 @@ generate_gitconfig() {
     echo ""
 }
 
-# Warn about settings in EXISTING_PATH that the rendered template doesn't have
+# Warn about settings in EXISTING_PATH that regenerating ~/.gitconfig drops
 # (e.g. ones `gh auth setup-git`, `git lfs install` or `git config --global`
-# wrote), because regenerating ~/.gitconfig drops them. Only key names are
-# printed, never values; the backup taken right after keeps the values.
+# wrote). A setting counts as dropped when its key is missing from the new
+# content, or, for a multi-valued key such as safe.directory, when that exact
+# value is missing. A single-valued key the template simply changes (an alias
+# edited upstream) is not reported. Only key names are printed, never values;
+# the backup taken right after keeps the values.
 # Usage: warn_dropped_gitconfig_keys EXISTING_PATH NEW_CONTENT
 warn_dropped_gitconfig_keys() {
-    local existing="$1" new_content="$2" tmp old_list new_list dropped
+    local existing="$1" new_content="$2" tmp dropped
     command -v git >/dev/null 2>&1 || return 0
-    tmp="$(mktemp "${TMPDIR:-/tmp}/gitconfig-new.XXXXXX")" || return 0
-    printf '%s\n' "$new_content" > "$tmp"
-    old_list="$(git config --file "$existing" --list 2>/dev/null)"
-    new_list="$(git config --file "$tmp" --list 2>/dev/null)"
-    rm -f "$tmp"
-    [ -n "$old_list" ] || return 0
-    dropped="$(printf '%s\n' "$old_list" | while IFS= read -r line; do
-        if ! printf '%s\n' "$new_list" | grep -Fqx -- "$line"; then
-            printf '%s\n' "${line%%=*}"
-        fi
-    done | LC_ALL=C sort -u)"
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/gitconfig-keys.XXXXXX")" || return 0
+    printf '%s\n' "$new_content" > "$tmp/new.cfg"
+    git config --file "$tmp/new.cfg" --list > "$tmp/new.list" 2>/dev/null
+    git config --file "$existing" --list > "$tmp/old.list" 2>/dev/null
+    dropped="$(awk '
+        FILENAME == ARGV[1] { k = $0; sub(/=.*/, "", k); have[$0] = 1; newn[k]++; next }
+        { k = $0; sub(/=.*/, "", k); oldn[k]++; line[++n] = $0; key[n] = k }
+        END {
+            for (i = 1; i <= n; i++) {
+                k = key[i]
+                if (!(k in newn)) { print k; continue }
+                if ((oldn[k] > 1 || newn[k] > 1) && !(line[i] in have)) print k
+            }
+        }' "$tmp/new.list" "$tmp/old.list" | LC_ALL=C sort -u)"
+    rm -rf "$tmp"
     [ -n "$dropped" ] || return 0
     echo "[WARN] ~/.gitconfig has settings the template doesn't; regenerating drops them:"
     printf '%s\n' "$dropped" | sed 's/^/         /'
