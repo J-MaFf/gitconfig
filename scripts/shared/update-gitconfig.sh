@@ -81,6 +81,12 @@ mkdir -p "$(dirname "$LOG_FILE")"
             [[ "$line" == \** ]] && continue
             # Only delete branches whose upstream remote is gone.
             [[ "$line" == *": gone]"* ]] || continue
+            # Skip branches checked out in another worktree (leading '+');
+            # git refuses to delete them until the worktree is removed.
+            if [[ "$line" == +* ]]; then
+                log_message "Skipped merged branch checked out in a worktree: $(awk '{print $2}' <<< "$line")"
+                continue
+            fi
             GONE_BRANCH=$(awk '{print $1}' <<< "$line")
             DELETE_RESULT=$(git branch -D "$GONE_BRANCH" 2>&1)
             if [ $? -eq 0 ]; then

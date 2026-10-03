@@ -88,6 +88,12 @@ try {
             if ($line -match '^\*') { continue }
             # Only delete branches whose upstream remote is gone.
             if ($line -notmatch ': gone\]') { continue }
+            # Skip branches checked out in another worktree (leading '+');
+            # git refuses to delete them until the worktree is removed.
+            if ($line -match '^\+\s+(\S+)') {
+                Write-Log "Skipped merged branch checked out in a worktree: $($Matches[1])"
+                continue
+            }
             $goneBranch = ($line.Trim() -split '\s+')[0]
             $deleteResult = git branch -D $goneBranch 2>&1
             if ($LASTEXITCODE -eq 0) {

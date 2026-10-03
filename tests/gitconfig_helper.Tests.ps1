@@ -182,6 +182,24 @@ import gitconfig_helper
             $branches | Should -Not -Contain "local-only"
         }
 
+        It "Should skip gone branches checked out in another worktree" {
+            # `git branch -vv` marks such branches with a leading '+'; cleanup must
+            # not misread '+' as the branch name or try to delete the branch.
+            & git branch wt-gone 2>&1 | Out-Null
+            & git push -u origin wt-gone 2>&1 | Out-Null
+            & git push origin --delete wt-gone 2>&1 | Out-Null
+            & git fetch -p 2>&1 | Out-Null
+            & git worktree add (Join-Path $script:cleanupParent "wt") wt-gone 2>&1 | Out-Null
+
+            $result = & $script:python $script:helperScript cleanup 2>&1
+            ($result -join "`n") | Should -Not -Match "Failed to delete branch '\+'"
+            ($result -join "`n") | Should -Match "wt-gone"
+
+            $branches = & git branch --format='%(refname:short)'
+            $branches | Should -Not -Contain "feature-gone"
+            $branches | Should -Contain "wt-gone"
+        }
+
         It "Should handle non-git directory gracefully" {
             $origDir = Get-Location
             try {
