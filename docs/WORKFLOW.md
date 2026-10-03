@@ -110,19 +110,25 @@ Creating local tracking branches...
 
 **Modes**:
 
-**1. Default mode** - Delete branches with deleted remotes (merged branches)
+**1. Default mode** - Delete branches whose remote branch is gone
 
 ```bash
 git cleanup
 ```
 
-Deletes local branches whose remote tracking branches have been deleted. This is safe because:
+Switches to the default branch (read from `origin/HEAD`), runs `git fetch --prune`,
+fast-forwards the default branch, then deletes each local branch whose upstream
+is marked `[gone]` (its remote branch was deleted, usually by merging the PR).
+Branch state comes from `git for-each-ref`, so a commit message that happens to
+contain ": gone]" can't get a live branch deleted, and a branch tracking another
+remote (say a fork's `upstream`) is left alone.
 
-- Remote branch was already deleted (likely merged)
-- Local branch is no longer being tracked
-- Deletion won't lose work already in the repository
+Each deletion tries `git branch -d` first, which only succeeds when the branch is
+merged into the default branch. A squash-merged PR branch never is, so a branch
+whose remote is gone falls back to `git branch -D`. The summary table marks which
+branches needed `-D` and shows every deleted branch's tip commit.
 
-**2. Force mode** - Also delete local-only branches
+**2. Force mode** - Also delete merged local-only branches
 
 ```bash
 git cleanup --force
@@ -130,48 +136,42 @@ git cleanup --force
 git cleanup -f
 ```
 
-Additionally deletes branches that never had a remote (local-only branches). Use with caution when:
-
-- You're sure the branch is no longer needed
-- Work has been merged or saved elsewhere
-- You want aggressive cleanup of abandoned branches
+Also deletes branches that never had a remote (local-only branches), but only
+with `git branch -d`: a local-only branch holding commits that aren't in the
+default branch is kept and listed with its tip, so delete it yourself with
+`git branch -D <name>` once you're sure.
 
 **When to use**:
 
 - **After merging PRs**: Remote branches get deleted, local cleanup keeps things tidy
 - **End of sprint**: Clean up temporary feature/bugfix branches
 - **Repository maintenance**: Regular cleanup prevents branch clutter
-- **Before pushing changes**: Ensure local state matches intent
 
-**Example workflow**:
+**Example**:
 
-```bash
-# Merge PR, remote branch gets deleted
-# Local tracking branch still exists
-
-# Clean up merged branches
-git cleanup
-
-# Output shows what was deleted
-Deleting branches with deleted remotes:
-✓ Deleted: feature/user-auth (was tracking origin/feature/user-auth)
-✓ Deleted: bugfix/login (was tracking origin/bugfix/login)
-
-# If you want aggressive cleanup too
-git cleanup --force
-
-# Output shows additional deletions
-Also deleting local-only branches:
-✓ Deleted: experimental (never had remote)
-✓ Deleted: old-feature (never had remote)
+```text
+$ git cleanup
+Switching from 'feat/new-thing' to 'main'...
+Running git cleanup...
+Fast-forwarding main...
+                         Deleted Branches
+| Branch Name       | Tip     | How                                    |
+| fix/login         | 3f9c2a1 | merged (-d)                            |
+| feat/user-auth    | 8b07d4e | remote gone, not merged into main (-D) |
+[OK] Successfully deleted 2 branch(es) (restore one with: git branch <name> <tip>)
 ```
 
 **Safety features**:
 
-- Won't delete your current branch
-- Shows what will be deleted before proceeding
-- Requires confirmation in interactive mode
-- Skips branches with unpushed commits (unless forced)
+- Never deletes the current branch or the default branch
+- Only branches whose remote is gone are ever deleted with `-D`
+- Branches checked out in another worktree are skipped and listed
+- Every deleted branch's tip is printed, so `git branch <name> <tip>` restores it
+- Exits non-zero if the fetch or any deletion fails, so scripts can tell
+
+The login-time updaters (`update-gitconfig.sh`, `Update-GitConfig.ps1`) prune the
+gitconfig repo itself the same way and write each deleted tip to
+`docs/update-gitconfig.log`.
 
 ---
 
@@ -579,23 +579,23 @@ git branch -a
 **Prevention**:
 
 ```bash
-# Always check what cleanup will delete first
+# Branches marked [gone] are the ones cleanup deletes
 git branch -vv
 
-# Only use --force if you understand the consequences
-git cleanup        # Safe - only removes already-merged branches
-git cleanup --force  # Aggressive - removes all stale branches
+git cleanup          # Deletes branches whose remote is gone
+git cleanup --force  # Also deletes local-only branches already merged into main
 ```
 
-**Recovery** (if recently deleted):
+**Recovery**: `git cleanup` prints each deleted branch's tip commit (the `Tip`
+column), and the login-time updaters log it to `docs/update-gitconfig.log`
+("was <sha>"). Recreate the branch from it:
 
 ```bash
-# Check reflog for deleted branch
-git reflog
-
-# Restore deleted branch (if still in reflog)
-git checkout -b feature/recovered-branch {commit-hash}
+git branch feature/recovered-branch <tip>
 ```
+
+If the output is gone, find the commit in the reflog of a branch that had it
+checked out, e.g. `git reflog` (HEAD's history).
 
 ---
 

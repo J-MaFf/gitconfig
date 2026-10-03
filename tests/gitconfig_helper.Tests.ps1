@@ -182,9 +182,71 @@ import gitconfig_helper
             $branches | Should -Not -Contain "local-only"
         }
 
+        It "Should exit 0 and keep a live branch whose commit subject contains ': gone]'" {
+            # The old `git branch -vv` scrape matched ": gone]" anywhere in the
+            # line, including the last commit subject, and deleted this branch.
+            & git checkout -b feature-trap 2>&1 | Out-Null
+            New-Item -Path "trap.txt" -Value "t" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "docs: gone] marks a deleted upstream" 2>&1 | Out-Null
+            & git push -u origin feature-trap 2>&1 | Out-Null
+            & git checkout main 2>&1 | Out-Null
+
+            & $script:python $script:helperScript cleanup 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 0
+
+            $branches = & git branch --format='%(refname:short)'
+            $branches | Should -Contain "feature-trap"
+            $branches | Should -Not -Contain "feature-gone"
+        }
+
+        It "Should force-delete an unmerged gone branch and print its tip" {
+            # A squash-merged PR branch: its commit never reaches main as-is, so
+            # -d refuses and -D (allowed only because the remote is gone) is used.
+            & git checkout -b feature-squashed 2>&1 | Out-Null
+            New-Item -Path "sq.txt" -Value "s" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "squashed work" 2>&1 | Out-Null
+            $tip = & git rev-parse --short HEAD
+            & git push -u origin feature-squashed 2>&1 | Out-Null
+            & git push origin --delete feature-squashed 2>&1 | Out-Null
+            & git checkout main 2>&1 | Out-Null
+
+            $result = & $script:python $script:helperScript cleanup 2>&1
+            $LASTEXITCODE | Should -Be 0
+            ($result -join "`n") | Should -Match $tip
+
+            $branches = & git branch --format='%(refname:short)'
+            $branches | Should -Not -Contain "feature-squashed"
+        }
+
+        It "Should keep an unmerged local-only branch under --force" {
+            & git checkout -b local-work 2>&1 | Out-Null
+            New-Item -Path "lw.txt" -Value "l" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "unpushed work" 2>&1 | Out-Null
+            & git checkout main 2>&1 | Out-Null
+
+            $result = & $script:python $script:helperScript cleanup --force 2>&1
+            $LASTEXITCODE | Should -Be 0
+            ($result -join "`n") | Should -Match "local-work"
+
+            $branches = & git branch --format='%(refname:short)'
+            $branches | Should -Contain "local-work"
+            $branches | Should -Not -Contain "local-only"
+        }
+
+        It "Should exit 1 when a branch cannot be deleted" {
+            # A stale ref lock makes both `git branch -d` and `-D` fail.
+            New-Item -ItemType File -Path ".git/refs/heads/feature-gone.lock" -Force | Out-Null
+            & $script:python $script:helperScript cleanup 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 1
+            Remove-Item ".git/refs/heads/feature-gone.lock" -Force
+        }
+
         It "Should skip gone branches checked out in another worktree" {
-            # `git branch -vv` marks such branches with a leading '+'; cleanup must
-            # not misread '+' as the branch name or try to delete the branch.
+            # Cleanup must report such a branch instead of trying (and failing)
+            # to delete it while a worktree still has it checked out.
             & git branch wt-gone 2>&1 | Out-Null
             & git push -u origin wt-gone 2>&1 | Out-Null
             & git push origin --delete wt-gone 2>&1 | Out-Null
@@ -391,6 +453,16 @@ import gitconfig_helper
             # Should display error message
             $output = $result -join "`n"
             ($output -match "not found" -or $output -match "Error") | Should -Be $true
+            # Usage error: exit 2, message on stderr only.
+            $LASTEXITCODE | Should -Be 2
+            $stdout = & $script:python $helperScript nonexistent_function 2>$null
+            $stdout | Should -BeNullOrEmpty
+        }
+
+        It "Should reject an unknown flag to issues with exit code 2" {
+            $result = & $script:python $helperScript issues --lable bug 2>&1
+            $LASTEXITCODE | Should -Be 2
+            ($result -join "`n") | Should -Match "Unknown argument: --lable"
         }
 
         It "Should handle no function name provided" {
@@ -398,6 +470,7 @@ import gitconfig_helper
             # Should display error or usage message
             $output = $result -join "`n"
             $output | Should -Not -BeNullOrEmpty
+            $LASTEXITCODE | Should -Be 2
         }
 
         It "Should handle rich library auto-installation" {
@@ -509,11 +582,45 @@ import gitconfig_helper
             Remove-Item $bareRepo -Recurse -Force -ErrorAction SilentlyContinue
         }
 
-        It "Should detect merge conflicts after pull" {
-            # This is difficult to test without a real remote repo
-            # We verify the code structure instead
-            $scriptContent = Get-Content $script:helperScript -Raw
-            ($scriptContent -match "merge.*conflict" -or $scriptContent -match "UU.*AA.*DD") | Should -Be $true
+        It "Should refuse to merge a diverged main (fast-forward only)" {
+            $bareRepo = New-Item -ItemType Directory -Path (Join-Path $script:tempRoot "bare_$(Get-Random)") -Force -ErrorAction Stop
+            & git init --bare $bareRepo 2>&1 | Out-Null
+            & git config commit.gpgsign false 2>&1 | Out-Null
+            New-Item -Path "test.txt" -Value "test" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "Initial commit" 2>&1 | Out-Null
+            & git branch -M main 2>&1 | Out-Null
+            & git remote add origin $bareRepo 2>&1 | Out-Null
+            & git push -u origin main 2>&1 | Out-Null
+
+            # The remote gains a commit from another clone...
+            $other = Join-Path $script:tempRoot "other_$(Get-Random)"
+            & git clone $bareRepo $other 2>&1 | Out-Null
+            & git -C $other config user.email "test@example.com" 2>&1 | Out-Null
+            & git -C $other config user.name "Test User" 2>&1 | Out-Null
+            & git -C $other config commit.gpgsign false 2>&1 | Out-Null
+            New-Item -Path (Join-Path $other "remote.txt") -Value "r" -Force | Out-Null
+            & git -C $other add . 2>&1 | Out-Null
+            & git -C $other commit -m "remote work" 2>&1 | Out-Null
+            & git -C $other push origin main 2>&1 | Out-Null
+
+            # ...while local main gains a different one.
+            New-Item -Path "local.txt" -Value "l" -Force | Out-Null
+            & git add . 2>&1 | Out-Null
+            & git commit -m "local work" 2>&1 | Out-Null
+            $before = & git rev-parse HEAD
+
+            $result = & $script:python $script:helperScript switch_to_main 2>&1
+            $code = $LASTEXITCODE
+            $output = $result -join "`n"
+
+            $code | Should -Be 1
+            $output | Should -Match "Could not fast-forward main"
+            $output | Should -Match "can't be fast-forwarded"
+            # No merge commit was created.
+            (& git rev-parse HEAD) | Should -Be $before
+
+            Remove-Item $bareRepo, $other -Recurse -Force -ErrorAction SilentlyContinue
         }
 
         It "Should provide clear error messages for each failure scenario" {
@@ -521,7 +628,7 @@ import gitconfig_helper
 
             # Verify error messages exist for key scenarios
             ($scriptContent -match "Fetching updates" -and $scriptContent -match "Switching from") | Should -Be $true
-            ($scriptContent -match "Uncommitted changes detected" -and $scriptContent -match "Merge conflict detected") | Should -Be $true
+            ($scriptContent -match "Uncommitted changes detected" -and $scriptContent -match "Could not fast-forward") | Should -Be $true
         }
 
         It "Should use Rich console output for formatting" {

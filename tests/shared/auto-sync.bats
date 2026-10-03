@@ -46,6 +46,9 @@ _make_clone() {
     mkdir -p "$SANDBOX/clone/scripts/shared"
     cp "$REPO_ROOT/scripts/shared/update-gitconfig.sh" "$REPO_ROOT/scripts/shared/functions.sh" \
         "$SANDBOX/clone/scripts/shared/"
+    # The updater exits 1 when it can't converge ~/.gitconfig, so the clone
+    # needs the template it renders.
+    cp "$REPO_ROOT/.gitconfig.template" "$SANDBOX/clone/"
     printf 'docs/update-gitconfig.log\n' > "$SANDBOX/clone/.gitignore"
     _git -C "$SANDBOX/clone" add -A
     _git -C "$SANDBOX/clone" commit -q -m "initial"

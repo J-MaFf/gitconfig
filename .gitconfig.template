@@ -24,8 +24,9 @@
 	# Download all remote branches creating local counterparts
 	branches = "!git fetch && git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -v -e '^origin/HEAD$' -e '^origin$' | while read ref; do git branch --track \"${ref#origin/}\" \"$ref\" 2>/dev/null || true; done"
 	cleanup = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
-	# Switch to main with error handling: fetch, check for uncommitted changes,
-	# checkout main, and pull. Detects and reports merge conflicts.
+	# Switch to the default branch (origin/HEAD) with error handling: fetch, check
+	# for uncommitted changes, checkout, fast-forward only (a diverged branch is
+	# reported, never merged), then clean up branches whose remote is gone.
 	# Pass --all (or -a) to run this for every git repo in immediate subdirectories
 	# of the Scripts root (the parent of this repo), regardless of where it runs.
 	main = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"

@@ -408,9 +408,33 @@ Describe "Update-GitConfig.ps1" {
                 git commit -m "Feature live" 2>&1 | Out-Null
                 git push -u origin feature-live 2>&1 | Out-Null
 
-                # Back on main; delete feature-gone on the remote.
+                # feature-trap: live branch whose commit subject contains
+                # ": gone]". The old `git branch -vv` text match deleted it.
                 git checkout main 2>&1 | Out-Null
+                git checkout -b feature-trap 2>&1 | Out-Null
+                "Trap" | Out-File -FilePath "trap.txt" -Encoding utf8
+                git add .
+                git commit -m "docs: gone] is how git marks a deleted upstream" 2>&1 | Out-Null
+                git push -u origin feature-trap 2>&1 | Out-Null
+
+                # feature-merged: merged into main (fast-forward), then its remote
+                # branch deleted. `git branch -d` handles it; no -D needed.
+                git checkout main 2>&1 | Out-Null
+                git checkout -b feature-merged 2>&1 | Out-Null
+                "Merged" | Out-File -FilePath "merged.txt" -Encoding utf8
+                git add .
+                git commit -m "Feature merged" 2>&1 | Out-Null
+                git push -u origin feature-merged 2>&1 | Out-Null
+                git checkout main 2>&1 | Out-Null
+                git merge --ff-only feature-merged 2>&1 | Out-Null
+                git push origin main 2>&1 | Out-Null
+
+                # Back on main; delete feature-gone and feature-merged on the remote.
                 git push origin --delete feature-gone 2>&1 | Out-Null
+                git push origin --delete feature-merged 2>&1 | Out-Null
+
+                $script:goneTip = git rev-parse --short feature-gone
+                $script:mergedTip = git rev-parse --short feature-merged
             }
             finally {
                 Pop-Location
@@ -469,9 +493,74 @@ Describe "Update-GitConfig.ps1" {
             # Read log content
             $logContent = Get-Content $script:logFile -Raw
 
-            # Verify the gone branch was logged as deleted, the live one was not
-            $logContent | Should -Match "Deleted merged branch: feature-gone"
-            $logContent | Should -Not -Match "Deleted merged branch: feature-live"
+            # The gone branch carries a commit main lacks (as a squash-merged PR
+            # branch does), so -d refuses and -D removes it. Its tip is logged
+            # with a restore command; the live one is never mentioned.
+            $logContent | Should -Match ([regex]::Escape("Deleted gone branch with commits not in HEAD (-D): feature-gone (was $script:goneTip; restore with: git branch feature-gone $script:goneTip)"))
+            $logContent | Should -Not -Match "feature-live"
+        }
+
+        It "Should delete a merged gone branch with -d and log its tip" {
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            Push-Location $script:testRepo
+            $branches = git branch --format='%(refname:short)'
+            Pop-Location
+            $branches | Should -Not -Contain "feature-merged"
+
+            $logContent = Get-Content $script:logFile -Raw
+            $logContent | Should -Match ([regex]::Escape("Deleted merged branch: feature-merged (was $script:mergedTip)"))
+        }
+
+        It "Should keep a live branch whose commit subject contains ': gone]'" {
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            Push-Location $script:testRepo
+            $branches = git branch --format='%(refname:short)'
+            Pop-Location
+            $branches | Should -Contain "feature-trap"
+
+            $logContent = Get-Content $script:logFile -Raw
+            $logContent | Should -Not -Match "feature-trap"
+        }
+
+        It "Should skip a gone branch checked out in another worktree" {
+            $wtPath = Join-Path $TestDrive ("wt-" + [guid]::NewGuid().ToString("N"))
+            Push-Location $script:testRepo
+            git worktree add $wtPath feature-gone 2>&1 | Out-Null
+            Pop-Location
+
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+            $code = $LASTEXITCODE
+
+            Push-Location $script:testRepo
+            $branches = git branch --format='%(refname:short)'
+            git worktree remove --force $wtPath 2>&1 | Out-Null
+            Pop-Location
+            $branches | Should -Contain "feature-gone"
+
+            $logContent = Get-Content $script:logFile -Raw
+            $logContent | Should -Match "Skipped merged branch checked out in a worktree: feature-gone"
+            $code | Should -Be 0
+        }
+
+        It "Should exit 0 when every branch is handled" {
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 0
+        }
+
+        It "Should exit 1 and log a warning when a branch cannot be deleted" {
+            # A stale ref lock makes both `git branch -d` and `-D` fail.
+            $lock = Join-Path $script:testRepo ".git/refs/heads/feature-gone.lock"
+            New-Item -ItemType File -Path $lock -Force | Out-Null
+
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+            $code = $LASTEXITCODE
+            Remove-Item $lock -Force
+
+            $code | Should -Be 1
+            $logContent = Get-Content $script:logFile -Raw
+            $logContent | Should -Match "WARNING: Failed to delete branch: feature-gone"
         }
 
         It "Should log successful prune" {
@@ -672,6 +761,7 @@ Describe "Update-GitConfig.ps1" {
 
             # Run script
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+            $LASTEXITCODE | Should -Be 0
 
             # Verify final state
             Push-Location $script:testRepo
@@ -695,7 +785,8 @@ Describe "Update-GitConfig.ps1" {
             $logContent | Should -Match "SUCCESS: ~/.gitconfig converged to template"
             $logContent | Should -Match "Pruning merged branches"
             $logContent | Should -Match "SUCCESS: git fetch --prune completed"
-            $logContent | Should -Match "Deleted merged branch: merged-feature"
+            # merged-feature has a commit main lacks, so it goes via -D.
+            $logContent | Should -Match "Deleted gone branch with commits not in HEAD \(-D\): merged-feature \(was [0-9a-f]+; restore with: git branch merged-feature [0-9a-f]+\)"
             $logContent | Should -Match "SUCCESS: Merged branches pruned"
             $logContent | Should -Match "Repository synchronization process completed"
         }

@@ -33,6 +33,8 @@ if [ ! -d "$REPO_PATH" ]; then
     exit 1
 fi
 
+EXIT_CODE=0
+
 mkdir -p "$(dirname "$LOG_FILE")"
 
 {
@@ -79,6 +81,7 @@ mkdir -p "$(dirname "$LOG_FILE")"
         log_message "SUCCESS: ~/.gitconfig converged to template"
     else
         log_message "ERROR: could not converge ~/.gitconfig from template"
+        EXIT_CODE=1
     fi
 
     # Ensure the declared Python deps are present (rich required; textual optional,
@@ -89,35 +92,45 @@ mkdir -p "$(dirname "$LOG_FILE")"
     install_python_deps "$REPO_PATH"
 
     # Prune merged branches: drop stale remote-tracking refs, then delete local
-    # branches whose upstream remote has been deleted (": gone]"). Mirrors the
-    # `git cleanup` alias. We don't recreate local branches for every remote here;
-    # the on-demand `git branches` alias covers that when wanted.
+    # branches whose upstream remote has been deleted. Mirrors the `git cleanup`
+    # alias. We don't recreate local branches for every remote here; the
+    # on-demand `git branches` alias covers that when wanted.
+    #
+    # Branch state comes from `git for-each-ref`, not `git branch -vv`: that
+    # text includes each branch's last commit subject, so a subject containing
+    # ": gone]" used to get a live branch deleted. Fields are separated by the
+    # ASCII unit separator (0x1f), which never appears in a ref name and, unlike
+    # a tab, isn't IFS whitespace, so empty fields survive `read`.
     log_message "Pruning merged branches..."
-    FETCH_RESULT=$(git fetch --prune 2>&1)
-    if [ $? -eq 0 ]; then
+    if FETCH_RESULT=$(git fetch --prune 2>&1); then
         log_message "SUCCESS: git fetch --prune completed"
-        while IFS= read -r line; do
-            # Skip the current branch (marked with a leading '*').
-            [[ "$line" == \** ]] && continue
+        while IFS=$'\x1f' read -r BRANCH IS_HEAD TRACK WORKTREE TIP; do
+            # Skip the current branch.
+            [ "$IS_HEAD" = "*" ] && continue
             # Only delete branches whose upstream remote is gone.
-            [[ "$line" == *": gone]"* ]] || continue
-            # Skip branches checked out in another worktree (leading '+');
-            # git refuses to delete them until the worktree is removed.
-            if [[ "$line" == +* ]]; then
-                log_message "Skipped merged branch checked out in a worktree: $(awk '{print $2}' <<< "$line")"
+            [ "$TRACK" = "[gone]" ] || continue
+            # Skip branches checked out in another worktree; git refuses to
+            # delete them until the worktree is removed.
+            if [ -n "$WORKTREE" ]; then
+                log_message "Skipped merged branch checked out in a worktree: $BRANCH"
                 continue
             fi
-            GONE_BRANCH=$(awk '{print $1}' <<< "$line")
-            DELETE_RESULT=$(git branch -D "$GONE_BRANCH" 2>&1)
-            if [ $? -eq 0 ]; then
-                log_message "Deleted merged branch: $GONE_BRANCH"
+            # -d first: it succeeds when the branch is merged into HEAD. A
+            # squash-merged PR branch never is, so fall back to -D for a gone
+            # branch, and log its tip so it can be restored.
+            if git branch -d "$BRANCH" >/dev/null 2>&1; then
+                log_message "Deleted merged branch: $BRANCH (was $TIP)"
+            elif DELETE_RESULT=$(git branch -D "$BRANCH" 2>&1); then
+                log_message "Deleted gone branch with commits not in HEAD (-D): $BRANCH (was $TIP; restore with: git branch $BRANCH $TIP)"
             else
-                log_message "WARNING: Failed to delete branch: $GONE_BRANCH"
+                log_message "WARNING: Failed to delete branch: $BRANCH"
                 log_message "Output: $DELETE_RESULT"
+                EXIT_CODE=1
             fi
-        done < <(git branch -vv)
+        done < <(git for-each-ref --format='%(refname:short)%1f%(HEAD)%1f%(upstream:track)%1f%(worktreepath)%1f%(objectname:short)' refs/heads/)
         log_message "SUCCESS: Merged branches pruned"
     else
+        # Offline at login is routine: warn, but don't fail the run for it.
         log_message "WARN: git fetch --prune failed (offline?); skipping prune"
         log_message "Output: $FETCH_RESULT"
     fi
@@ -126,4 +139,7 @@ mkdir -p "$(dirname "$LOG_FILE")"
 
 } >> "$LOG_FILE" 2>&1
 
-exit $?
+# The block above is a brace group, not a subshell, so EXIT_CODE set inside it
+# is visible here. Non-zero when ~/.gitconfig could not be converged or a
+# branch could not be deleted; a failed pull or fetch (offline) is only a WARN.
+exit "$EXIT_CODE"
