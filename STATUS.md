@@ -65,5 +65,5 @@ None.
 ## Prerequisites to Run
 
 - **Windows:** Git for Windows, PowerShell 7+, Python 3 (PyManager or python.org); run `scripts/windows version/install.ps1` (elevates for symlinks + scheduled task).
-- **Tests:** Pester 5+; `tests/run-tests.ps1` (add `-IncludeIntegration` only on a throwaway machine/VM).
+- **Tests:** Pester 5+; `tests/run-tests.ps1` (add `-IncludeIntegration` only on a throwaway machine/VM). bats-core + pytest for `tests/shared/`. CI (`.github/workflows/test.yml`) runs all of them on Windows (pwsh 7 and 5.1, plus the integration tests), Linux and macOS for every PR.
 - **Beads:** `bd` CLI; `bd bootstrap` on a fresh clone, then `bd dolt pull` / `bd dolt push` to sync.

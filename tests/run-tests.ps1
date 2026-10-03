@@ -84,10 +84,14 @@ else {
 }
 
 # Build Pester configuration using Pester 5 Configuration object
+# Run.PassThru is always on: Invoke-Pester -Configuration returns a result object
+# only when it is set, and the exit code below needs that object. Wiring it to the
+# caller's -PassThru switch left $results $null on a plain .\run-tests.ps1, so the
+# script exited 0 however many tests failed (and CI would always pass).
 $pesterConfig = @{
     Run          = @{
         Path     = $Path
-        PassThru = $PassThru
+        PassThru = $true
     }
     Output       = @{
         Verbosity = 'Detailed'
@@ -117,8 +121,13 @@ Write-Host ""
 $config = New-PesterConfiguration -Hashtable $pesterConfig
 $results = Invoke-Pester -Configuration $config
 
-# Exit with appropriate code
-if ($results.FailedCount -gt 0) {
+if ($PassThru) {
+    $results
+}
+
+# Exit with appropriate code. A $null result (Pester aborted before returning one)
+# counts as a failure rather than a pass.
+if (-not $results -or $results.FailedCount -gt 0 -or $results.Result -eq 'Failed') {
     exit 1
 }
 else {

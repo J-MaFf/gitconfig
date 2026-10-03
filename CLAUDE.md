@@ -39,7 +39,8 @@ This repo targets **macOS, Linux, and Windows** — it's a cross-platform dotfil
 ## Testing
 
 - Windows: Pester (`tests/run-tests.ps1`)
-- macOS/Linux: no formal test runner — validate manually or with bash assertions
+- macOS/Linux: bats and pytest suites in `tests/shared/` (see `tests/shared/README.md`)
+- CI: `.github/workflows/test.yml` runs, for every PR, Pester on `windows-latest` under pwsh 7 and Windows PowerShell 5.1 (plus an `-IncludeIntegration` run, safe on a throwaway runner), bats + pytest on `ubuntu-latest` and `macos-latest` (system bash 3.2), and PSScriptAnalyzer
 - Integration tests live in `tests/Integration.Tests.ps1` — these require a real machine or VM, not a mock environment
 
 
