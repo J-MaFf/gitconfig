@@ -16,7 +16,8 @@ USAGE:
     .\Initialize-Symlinks.ps1 [OPTIONS]
 
 OPTIONS:
-    -Force      Overwrite existing files without prompting
+    -Force      Replace existing files without prompting (each is first moved
+                to a timestamped backup, <file>.bak.yyyyMMdd-HHmmss)
     -Help       Display this help message
 
 DESCRIPTION:
@@ -58,6 +59,9 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot  = Split-Path -Parent (Split-Path -Parent $scriptDir)
 $homeDir = $env:USERPROFILE
 
+# Shared helpers: timestamped backups and symlink checks.
+. (Join-Path $scriptDir "Functions.ps1")
+
 Write-Host "Dotfiles Setup" -ForegroundColor Cyan
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host "Repository: $repoRoot" -ForegroundColor Green
@@ -79,16 +83,39 @@ function New-Symlink {
         [bool]$Force
     )
 
-    if (Test-Path $LinkPath) {
-        if (-not $Force) {
-            $response = Read-Host "'$LinkPath' already exists. Overwrite? (y/n)"
-            if ($response -ne "y") {
-                Write-Host "Skipped: $LinkPath" -ForegroundColor Yellow
+    # Already the right link: nothing to do.
+    if (Test-LinkPointsTo -Path $LinkPath -Target $TargetPath) {
+        Write-Host "[OK] Already linked: $LinkPath" -ForegroundColor Green
+        return $true
+    }
+
+    # Get-LinkAwareItem (not Test-Path) so a dangling symlink still counts.
+    if (Get-LinkAwareItem -Path $LinkPath) {
+        if (Test-LinkIntoDirectory -Path $LinkPath -Directory $repoRoot) {
+            # An old link of ours into the repo holds no user data: replace it
+            # without a backup.
+            Remove-Item -LiteralPath $LinkPath -Force
+        }
+        else {
+            if (-not $Force) {
+                $response = Read-Host "'$LinkPath' already exists. Overwrite? (y/n)"
+                if ($response -ne "y") {
+                    Write-Host "Skipped: $LinkPath" -ForegroundColor Yellow
+                    return $false
+                }
+            }
+            # A real file (or someone else's link): move it to a timestamped
+            # backup rather than deleting it.
+            try {
+                $backupPath = Backup-UserFile -Path $LinkPath -Move
+                Write-Host "[OK] Backed up existing $(Split-Path -Leaf $LinkPath) to $(Split-Path -Leaf $backupPath)" -ForegroundColor Yellow
+            }
+            catch {
+                Write-Host "[FAIL] Could not back up $LinkPath; leaving it in place" -ForegroundColor Red
+                Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
                 return $false
             }
         }
-        Remove-Item $LinkPath -Force | Out-Null
-        Write-Host "Removed existing: $LinkPath" -ForegroundColor Yellow
     }
 
     try {

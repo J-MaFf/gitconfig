@@ -47,6 +47,9 @@ if (-not $homeDir) {
 $templatePath = Join-Path $repoRoot ".gitconfig.template"
 $outputPath = Join-Path $homeDir ".gitconfig"
 
+# Shared helpers: timestamped backups and the dropped-settings check.
+. (Join-Path $scriptDir "Functions.ps1")
+
 Write-Host "Git Configuration Generator" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host "Repository: $repoRoot" -ForegroundColor Green
@@ -59,6 +62,15 @@ Write-Host ""
 if (-not (Test-Path $templatePath)) {
     Write-Host "[ERROR] Template not found: $templatePath" -ForegroundColor Red
     exit 1
+}
+
+# A ~/.gitconfig that is a symlink into this repo is a leftover from an old
+# install that linked it instead of generating it. Writing through it would
+# clobber a file inside the repo, and backing it up would only save a link, so
+# drop the link and write a real file in its place.
+if (Test-LinkIntoDirectory -Path $outputPath -Directory $repoRoot) {
+    Remove-Item -LiteralPath $outputPath -Force
+    Write-Host "[INFO] Replaced the old ~/.gitconfig symlink into the repo with a generated file" -ForegroundColor Yellow
 }
 
 # Check if .gitconfig already exists
@@ -96,11 +108,20 @@ try {
         }
     }
     
-    # Backup existing file if it exists
+    # Warn about settings the rewrite drops, then back up the existing file to a
+    # timestamped copy (older backups are kept, see Backup-UserFile).
     if (Test-Path $outputPath) {
-        $backupPath = "$outputPath.bak"
-        Copy-Item -Path $outputPath -Destination $backupPath -Force
-        Write-Host "[INFO] Backed up existing .gitconfig to .gitconfig.bak" -ForegroundColor Yellow
+        $dropped = @(Get-DroppedGitConfigKeys -ExistingPath $outputPath -NewContent $generatedContent)
+        if ($dropped.Count -gt 0) {
+            Write-Host "[WARN] ~/.gitconfig has settings the template doesn't; regenerating drops them:" -ForegroundColor Yellow
+            foreach ($key in $dropped) { Write-Host "         $key" -ForegroundColor Yellow }
+            Write-Host "       They are kept in the backup below. To keep a setting, put it in" -ForegroundColor Yellow
+            Write-Host "       ~/.gitconfig.local (git config --file ~/.gitconfig.local <key> <value>)." -ForegroundColor Yellow
+        }
+        $backupPath = Backup-UserFile -Path $outputPath
+        if ($backupPath) {
+            Write-Host "[INFO] Backed up existing .gitconfig to $(Split-Path -Leaf $backupPath)" -ForegroundColor Yellow
+        }
     }
     
     # Write generated config

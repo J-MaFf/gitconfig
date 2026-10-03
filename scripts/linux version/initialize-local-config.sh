@@ -40,6 +40,7 @@ USAGE:
 
 OPTIONS:
     -f, --force     Overwrite existing .gitconfig.local without prompting
+                    (the old file is kept as .gitconfig.local.bak.<timestamp>)
     -h, --help      Display this help message
 
 DESCRIPTION:
@@ -208,6 +209,12 @@ CONFIG_CONTENT+="
 	# directory = /path/to/trusted/repo
 	directory = $HOME_DIR/Documents/Scripts/gitconfig
 "
+
+# Keep a timestamped copy of the file we are about to replace, unless it
+# already holds exactly what we would write.
+if [ -f "$LOCAL_CONFIG_PATH" ] && [ "$(cat "$LOCAL_CONFIG_PATH")" != "$(printf '%s\n' "$CONFIG_CONTENT")" ]; then
+    backup_copy "$LOCAL_CONFIG_PATH"
+fi
 
 printf '%s\n' "$CONFIG_CONTENT" > "$LOCAL_CONFIG_PATH"
 echo "[OK] Created .gitconfig.local"

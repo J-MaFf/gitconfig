@@ -29,6 +29,7 @@ USAGE:
 
 OPTIONS:
     -f, --force     Overwrite existing .gitconfig.local without prompting
+                    (the old file is kept as .gitconfig.local.bak.<timestamp>)
     -h, --help      Display this help message
 
 DESCRIPTION:
@@ -227,6 +228,12 @@ if [ -d "$HOMEBREW_REPO/.git" ] && [ "$(file_owner_uid "$HOMEBREW_REPO")" != "$(
 	# without this entry git's dubious-ownership check breaks \`brew update\`.
 	directory = $HOMEBREW_REPO
 "
+fi
+
+# Keep a timestamped copy of the file we are about to replace, unless it
+# already holds exactly what we would write.
+if [ -f "$LOCAL_CONFIG_PATH" ] && [ "$(cat "$LOCAL_CONFIG_PATH")" != "$(printf '%s\n' "$CONFIG_CONTENT")" ]; then
+    backup_copy "$LOCAL_CONFIG_PATH"
 fi
 
 printf '%s\n' "$CONFIG_CONTENT" > "$LOCAL_CONFIG_PATH"

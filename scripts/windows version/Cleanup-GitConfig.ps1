@@ -17,17 +17,20 @@ USAGE: .\Cleanup-GitConfig.ps1 [OPTIONS]
 OPTIONS:
     -Force      Skip confirmation prompts
     -KeepLocal  Preserve ~/.gitconfig.local (machine-specific user config).
-                Used by install.ps1's preflight so re-running setup never wipes
+                Used by install.ps1 -Reinstall so re-running setup never wipes
                 hand-tuned safe.directory entries, etc.
     -Help       Display this help message
 
 DESCRIPTION:
     Removes all gitconfig-related setup:
-    1. Backs up and removes .gitconfig (generated file)
-    2. Removes symlinks (.gitignore_global and gitconfig_helper.py)
-    3. Removes .gitconfig.local (unless -KeepLocal)
+    1. Moves .gitconfig, .gitignore_global and gitconfig_helper.py away
+    2. Moves .gitconfig.local away (unless -KeepLocal)
+    3. Removes the Ctrl-G git-alias keybinding from the PowerShell profile
     4. Deletes scheduled task (if it exists)
-    5. Clears git SSH signing config
+
+    Removed files are kept as timestamped backups (<file>.bak.yyyyMMdd-HHmmss,
+    newest 5 per file; set GITCONFIG_BACKUP_KEEP to change, 0 keeps all).
+    Symlinks into this repo are removed without a backup.
 
 NOTE: Requires administrator privileges
 "@
@@ -47,6 +50,7 @@ if (-not $isAdmin) {
     $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", "`"$scriptPath`"")
 
     if ($Force) { $scriptArgs += "-Force" }
+    if ($KeepLocal) { $scriptArgs += "-KeepLocal" }
 
     Write-Host "Relaunching with administrator privileges..." -ForegroundColor Cyan
     Write-Host ""
@@ -76,6 +80,33 @@ if (-not $Force) {
 
 $homeDir = $env:USERPROFILE
 $removed = 0
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+
+# Shared helpers: timestamped backups (Backup-UserFile).
+. (Join-Path $scriptDir "Functions.ps1")
+
+# Move Path to a timestamped backup (or just remove it if it is a symlink into
+# the repo) and report what happened. Returns $true if Path is gone.
+function Remove-WithBackup {
+    param([string]$Path)
+    $file = Split-Path -Leaf $Path
+    try {
+        $backupPath = Backup-UserFile -Path $Path -Move -RepoRoot $repoRoot
+        if ($backupPath) {
+            Write-Host "[OK] Backed up $file to $(Split-Path -Leaf $backupPath)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "[OK] Removed $file (symlink into the repo; no backup needed)" -ForegroundColor Green
+        }
+        return $true
+    }
+    catch {
+        Write-Host "[FAIL] Could not backup $file" -ForegroundColor Red
+        Write-Host "  Error: $_" -ForegroundColor Red
+        return $false
+    }
+}
 
 # STEP 1: Remove Symlinks
 Write-Host "[STEP 1] Removing symlinks..." -ForegroundColor Cyan
@@ -85,21 +116,8 @@ $filesToRemove = @(".gitconfig", ".gitignore_global", "gitconfig_helper.py")
 
 foreach ($file in $filesToRemove) {
     $path = Join-Path $homeDir $file
-    if (Test-Path $path) {
-        try {
-            $backupName = "Existing.$file.bak"
-            $backupPath = Join-Path $homeDir $backupName
-            if (Test-Path $backupPath) {
-                Remove-Item $backupPath -Force | Out-Null
-            }
-            Rename-Item -Path $path -NewName $backupName -Force | Out-Null
-            Write-Host "[OK] Backed up $file to $backupName" -ForegroundColor Green
-            $removed++
-        }
-        catch {
-            Write-Host "[FAIL] Could not backup $file" -ForegroundColor Red
-            Write-Host "  Error: $_" -ForegroundColor Red
-        }
+    if (Get-LinkAwareItem -Path $path) {
+        if (Remove-WithBackup -Path $path) { $removed++ }
     }
     else {
         Write-Host "[SKIP] $file not found" -ForegroundColor Yellow
@@ -116,21 +134,8 @@ $localConfigPath = "$homeDir\.gitconfig.local"
 if ($KeepLocal) {
     Write-Host "[SKIP] Preserving .gitconfig.local (-KeepLocal)" -ForegroundColor Yellow
 }
-elseif (Test-Path $localConfigPath) {
-    try {
-        $backupName = "Existing.gitconfig.local.bak"
-        $backupPath = Join-Path $homeDir $backupName
-        if (Test-Path $backupPath) {
-            Remove-Item $backupPath -Force | Out-Null
-        }
-        Rename-Item -Path $localConfigPath -NewName $backupName -Force | Out-Null
-        Write-Host "[OK] Backed up .gitconfig.local to $backupName" -ForegroundColor Green
-        $removed++
-    }
-    catch {
-        Write-Host "[FAIL] Could not backup .gitconfig.local" -ForegroundColor Red
-        Write-Host "  Error: $_" -ForegroundColor Red
-    }
+elseif (Get-LinkAwareItem -Path $localConfigPath) {
+    if (Remove-WithBackup -Path $localConfigPath) { $removed++ }
 }
 else {
     Write-Host "[SKIP] .gitconfig.local not found" -ForegroundColor Yellow

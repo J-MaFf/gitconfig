@@ -38,13 +38,24 @@ teardown() {
 # backup_file
 # ---------------------------------------------------------------------------
 
-@test "backup_file moves an existing file to Existing.<name>.bak" {
+# The timestamped backups of FILE, oldest first (one per line).
+backups_of() {
+    local f
+    for f in "$1".bak.[0-9]*; do
+        if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\n' "$f"; fi
+    done | LC_ALL=C sort
+}
+
+@test "backup_file moves an existing file to a timestamped <name>.bak.<stamp>" {
     echo "original" > "$TESTDIR/.gitconfig"
     run backup_file "$TESTDIR/.gitconfig"
     [ "$status" -eq 0 ]
     [ ! -e "$TESTDIR/.gitconfig" ]
-    [ -f "$TESTDIR/Existing..gitconfig.bak" ]
-    [ "$(cat "$TESTDIR/Existing..gitconfig.bak")" = "original" ]
+    [ "$(backups_of "$TESTDIR/.gitconfig" | wc -l | tr -d ' ')" -eq 1 ]
+    local backup
+    backup="$(backups_of "$TESTDIR/.gitconfig")"
+    [[ "$(basename "$backup")" =~ ^\.gitconfig\.bak\.[0-9]{8}-[0-9]{6}$ ]]
+    [ "$(cat "$backup")" = "original" ]
 }
 
 @test "backup_file returns 1 and skips when the target is missing" {
@@ -53,12 +64,102 @@ teardown() {
     [[ "$output" == *"[SKIP]"* ]]
 }
 
-@test "backup_file overwrites a stale backup instead of failing" {
-    echo "stale" > "$TESTDIR/Existing.file.bak"
+@test "backup_file never overwrites an earlier backup (finding 1)" {
+    echo "original" > "$TESTDIR/file"
+    backup_file "$TESTDIR/file" >/dev/null
+    echo "generated" > "$TESTDIR/file"
+    backup_file "$TESTDIR/file" >/dev/null
+    # Both backups exist, even within the same second, and the user's original
+    # is the oldest one.
+    [ "$(backups_of "$TESTDIR/file" | wc -l | tr -d ' ')" -eq 2 ]
+    [ "$(cat "$(backups_of "$TESTDIR/file" | head -n 1)")" = "original" ]
+    [ "$(cat "$(backups_of "$TESTDIR/file" | tail -n 1)")" = "generated" ]
+}
+
+@test "backup_file leaves legacy Existing.<name>.bak backups alone" {
+    echo "legacy" > "$TESTDIR/Existing.file.bak"
     echo "fresh" > "$TESTDIR/file"
     run backup_file "$TESTDIR/file"
     [ "$status" -eq 0 ]
-    [ "$(cat "$TESTDIR/Existing.file.bak")" = "fresh" ]
+    [ "$(cat "$TESTDIR/Existing.file.bak")" = "legacy" ]
+}
+
+@test "backup_file removes a symlink into the repo without backing it up" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo"
+    echo "ours" > "$repo/.gitignore_global"
+    ln -s "$repo/.gitignore_global" "$TESTDIR/.gitignore_global"
+    run backup_file "$TESTDIR/.gitignore_global" "$repo"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"no backup needed"* ]]
+    [ ! -e "$TESTDIR/.gitignore_global" ] && [ ! -L "$TESTDIR/.gitignore_global" ]
+    [ -z "$(backups_of "$TESTDIR/.gitignore_global")" ]
+    [ "$(cat "$repo/.gitignore_global")" = "ours" ]
+}
+
+@test "backup_file still backs up a symlink that points outside the repo" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo"
+    echo "theirs" > "$TESTDIR/elsewhere"
+    ln -s "$TESTDIR/elsewhere" "$TESTDIR/.gitignore_global"
+    run backup_file "$TESTDIR/.gitignore_global" "$repo"
+    [ "$status" -eq 0 ]
+    [ "$(backups_of "$TESTDIR/.gitignore_global" | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# prune_backups (retention)
+# ---------------------------------------------------------------------------
+
+@test "prune_backups keeps the newest 5 by default" {
+    local i
+    for i in 1 2 3 4 5 6 7; do
+        echo "v$i" > "$TESTDIR/file.bak.2026010$i-120000"
+    done
+    unset GITCONFIG_BACKUP_KEEP
+    prune_backups "$TESTDIR/file"
+    [ "$(backups_of "$TESTDIR/file" | wc -l | tr -d ' ')" -eq 5 ]
+    [ ! -e "$TESTDIR/file.bak.20260101-120000" ]
+    [ ! -e "$TESTDIR/file.bak.20260102-120000" ]
+    [ -e "$TESTDIR/file.bak.20260107-120000" ]
+}
+
+@test "prune_backups honours GITCONFIG_BACKUP_KEEP, and 0 keeps everything" {
+    local i
+    for i in 1 2 3 4; do
+        echo "v$i" > "$TESTDIR/file.bak.2026010$i-120000"
+    done
+    GITCONFIG_BACKUP_KEEP=0 prune_backups "$TESTDIR/file"
+    [ "$(backups_of "$TESTDIR/file" | wc -l | tr -d ' ')" -eq 4 ]
+    GITCONFIG_BACKUP_KEEP=2 prune_backups "$TESTDIR/file"
+    [ "$(backups_of "$TESTDIR/file" | wc -l | tr -d ' ')" -eq 2 ]
+    [ -e "$TESTDIR/file.bak.20260104-120000" ]
+}
+
+@test "prune_backups never deletes other files or legacy backups" {
+    local i
+    for i in 1 2 3; do
+        echo "v$i" > "$TESTDIR/file.bak.2026010$i-120000"
+    done
+    echo "legacy" > "$TESTDIR/Existing.file.bak"
+    echo "legacy" > "$TESTDIR/file.bak"
+    echo "note" > "$TESTDIR/file.bak.notes"
+    GITCONFIG_BACKUP_KEEP=1 prune_backups "$TESTDIR/file"
+    [ -e "$TESTDIR/Existing.file.bak" ]
+    [ -e "$TESTDIR/file.bak" ]
+    [ -e "$TESTDIR/file.bak.notes" ]
+    [ "$(backups_of "$TESTDIR/file" | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "a same-second collision sorts after the first backup" {
+    echo "a" > "$TESTDIR/file"
+    backup_copy "$TESTDIR/file" >/dev/null
+    echo "b" > "$TESTDIR/file"
+    backup_copy "$TESTDIR/file" >/dev/null
+    echo "c" > "$TESTDIR/file"
+    backup_copy "$TESTDIR/file" >/dev/null
+    [ "$(backups_of "$TESTDIR/file" | wc -l | tr -d ' ')" -eq 3 ]
+    [ "$(backups_of "$TESTDIR/file" | while IFS= read -r f; do cat "$f"; done | tr -d '\n')" = "abc" ]
 }
 
 # ---------------------------------------------------------------------------
@@ -86,8 +187,31 @@ teardown() {
     run create_symlink "$TESTDIR/source" "$TESTDIR/link" true
     [ "$status" -eq 0 ]
     [ -L "$TESTDIR/link" ]
-    [ -f "$TESTDIR/Existing.link.bak" ]
-    [ "$(cat "$TESTDIR/Existing.link.bak")" = "old" ]
+    [ "$(backups_of "$TESTDIR/link" | wc -l | tr -d ' ')" -eq 1 ]
+    [ "$(cat "$(backups_of "$TESTDIR/link")")" = "old" ]
+}
+
+@test "create_symlink leaves an already-correct link alone, with no backup" {
+    mkdir -p "$TESTDIR/repo"
+    echo "src" > "$TESTDIR/repo/source"
+    ln -s "$TESTDIR/repo/source" "$HOME_DIR/link"
+    run create_symlink "$TESTDIR/repo/source" "$HOME_DIR/link" false
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already linked"* ]]
+    [ -L "$HOME_DIR/link" ]
+    [ -z "$(backups_of "$HOME_DIR/link")" ]
+}
+
+@test "create_symlink replaces a stale link into the repo without a backup or prompt" {
+    mkdir -p "$TESTDIR/repo/old"
+    echo "src" > "$TESTDIR/repo/source"
+    echo "stale" > "$TESTDIR/repo/old/source"
+    ln -s "$TESTDIR/repo/old/source" "$HOME_DIR/link"
+    # force=false and no stdin: a prompt would read EOF and skip.
+    run create_symlink "$TESTDIR/repo/source" "$HOME_DIR/link" false "$TESTDIR/repo" < /dev/null
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HOME_DIR/link")" = "src" ]
+    [ -z "$(backups_of "$HOME_DIR/link")" ]
 }
 
 # ---------------------------------------------------------------------------
@@ -202,8 +326,66 @@ teardown() {
 
     run generate_gitconfig "$repo" "$HOME_DIR" true
     [ "$status" -eq 0 ]
-    [ -f "$HOME_DIR/.gitconfig.bak" ]
-    [ "$(cat "$HOME_DIR/.gitconfig.bak")" = "prior" ]
+    [ "$(backups_of "$HOME_DIR/.gitconfig" | wc -l | tr -d ' ')" -eq 1 ]
+    [ "$(cat "$(backups_of "$HOME_DIR/.gitconfig")")" = "prior" ]
+}
+
+@test "generate_gitconfig keeps every earlier backup across regenerations" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo"
+    printf '[core]\n\trepo = {{REPO_PATH}}\n' > "$repo/.gitconfig.template"
+    echo "hand-written" > "$HOME_DIR/.gitconfig"
+    generate_gitconfig "$repo" "$HOME_DIR" true >/dev/null
+    printf '[core]\n\tother = 1\n' > "$repo/.gitconfig.template"
+    generate_gitconfig "$repo" "$HOME_DIR" true >/dev/null
+    [ "$(backups_of "$HOME_DIR/.gitconfig" | wc -l | tr -d ' ')" -eq 2 ]
+    [ "$(cat "$(backups_of "$HOME_DIR/.gitconfig" | head -n 1)")" = "hand-written" ]
+}
+
+@test "generate_gitconfig names settings the rewrite drops, without their values" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo"
+    printf '[user]\n\tname = Tester\n' > "$repo/.gitconfig.template"
+    printf '[user]\n\tname = Tester\n[filter "lfs"]\n\tclean = git-lfs clean -- %%f\n[credential "https://github.com"]\n\thelper = secret-helper-value\n' > "$HOME_DIR/.gitconfig"
+    run generate_gitconfig "$repo" "$HOME_DIR" true
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[WARN]"* ]]
+    [[ "$output" == *"filter.lfs.clean"* ]]
+    [[ "$output" == *"credential.https://github.com.helper"* ]]
+    [[ "$output" == *".gitconfig.local"* ]]
+    [[ "$output" != *"secret-helper-value"* ]]
+    [[ "$output" != *"user.name"* ]]
+}
+
+@test "generate_gitconfig doesn't flag a value the template changed, but does flag a lost multi-value" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo"
+    printf '[alias]\n\tst = status\n[safe]\n\tdirectory = /a\n' > "$repo/.gitconfig.template"
+    printf '[alias]\n\tst = status -sb\n[safe]\n\tdirectory = /a\n' > "$HOME_DIR/.gitconfig"
+    run generate_gitconfig "$repo" "$HOME_DIR" true
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"[WARN]"* ]]
+
+    printf '[alias]\n\tst = status\n[safe]\n\tdirectory = /a\n\tdirectory = /b\n' > "$HOME_DIR/.gitconfig"
+    run generate_gitconfig "$repo" "$HOME_DIR" true
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[WARN]"* ]]
+    [[ "$output" == *"safe.directory"* ]]
+    [[ "$output" != *"alias.st"* ]]
+}
+
+@test "generate_gitconfig replaces a ~/.gitconfig symlink into the repo instead of writing through it" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo"
+    printf '[core]\n\trepo = {{REPO_PATH}}\n' > "$repo/.gitconfig.template"
+    echo "repo copy" > "$repo/.gitconfig"
+    ln -s "$repo/.gitconfig" "$HOME_DIR/.gitconfig"
+    run generate_gitconfig "$repo" "$HOME_DIR" true
+    [ "$status" -eq 0 ]
+    [ ! -L "$HOME_DIR/.gitconfig" ]
+    grep -qF "repo = $repo" "$HOME_DIR/.gitconfig"
+    [ "$(cat "$repo/.gitconfig")" = "repo copy" ]
+    [ -z "$(backups_of "$HOME_DIR/.gitconfig")" ]
 }
 
 # ---------------------------------------------------------------------------

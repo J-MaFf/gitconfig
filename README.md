@@ -45,7 +45,17 @@ bash scripts/linux\ version/install.sh --force
 
 The setup script handles generating `~/.gitconfig` from the template, creating symlinks, installing the `rich` Python dependency, and registering an auto-update job (launchd on macOS, Task Scheduler on Windows, cron on Linux).
 
-The auto-update job is **pull + install + prune**: at each login it pulls the latest commits and, if `.gitconfig.template` changed in that pull, regenerates `~/.gitconfig` so template changes take effect without a manual re-run. It also prunes merged branches in the gitconfig repo — dropping stale remote-tracking refs (`fetch --prune`) and deleting local branches whose remote has been deleted — so old feature branches don't pile up. It also ensures the optional `textual` dependency (which powers the interactive `git alias` browser) is installed — best-effort and only when missing, so existing machines pick it up on their next update without a manual `pip install`. Your existing `~/.gitconfig` is backed up to `~/.gitconfig.bak` first, and `~/.gitconfig.local` is never modified. Run the same pull-install-prune on demand any time with `git selfupdate`.
+The auto-update job is **pull + install + prune**: at each login it pulls the latest commits and, if `.gitconfig.template` changed in that pull, regenerates `~/.gitconfig` so template changes take effect without a manual re-run. It also prunes merged branches in the gitconfig repo — dropping stale remote-tracking refs (`fetch --prune`) and deleting local branches whose remote has been deleted — so old feature branches don't pile up. It also ensures the optional `textual` dependency (which powers the interactive `git alias` browser) is installed — best-effort and only when missing, so existing machines pick it up on their next update without a manual `pip install`. Your existing `~/.gitconfig` is backed up first, and `~/.gitconfig.local` is never modified. Run the same pull-install-prune on demand any time with `git selfupdate`.
+
+**Put your own git settings in `~/.gitconfig.local`, not `~/.gitconfig`.** `~/.gitconfig` is generated from `.gitconfig.template` and is rewritten whenever the template changes. Before a rewrite, the scripts print the names (never the values) of any settings in `~/.gitconfig` that the template doesn't have, so you can move them.
+
+### Backups
+
+Whenever a script replaces or removes one of your files, it first saves a timestamped copy next to it, for example `~/.gitconfig.bak.20261003-142501`. The newest 5 backups of each file are kept and older ones are deleted. Set `GITCONFIG_BACKUP_KEEP` to change the limit, or set it to `0` to keep every backup. Older `*.bak` files from previous versions (`~/.gitconfig.bak`, `~/Existing.*.bak`) are never touched. Symlinks that already point into this repo aren't backed up, so running the installer again doesn't create new backups.
+
+### Reinstalling
+
+Running the installer again is safe. It doesn't remove anything first. To wipe the previous install before setting up again, pass `--reinstall` (bash) or `-Reinstall` (PowerShell). Everything it removes is backed up first.
 
 ## Uninstall
 

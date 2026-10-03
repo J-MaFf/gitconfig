@@ -14,12 +14,14 @@ set -e
 command -v git >/dev/null 2>&1 || { echo "[ERROR] git not found on PATH. Install git (sudo apt install git), then re-run." >&2; exit 1; }
 
 FORCE=false
+REINSTALL=false
 NO_CRON=false
 HELP=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         -f|--force)  FORCE=true;   shift ;;
+        --reinstall) REINSTALL=true; shift ;;
         --no-cron)   NO_CRON=true; shift ;;
         -h|--help)   HELP=true;    shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -34,14 +36,23 @@ USAGE: ./install.sh [OPTIONS]
 
 OPTIONS:
     -f, --force     Overwrite existing files without prompting
+    --reinstall     Tear down the previous install first (runs
+                    cleanup-gitconfig.sh --force; files are backed up)
     --no-cron       Skip cron job creation
     -h, --help      Display this help message
 
 DESCRIPTION:
-    1. Creates symlinks for .gitconfig and gitconfig_helper.py
-    2. Generates machine-specific .gitconfig.local
-    3. Sets up cron job for auto-sync (optional)
-    4. Verifies the complete setup
+    1. Generates ~/.gitconfig from the template
+    2. Links .gitignore_global and gitconfig_helper.py into ~
+    3. Generates machine-specific .gitconfig.local
+    4. Sets up cron job for auto-sync (optional)
+    5. Verifies the complete setup
+
+    Files that would be replaced are first kept as timestamped backups
+    (<file>.bak.YYYYMMDD-HHMMSS; newest 5 per file, set GITCONFIG_BACKUP_KEEP
+    to change, 0 keeps all). Put your own git settings in ~/.gitconfig.local:
+    ~/.gitconfig is regenerated from the template, so anything added to it
+    with `git config --global` is dropped (and backed up) at the next sync.
 
 REQUIREMENTS:
     - bash 4.0+
@@ -51,11 +62,11 @@ EOF
     exit 0
 fi
 
-# Guard: refuse to run the Linux installer on macOS BEFORE STEP 0's destructive
-# cleanup. cleanup-gitconfig.sh --force moves an existing correct
-# ~/.gitconfig.local aside, and the guard inside initialize-local-config.sh
-# (STEP 3) only fires afterwards — so running the wrong installer would displace
-# the local config and then abort mid-install (issue #181). Fail first instead.
+# Guard: refuse to run the Linux installer on macOS before any step
+# writes to $HOME. The guard inside initialize-local-config.sh (STEP 3) fires
+# too late: STEP 0 (--reinstall) moves ~/.gitconfig.local aside and STEPs 1-2
+# rewrite ~/.gitconfig and the links, so the wrong installer would change the
+# machine and then abort mid-install (issue #181). Fail first instead.
 # Tests set GITCONFIG_ALLOW_CROSS_OS=1 to run in a sandbox anywhere.
 if [ "$(uname -s)" = "Darwin" ] && [ "${GITCONFIG_ALLOW_CROSS_OS:-0}" != "1" ]; then
     echo "[ERROR] This is the Linux installer but this host is macOS." >&2
@@ -79,19 +90,23 @@ echo "Repository: $REPO_ROOT"
 echo "Home Directory: $HOME_DIR"
 echo ""
 
-# STEP 0: Clean up previous installation
-echo "[STEP 0] Cleaning up previous installation..."
-echo "-----"
-if [ -f "$CLEANUP_SCRIPT" ]; then
-    if bash "$CLEANUP_SCRIPT" --force 2>/dev/null; then
-        echo "[OK] Previous installation cleaned up"
+# STEP 0: Tear down the previous installation, only when asked (--reinstall).
+# A plain re-run converges in place: existing files that differ are backed up
+# with a timestamp, and links that already point into the repo are left alone.
+if [ "$REINSTALL" = true ]; then
+    echo "[STEP 0] Cleaning up previous installation (--reinstall)..."
+    echo "-----"
+    if [ -f "$CLEANUP_SCRIPT" ]; then
+        if bash "$CLEANUP_SCRIPT" --force 2>/dev/null; then
+            echo "[OK] Previous installation cleaned up"
+        else
+            echo "[WARN] No previous installation found or cleanup failed (this is OK)"
+        fi
     else
-        echo "[WARN] No previous installation found or cleanup failed (this is OK)"
+        echo "[WARN] Cleanup script not found, skipping"
     fi
-else
-    echo "[WARN] Cleanup script not found, skipping"
+    echo ""
 fi
-echo ""
 
 # STEP 1: Generate .gitconfig from template
 echo "[STEP 1] Generating .gitconfig from template..."
@@ -108,7 +123,7 @@ echo "[STEP 2] Creating symlinks..."
 echo "-----"
 LINK_ERRORS=0
 for file in ".gitignore_global" "gitconfig_helper.py"; do
-    create_symlink "$REPO_ROOT/$file" "$HOME_DIR/$file" "$FORCE" || ((LINK_ERRORS++))
+    create_symlink "$REPO_ROOT/$file" "$HOME_DIR/$file" "$FORCE" "$REPO_ROOT" || ((LINK_ERRORS++))
 done
 echo ""
 
@@ -124,12 +139,6 @@ if [ -f "$LOCAL_CONFIG_SCRIPT" ]; then
 else
     echo "[ERROR] Local config script not found: $LOCAL_CONFIG_SCRIPT"
 fi
-echo ""
-
-# STEP 4: Configure global gitignore
-echo "[STEP 4] Configuring global gitignore..."
-echo "-----"
-configure_global_gitignore "$HOME_DIR"
 echo ""
 
 # STEP 5: Set up cron job
