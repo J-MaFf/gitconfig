@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 #
-# Platform guards on the install.sh wrappers (issue #181).
+# Platform guards on the install.sh wrappers (issue #181), which since #229
+# run scripts/unix/install.sh with GITCONFIG_PLATFORM set.
 #
 # PR #180 guarded initialize-local-config.sh, but install.sh runs STEP 0
 # (cleanup-gitconfig.sh --force, which moves an existing ~/.gitconfig.local to a
@@ -63,6 +64,17 @@ _stub_uname() {
 @test "both installers carry the GITCONFIG_ALLOW_CROSS_OS escape hatch" {
     # The override lets the sandboxed bats suites (and deliberate cross-OS runs)
     # past the guard; a full cross-OS install is out of scope for this suite.
-    grep -qF 'GITCONFIG_ALLOW_CROSS_OS' "$MAC_INSTALL"
-    grep -qF 'GITCONFIG_ALLOW_CROSS_OS' "$LINUX_INSTALL"
+    # Since #229 both wrappers run scripts/unix/install.sh, whose guard is
+    # resolve_target_os in scripts/shared/platform.sh.
+    grep -qF '../unix/install.sh' "$MAC_INSTALL"
+    grep -qF '../unix/install.sh' "$LINUX_INSTALL"
+    grep -qF 'resolve_target_os' "$REPO_ROOT/scripts/unix/install.sh"
+    grep -qF 'GITCONFIG_ALLOW_CROSS_OS' "$REPO_ROOT/scripts/shared/platform.sh"
+}
+
+@test "the guard's hint points at the OS-detecting scripts/unix installer" {
+    _stub_uname Linux
+    run env -u GITCONFIG_ALLOW_CROSS_OS PATH="$SANDBOX/bin:$PATH" bash "$MAC_INSTALL" --force
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"scripts/unix/install.sh"* ]]
 }

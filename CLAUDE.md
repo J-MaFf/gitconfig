@@ -17,7 +17,7 @@ Invoke it at the start of any session that involves git: `/git-policies`
 This repo targets **macOS, Linux, and Windows** — it's a cross-platform dotfiles/git-config tool.
 
 - **Windows scripts:** PowerShell (`scripts/`), tested with Pester (`tests/`)
-- **macOS/Linux scripts:** bash (`scripts/mac version/`, `scripts/linux version/`)
+- **macOS/Linux scripts:** bash, one implementation in `scripts/unix/` (per-OS bits in `scripts/shared/platform.sh`); `scripts/mac version/` and `scripts/linux version/` are thin wrappers kept for old commands
 - `gitconfig_helper.py` is cross-platform Python 3
 - Always confirm which platform a change targets before editing
 
@@ -29,9 +29,9 @@ This repo targets **macOS, Linux, and Windows** — it's a cross-platform dotfil
 |------|---------|
 | `gitconfig_helper.py` | Cross-platform helper — Python 3 |
 | `scripts/windows version/install.ps1` | Windows setup entrypoint |
-| `scripts/shared/` | Shared bash library and scripts (mac + linux) |
-| `scripts/mac version/` | macOS bash entry points |
-| `scripts/linux version/` | Linux bash entry points |
+| `scripts/unix/` | macOS + Linux bash entry points (install, cleanup, initialize-local-config); detect the OS |
+| `scripts/shared/` | Shared bash library and scripts (mac + linux); `platform.sh` holds the per-OS layer (launchd/cron scheduler, credential helper, signing detection) |
+| `scripts/mac version/`, `scripts/linux version/` | Thin `exec` wrappers into `scripts/unix/` (and `scripts/shared/`), kept so existing commands keep working |
 | `tests/` | Pester tests for Windows scripts |
 
 ---

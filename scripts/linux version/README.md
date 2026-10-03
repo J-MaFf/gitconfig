@@ -6,7 +6,9 @@
 
 ## Overview
 
-This directory provides a complete Linux/Unix version of the gitconfig setup system. All scripts are designed to work on:
+Since [#229](https://github.com/J-MaFf/gitconfig/issues/229), macOS and Linux share one implementation in `scripts/unix/` (`install.sh`, `cleanup-gitconfig.sh`, `initialize-local-config.sh`), which detects the OS; the per-OS pieces (cron vs launchd, credential helper, op-ssh-sign paths) live in `scripts/shared/platform.sh`. The scripts in this directory are thin wrappers kept so existing commands keep working: they run the `scripts/unix/` (or `scripts/shared/`) script for Linux and refuse to run on macOS. The commands below work from either directory.
+
+The scripts are designed to work on:
 
 - **Linux** (Ubuntu, Debian, Fedora, CentOS, Arch, etc.)
 - **macOS**
@@ -40,6 +42,12 @@ This directory provides a complete Linux/Unix version of the gitconfig setup sys
 - **initialize-local-config.sh** - Creates machine-specific .gitconfig.local
   - Sets up safe directories
   - Configures gitignore path
+  - Configures SSH commit signing, in this order (the same as macOS): an
+    on-disk key (`~/.ssh/claude_desktop`, then `~/.ssh/id_ed25519_signing`,
+    each with its `.pub`, plus the optional `~/.ssh/git-sign-no-agent`
+    wrapper); else 1Password's `/opt/1Password/op-ssh-sign`; else, when git
+    already has a `user.signingkey`, just `allowedSignersFile` so signatures
+    verify
   - Configures an HTTPS credential helper: the GitHub CLI (`gh auth git-credential`)
     when installed — so unattended HTTPS git (cron pulls, `bd dolt push`)
     authenticates without prompting — falling back to the desktop keyring
@@ -78,7 +86,7 @@ Run the main setup script:
 ```bash
 ./install.sh                # Interactive mode
 ./install.sh --force        # Overwrite without prompting
-./install.sh --no-cron      # Skip cron job setup
+./install.sh --no-cron      # Skip cron job setup (same as --no-scheduler)
 ./install.sh --help         # Show help
 ```
 
@@ -139,7 +147,7 @@ Run the main setup script:
 
    ```bash
    crontab -e
-   # Add: 0 9 * * * bash "/path/to/gitconfig/scripts/linux version/update-gitconfig.sh" "/path/to/gitconfig" >> /tmp/gitconfig-update.log 2>&1
+   # Add: 0 9 * * * bash "/path/to/gitconfig/scripts/shared/update-gitconfig.sh" "/path/to/gitconfig" >> /tmp/gitconfig-update.log 2>&1 # gitconfig-autoupdate
    ```
 
 ### Reverse Setup
@@ -172,7 +180,10 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 
 ### Automation (Optional)
 
-- Cron job set for daily updates at 9 AM
+- Cron job set for daily updates at 9 AM, tagged `# gitconfig-autoupdate`
+  so cleanup (and a re-install) can find and replace exactly that line;
+  untagged lines from older installs that run `update-gitconfig.sh` are
+  replaced or removed too
 - Can be customized or disabled with `--no-cron`
 
 ## Differences from Windows Version
@@ -184,7 +195,7 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 | Scheduled Tasks | Windows Task Scheduler | cron |
 | Paths | `C:\Users\...` | `/home/...` |
 | Line Endings | CRLF | LF |
-| SSH Signing | op-ssh-sign.exe | Native SSH key |
+| SSH Signing | op-ssh-sign.exe | On-disk SSH key, or op-ssh-sign |
 | Safe Directories | Network UNC paths | Unix mount paths |
 
 ## Troubleshooting
@@ -217,11 +228,13 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 
 ### Custom Cron Schedule
 
-Edit the cron entry in `install.sh` before running:
+Edit `cron_entry` in `scripts/shared/platform.sh` before running (keep the
+trailing `# gitconfig-autoupdate` marker so cleanup can find the line), or
+change the schedule afterwards with `crontab -e`:
 
 ```bash
-# Change this line:
-CRON_ENTRY="0 9 * * * bash \"$CRON_SCRIPT\" \"$REPO_ROOT\" >> /tmp/gitconfig-update.log 2>&1"
+# Change the schedule in this line:
+printf '0 9 * * * bash "%s" "%s" >> /tmp/gitconfig-update.log 2>&1 %s\n' \
 ```
 
 Common cron schedules:

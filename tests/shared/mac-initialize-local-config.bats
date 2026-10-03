@@ -13,9 +13,10 @@
 #     machine to agent-based signing (Touch ID prompt per commit).
 #
 # These tests run the real script in a mktemp sandbox with HOME and git config
-# redirected, so they never touch the developer's machine. op-ssh-sign is not on
-# the sandbox's fixed lookup paths (/opt/homebrew/bin, /usr/local/bin), so the
-# "no 1Password" branches are exercised naturally.
+# redirected, so they never touch the developer's machine. GITCONFIG_OP_SSH_SIGN=""
+# pins op-ssh-sign as absent: since #229 the probe also checks the 1Password app
+# bundle, which a developer's Mac usually has, so the "no 1Password" branches
+# can't rely on the real lookup paths being empty.
 #
 # Run with:  bats tests/shared/mac-initialize-local-config.bats
 # Requires:  bats-core and git.
@@ -38,6 +39,7 @@ setup() {
     # The script refuses to run on a non-macOS host (issue #179); the sandbox
     # makes cross-OS runs safe, so opt out of the guard for every test.
     export GITCONFIG_ALLOW_CROSS_OS=1
+    export GITCONFIG_OP_SSH_SIGN=""
     : > "$GIT_CONFIG_GLOBAL"
 }
 

@@ -20,7 +20,7 @@ Four follow-up fixes from the #198 adversarial review landed: [#203](https://git
 | `.gitconfig.template` | Source template for `~/.gitconfig` (placeholders: `{{REPO_PATH}}`, `{{HOME_DIR}}`) |
 | `gitconfig_helper.py` | Cross-platform Python 3 helper backing the git aliases |
 | `scripts/windows version/` | PowerShell setup (`install.ps1`, `Initialize-*`, `Update-GitConfig.ps1`, `Functions.ps1`) |
-| `scripts/shared/`, `scripts/mac version/`, `scripts/linux version/` | bash library + macOS/Linux entry points |
+| `scripts/unix/`, `scripts/shared/` | macOS/Linux entry points (one implementation, OS-detecting) + bash library and per-OS layer (`platform.sh`); `scripts/mac version/` and `scripts/linux version/` are thin wrappers |
 | `tests/` | Pester tests (unit by default; integration tests are `Tag 'Integration'`, opt-in) |
 | `.beads/` | Beads task graph (Dolt-backed); syncs via `refs/dolt/data` |
 

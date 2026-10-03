@@ -168,7 +168,112 @@ EOF
         bash "$REPO_ROOT/scripts/linux version/install.sh" --force
     [ "$status" -eq 0 ]
     [[ "$output" == *"[OK] Created cron job"* ]]
-    grep -qF "\"$REPO_ROOT/scripts/linux version/update-gitconfig.sh\" \"$REPO_ROOT\"" "$SANDBOX/crontab.txt"
+    # The job runs the shared updater directly (issue #229) with this clone's path.
+    grep -qF "\"$REPO_ROOT/scripts/shared/update-gitconfig.sh\" \"$REPO_ROOT\"" "$SANDBOX/crontab.txt"
+}
+
+@test "linux install tags its cron line and replaces it instead of adding a second" {
+    _stub_crontab
+    for _ in 1 2; do
+        run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" \
+            bash "$REPO_ROOT/scripts/linux version/install.sh" --force
+        [ "$status" -eq 0 ]
+    done
+    # Exactly one line, and it ends with the marker cleanup removes it by.
+    [ "$(grep -c 'update-gitconfig.sh' "$SANDBOX/crontab.txt")" -eq 1 ]
+    grep -qE ' # gitconfig-autoupdate$' "$SANDBOX/crontab.txt"
+    # The marker is a shell comment: the line still parses as one command.
+    line="$(grep -F 'gitconfig-autoupdate' "$SANDBOX/crontab.txt")"
+    sh -n -c "${line#0 9 \* \* \* }"
+}
+
+@test "linux install migrates an untagged cron line from an older install" {
+    _stub_crontab
+    # What the pre-#229 Linux installer wrote: the per-OS wrapper, no marker.
+    printf '0 8 * * * echo keep-me\n0 9 * * * bash "/old/clone/scripts/linux version/update-gitconfig.sh" "/old/clone" >> /tmp/gitconfig-update.log 2>&1\n' \
+        > "$SANDBOX/crontab.txt"
+    run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" \
+        bash "$REPO_ROOT/scripts/linux version/install.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] Created cron job"* ]]
+    [ "$(grep -c 'update-gitconfig.sh' "$SANDBOX/crontab.txt")" -eq 1 ]
+    run ! grep -qF '/old/clone' "$SANDBOX/crontab.txt"
+    grep -qF "keep-me" "$SANDBOX/crontab.txt"
+}
+
+@test "linux cleanup removes an untagged cron line from an older install" {
+    _stub_crontab
+    printf '0 8 * * * echo keep-me\n0 9 * * * bash "/old/clone/scripts/linux version/update-gitconfig.sh" "/old/clone" >> /tmp/gitconfig-update.log 2>&1\n' \
+        > "$SANDBOX/crontab.txt"
+    run env PATH="$SANDBOX/bin:$PATH" bash "$REPO_ROOT/scripts/linux version/cleanup-gitconfig.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] Removed cron job"* ]]
+    [[ "$output" == *"Cleanup SUCCESSFUL!"* ]]
+    run ! grep -qF "update-gitconfig.sh" "$SANDBOX/crontab.txt"
+    grep -qF "keep-me" "$SANDBOX/crontab.txt"
+}
+
+@test "linux install verifies the cron job and prints the error summary" {
+    _stub_crontab
+    run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" \
+        bash "$REPO_ROOT/scripts/linux version/install.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] cron job verified"* ]]
+    [[ "$output" == *"Verify your git aliases:"* ]]
+}
+
+@test "--no-scheduler and the old per-OS spellings all skip the job" {
+    _stub_crontab
+    for flag in --no-scheduler --no-cron --no-launchd; do
+        run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" \
+            bash "$REPO_ROOT/scripts/linux version/install.sh" --force "$flag"
+        [ "$status" -eq 0 ]
+        [[ "$output" != *"[STEP 5]"* ]]
+        [ ! -e "$SANDBOX/crontab.txt" ]
+    done
+}
+
+# $1 = the value `uname -s` should print
+_stub_uname() {
+    printf '#!/bin/sh\necho %s\n' "$1" > "$SANDBOX/bin/uname"
+    chmod +x "$SANDBOX/bin/uname"
+}
+
+@test "scripts/unix/install.sh on a Linux host schedules a cron job" {
+    _stub_crontab
+    _stub_uname Linux
+    run env -u GITCONFIG_PLATFORM -u GITCONFIG_ALLOW_CROSS_OS PATH="$SANDBOX/bin:$PATH" \
+        bash "$REPO_ROOT/scripts/unix/install.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"GitConfig Setup (Linux)"* ]]
+    [[ "$output" == *"[OK] Created cron job"* ]]
+    grep -qF 'gitconfig-autoupdate' "$SANDBOX/crontab.txt"
+    [ ! -e "$HOME/Library/LaunchAgents/com.gitconfig.update.plist" ]
+    grep -qF '(Linux)' "$HOME/.gitconfig.local"
+}
+
+@test "scripts/unix/install.sh on a macOS host registers a launchd agent" {
+    _stub_crontab
+    _stub_uname Darwin
+    printf '#!/bin/sh\nexit 0\n' > "$SANDBOX/bin/launchctl"
+    chmod +x "$SANDBOX/bin/launchctl"
+    # The macOS file-owner probe uses BSD stat; HOMEBREW_REPO keeps it unused.
+    run env -u GITCONFIG_PLATFORM -u GITCONFIG_ALLOW_CROSS_OS PATH="$SANDBOX/bin:$PATH" \
+        HOMEBREW_REPO="$SANDBOX/no-such-brew" GITCONFIG_OP_SSH_SIGN="" \
+        bash "$REPO_ROOT/scripts/unix/install.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"GitConfig Setup (macOS)"* ]]
+    [[ "$output" == *"[OK] launchd agent verified"* ]]
+    [ -f "$HOME/Library/LaunchAgents/com.gitconfig.update.plist" ]
+    [ ! -e "$SANDBOX/crontab.txt" ]
+    grep -qF 'helper = osxkeychain' "$HOME/.gitconfig.local"
+
+    run env -u GITCONFIG_PLATFORM PATH="$SANDBOX/bin:$PATH" \
+        bash "$REPO_ROOT/scripts/unix/cleanup-gitconfig.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] Removed launchd plist"* ]]
+    [[ "$output" == *"Cleanup SUCCESSFUL!"* ]]
+    [ ! -e "$HOME/Library/LaunchAgents/com.gitconfig.update.plist" ]
 }
 
 # A PATH dir ($SANDBOX/sysbin) with the usual tools but no crontab binary.
@@ -197,7 +302,7 @@ _path_without_crontab() {
     run env PATH="$SANDBOX/bin:$PATH" bash "$REPO_ROOT/scripts/linux version/cleanup-gitconfig.sh" --force
     [ "$status" -eq 0 ]
     [[ "$output" == *"[OK] Removed cron job"* ]]
-    ! grep -qF "update-gitconfig.sh" "$SANDBOX/crontab.txt"
+    run ! grep -qF "update-gitconfig.sh" "$SANDBOX/crontab.txt"
     # Other users' entries survive.
     grep -qF "keep-me" "$SANDBOX/crontab.txt"
 }
@@ -239,6 +344,7 @@ with open(sys.argv[1], "rb") as f:
     p = plistlib.load(f)
 repo = sys.argv[2]
 assert p["ProgramArguments"][-1] == repo, p["ProgramArguments"]
+assert p["ProgramArguments"][1] == repo + "/scripts/shared/update-gitconfig.sh", p["ProgramArguments"]
 path = p["EnvironmentVariables"]["PATH"].split(":")
 assert "/opt/homebrew/bin" in path and "/usr/local/bin" in path, path
 assert path.index("/opt/homebrew/bin") < path.index("/usr/bin"), path
