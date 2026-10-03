@@ -210,6 +210,9 @@ def cleanup_branches(force=False, update=True):
                     f"[yellow]Warning: git fetch --prune failed: {escape(fetch_result.stderr.strip())}[/yellow]"
                 )
                 exit_code = 1
+            elif run_git("rev-parse", "--verify", "--quiet", "@{upstream}").returncode != 0:
+                # Nothing to fast-forward from (e.g. a repo with no remote).
+                console.print(f"[dim]{default_branch} has no upstream; skipping fast-forward[/dim]")
             else:
                 # Keep the default branch current; a failure here is only a
                 # warning because it doesn't affect which branches are pruned.

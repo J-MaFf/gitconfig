@@ -546,6 +546,17 @@ class TestCleanupBranches:
         assert helper.cleanup_branches(force=False) == 1
 
 
+    def test_repo_without_remote_cleans_up_quietly(self, helper, git_env, monkeypatch, capsys):
+        work = git_env / "solo"
+        _git(git_env, "init", "-q", "-b", "main", str(work))
+        _commit(work, "README.md", "Initial")
+        _git(work, "branch", "done", "main")
+        monkeypatch.chdir(work)
+        assert helper.cleanup_branches(force=True) == 0
+        assert _branches(work) == {"main"}
+        assert "Error" not in capsys.readouterr().out
+
+
 class TestSwitchToMain:
     @staticmethod
     def _advance_remote(tmp_path):
