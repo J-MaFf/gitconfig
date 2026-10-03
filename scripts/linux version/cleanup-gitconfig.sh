@@ -63,14 +63,14 @@ REMOVED=0
 echo "[STEP 1] Removing symlinks..."
 echo "-----"
 for file in ".gitconfig" ".gitignore_global" "gitconfig_helper.py"; do
-    backup_file "$HOME_DIR/$file" "$REPO_ROOT" && ((REMOVED++)) || true
+    backup_file "$HOME_DIR/$file" "$REPO_ROOT" && REMOVED=$((REMOVED+1)) || true
 done
 echo ""
 
 # STEP 2: Remove .gitconfig.local
 echo "[STEP 2] Removing .gitconfig.local..."
 echo "-----"
-backup_file "$HOME_DIR/.gitconfig.local" && ((REMOVED++)) || true
+backup_file "$HOME_DIR/.gitconfig.local" && REMOVED=$((REMOVED+1)) || true
 echo ""
 
 # STEP 2b: Remove the git-alias browser keybinding from shell rc files
@@ -85,10 +85,12 @@ echo "-----"
 
 CRON_SCRIPT="$SCRIPT_DIR/update-gitconfig.sh"
 
-if crontab -l 2>/dev/null | grep -q "$CRON_SCRIPT"; then
-    crontab -l 2>/dev/null | grep -v "$CRON_SCRIPT" | crontab - 2>/dev/null
+if ! command -v crontab >/dev/null 2>&1; then
+    echo "[SKIP] crontab not found; no cron job to remove"
+elif crontab -l 2>/dev/null | grep -qF "$CRON_SCRIPT"; then
+    crontab -l 2>/dev/null | grep -vF "$CRON_SCRIPT" | crontab - 2>/dev/null
     echo "[OK] Removed cron job"
-    ((REMOVED++))
+    REMOVED=$((REMOVED+1))
 else
     echo "[SKIP] Cron job not found"
 fi
@@ -100,9 +102,9 @@ echo "-----"
 
 ERRORS=0
 for file in ".gitconfig" ".gitignore_global" "gitconfig_helper.py" ".gitconfig.local"; do
-    [ ! -e "$HOME_DIR/$file" ] && echo "[OK] $file removed" || { echo "[FAIL] $file still exists!"; ((ERRORS++)); }
+    [ ! -e "$HOME_DIR/$file" ] && echo "[OK] $file removed" || { echo "[FAIL] $file still exists!"; ERRORS=$((ERRORS+1)); }
 done
-crontab -l 2>/dev/null | grep -q "$CRON_SCRIPT" && { echo "[FAIL] Cron job still exists!"; ((ERRORS++)); } || echo "[OK] Cron job removed"
+crontab -l 2>/dev/null | grep -qF "$CRON_SCRIPT" && { echo "[FAIL] Cron job still exists!"; ERRORS=$((ERRORS+1)); } || echo "[OK] Cron job removed"
 git --version > /dev/null 2>&1 && echo "[OK] Git still functional" || echo "[WARN] Git may be unavailable"
 
 echo ""

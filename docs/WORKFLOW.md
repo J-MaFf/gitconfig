@@ -358,10 +358,10 @@ Automatic repository synchronization and maintenance.
 
 **What it does**:
 
-1. Runs at Windows user login (via Scheduled Task)
-2. Switches to main branch
-3. Runs `git pull` to fetch latest changes
-4. Syncs remote tracking branches (doesn't modify your work branches)
+1. Runs at Windows user login, one minute after logon (via the "GitConfig Pull at Login" scheduled task, which passes the repo path with `-RepoPath`)
+2. On main, fast-forwards it with `git pull --ff-only`; on any other branch, leaves that branch checked out and fast-forwards main in place with `git fetch origin main:main`
+3. Re-renders `~/.gitconfig` from the template
+4. Prunes local branches whose remote was deleted (doesn't touch local-only branches)
 5. Logs all operations
 
 **Log location**:

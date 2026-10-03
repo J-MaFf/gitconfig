@@ -3,12 +3,15 @@
 # and prunes merged branches.
 # Scheduled to run at user login via Windows Task Scheduler
 
+# RepoPath defaults to the repo this script lives in (scripts\windows version ->
+# repo root), not a fixed Documents path, so a clone anywhere still syncs.
+# Register-LoginTask.ps1 also passes the path explicitly.
 param(
-    [string]$RepoPath = "$env:USERPROFILE\Documents\Scripts\gitconfig"
+    [string]$RepoPath = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 )
 
 # Log file location
-$logFile = "$RepoPath\docs\update-gitconfig.log"
+$logFile = Join-Path $RepoPath "docs\update-gitconfig.log"
 
 # Function to log messages with timestamp
 function Write-Log {
@@ -17,14 +20,25 @@ function Write-Log {
     "$timestamp - $Message" | Tee-Object -FilePath $logFile -Append
 }
 
+# Check the path BEFORE logging: the log lives inside the repo, so with a wrong
+# path every Write-Log would throw (and the old order also hid the real error).
+# Report to stderr and exit 1 instead; Task Scheduler records the exit code.
+if (-not (Test-Path -LiteralPath $RepoPath -PathType Container)) {
+    [Console]::Error.WriteLine("$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - ERROR: Repository path not found: $RepoPath")
+    exit 1
+}
+$logDir = Split-Path -Parent $logFile
+if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+
+# Headless (login task): a git credential prompt would block forever with nobody
+# to answer it. Fail the network step instead; it is best-effort. Restored in
+# `finally` because a direct `& .\Update-GitConfig.ps1` runs in the caller's
+# session and must not leave the variable behind.
+$previousTerminalPrompt = $env:GIT_TERMINAL_PROMPT
+$env:GIT_TERMINAL_PROMPT = '0'
+
 try {
     Write-Log "Starting git repository synchronization..."
-
-    # Verify repo directory exists
-    if (-not (Test-Path $RepoPath)) {
-        Write-Log "ERROR: Repository path not found: $RepoPath"
-        exit 1
-    }
 
     # Change to repo directory
     Push-Location $RepoPath
@@ -32,15 +46,27 @@ try {
     # Step 1+2: Update the repo (best-effort; never fatal). A dirty tree, offline
     # state, or diverged history must not stop the convergence step below.
     # --untracked-files=no: the log we just wrote under docs/ is untracked and must
-    # not count as "dirty" (untracked files don't block a checkout or ff-only pull).
-    if (git status --porcelain --untracked-files=no 2>$null) {
+    # not count as "dirty" (untracked files don't block an ff-only pull).
+    # Never switch branches: a feature branch is someone's work in progress, and
+    # checking out main under them at login is a surprise. Off main, fast-forward
+    # main in place instead (`fetch origin main:main` refuses a non-fast-forward
+    # and never touches the working tree); the template rendered below is still
+    # the one in the checked-out branch.
+    $currentBranch = git rev-parse --abbrev-ref HEAD 2>$null
+    if ($currentBranch -ne "main") {
+        Write-Log "On '$currentBranch', not main; leaving it checked out and fast-forwarding main in place..."
+        $fetchMainResult = git fetch origin main:main 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Log "SUCCESS: main up to date (still on '$currentBranch')"
+        }
+        else {
+            Write-Log "WARN: could not fast-forward main (offline, diverged, or checked out elsewhere); continuing. Output: $fetchMainResult"
+        }
+    }
+    elseif (git status --porcelain --untracked-files=no 2>$null) {
         Write-Log "WARN: working tree not clean; skipping pull (will still converge ~/.gitconfig)"
     }
     else {
-        if ((git rev-parse --abbrev-ref HEAD 2>$null) -ne "main") {
-            git checkout main 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { Write-Log "WARN: could not switch to main; pulling current branch" }
-        }
         Write-Log "Fetching and fast-forwarding..."
         $pullResult = git pull --ff-only 2>&1
         if ($LASTEXITCODE -eq 0) {
@@ -118,4 +144,7 @@ try {
 catch {
     Write-Log "EXCEPTION: $_"
     exit 1
+}
+finally {
+    $env:GIT_TERMINAL_PROMPT = $previousTerminalPrompt
 }

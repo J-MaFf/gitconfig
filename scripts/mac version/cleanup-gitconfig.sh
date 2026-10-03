@@ -65,14 +65,14 @@ REMOVED=0
 echo "[STEP 1] Removing symlinks and generated files..."
 echo "-----"
 for file in ".gitconfig" ".gitignore_global" "gitconfig_helper.py"; do
-    backup_file "$HOME_DIR/$file" "$REPO_ROOT" && ((REMOVED++)) || true
+    backup_file "$HOME_DIR/$file" "$REPO_ROOT" && REMOVED=$((REMOVED+1)) || true
 done
 echo ""
 
 # STEP 2: Remove .gitconfig.local
 echo "[STEP 2] Removing .gitconfig.local..."
 echo "-----"
-backup_file "$HOME_DIR/.gitconfig.local" && ((REMOVED++)) || true
+backup_file "$HOME_DIR/.gitconfig.local" && REMOVED=$((REMOVED+1)) || true
 echo ""
 
 # STEP 2b: Remove the git-alias browser keybinding from shell rc files
@@ -92,7 +92,7 @@ if [ -f "$PLIST_PATH" ]; then
     launchctl unload "$PLIST_PATH" 2>/dev/null && echo "[OK] Unloaded launchd agent" || echo "[WARN] Could not unload agent (may not be running)"
     rm -f "$PLIST_PATH"
     echo "[OK] Removed launchd plist: $PLIST_PATH"
-    ((REMOVED++))
+    REMOVED=$((REMOVED+1))
 else
     echo "[SKIP] launchd plist not found"
 fi
@@ -104,9 +104,9 @@ echo "-----"
 
 ERRORS=0
 for file in ".gitconfig" ".gitignore_global" "gitconfig_helper.py" ".gitconfig.local"; do
-    [ ! -e "$HOME_DIR/$file" ] && echo "[OK] $file removed" || { echo "[FAIL] $file still exists!"; ((ERRORS++)); }
+    [ ! -e "$HOME_DIR/$file" ] && echo "[OK] $file removed" || { echo "[FAIL] $file still exists!"; ERRORS=$((ERRORS+1)); }
 done
-[ ! -f "$PLIST_PATH" ] && echo "[OK] launchd agent removed" || { echo "[FAIL] launchd plist still exists!"; ((ERRORS++)); }
+[ ! -f "$PLIST_PATH" ] && echo "[OK] launchd agent removed" || { echo "[FAIL] launchd plist still exists!"; ERRORS=$((ERRORS+1)); }
 git --version > /dev/null 2>&1 && echo "[OK] Git still functional"
 
 echo ""

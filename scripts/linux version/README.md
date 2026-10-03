@@ -109,7 +109,7 @@ Run the main setup script:
 **update-gitconfig.sh**
 
 ```bash
-./update-gitconfig.sh                            # Update from default location
+./update-gitconfig.sh                            # Update the repo this script lives in
 ./update-gitconfig.sh /path/to/gitconfig        # Update from specific location
 ```
 
@@ -139,7 +139,7 @@ Run the main setup script:
 
    ```bash
    crontab -e
-   # Add: 0 9 * * * /path/to/update-gitconfig.sh >> /tmp/gitconfig-update.log 2>&1
+   # Add: 0 9 * * * bash "/path/to/gitconfig/scripts/linux version/update-gitconfig.sh" "/path/to/gitconfig" >> /tmp/gitconfig-update.log 2>&1
    ```
 
 ### Reverse Setup
@@ -197,6 +197,7 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 
 ### Cron Job Not Working
 
+- `install.sh` skips the cron step with a `[WARN]` when `crontab` isn't installed (e.g. `sudo apt-get install cron`, then re-run)
 - Verify cron daemon is running: `systemctl status cron`
 - Check cron log: `grep CRON /var/log/syslog` (Debian/Ubuntu)
 - Manually test: `bash update-gitconfig.sh`
@@ -220,7 +221,7 @@ Edit the cron entry in `install.sh` before running:
 
 ```bash
 # Change this line:
-CRON_ENTRY="0 9 * * * bash \"$CRON_SCRIPT\" >> /tmp/gitconfig-update.log 2>&1"
+CRON_ENTRY="0 9 * * * bash \"$CRON_SCRIPT\" \"$REPO_ROOT\" >> /tmp/gitconfig-update.log 2>&1"
 ```
 
 Common cron schedules:
