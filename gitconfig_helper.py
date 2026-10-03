@@ -81,7 +81,7 @@ def cleanup_branches(force=False):
         # Get all branches before cleanup
         result_before = run_git("branch", "-vv", check=True)
         branches_before = set(
-            line.strip().split()[0].lstrip("*").strip()
+            line.lstrip("*+").split()[0]
             for line in result_before.stdout.strip().split("\n")
             if line.strip()
         )
@@ -107,6 +107,7 @@ def cleanup_branches(force=False):
             return
 
         branches_to_delete = []
+        worktree_branches = []
         for line in result_vv.stdout.strip().split("\n"):
             if not line.strip():
                 continue
@@ -114,15 +115,22 @@ def cleanup_branches(force=False):
             if line.startswith("*"):
                 continue
 
-            # Extract branch name (first field, after stripping *)
-            parts = line.strip().split()
+            # Extract branch name (first field, after stripping the * / + marker)
+            parts = line.lstrip("*+").split()
             if not parts:
                 continue
-            branch_name = parts[0].lstrip("*").strip()
+            branch_name = parts[0]
 
             # Check if branch has no remote tracking or remote is gone
             has_no_remote = "[origin/" not in line
             remote_is_gone = ": gone]" in line
+
+            # Branches checked out in another worktree (marked with +) can't be
+            # deleted until that worktree is removed; report the gone ones instead.
+            if line.startswith("+"):
+                if remote_is_gone:
+                    worktree_branches.append(branch_name)
+                continue
 
             if remote_is_gone:
                 # Auto-delete branches where remote has been deleted (merged branches)
@@ -139,10 +147,18 @@ def cleanup_branches(force=False):
                     f"[yellow]Warning: Failed to delete branch '{branch}': {result.stderr.strip()}[/yellow]"
                 )
 
+        if worktree_branches:
+            console.print(
+                f"[yellow]Skipped {len(worktree_branches)} merged branch(es) still checked out in a worktree "
+                "(see 'git worktree list'; remove the worktree, then re-run cleanup):[/yellow]"
+            )
+            for branch in sorted(worktree_branches):
+                console.print(f"[yellow]  {branch}[/yellow]")
+
         # Get all branches after cleanup
         result_after = run_git("branch", "-vv", check=True)
         branches_after = set(
-            line.strip().split()[0].lstrip("*").strip()
+            line.lstrip("*+").split()[0]
             for line in result_after.stdout.strip().split("\n")
             if line.strip()
         )
