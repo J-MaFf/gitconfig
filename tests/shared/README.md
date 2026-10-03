@@ -12,6 +12,8 @@ linux setup scripts depend on. They complement the Windows-only Pester suite in
 | `install-backups.bats` | bats-core | Runs the real mac and linux `install.sh` in a sandboxed `$HOME`: re-running never loses the original files, links into the repo aren't backed up, cleanup runs only with `--reinstall`, no `core.excludesfile` drift in `~/.gitconfig`, retention limit ([#226](https://github.com/J-MaFf/gitconfig/issues/226)) |
 | `auto-sync.bats` | bats-core | The login/daily auto-sync ([#225](https://github.com/J-MaFf/gitconfig/issues/225)): `scripts/shared/update-gitconfig.sh` defaults to its own repo, fails loudly on a missing path, keeps a feature branch checked out while fast-forwarding main, and runs git with `GIT_TERMINAL_PROMPT=0`; the Linux installer puts the repo path in the cron entry and finishes without `crontab`, and Linux cleanup removes only that entry (and also finishes without `crontab`); the mac installer writes a launchd plist with a Homebrew `PATH`; mac cleanup survives its counters under `set -e`. Uses stub `crontab`/`launchctl` and a fake `HOME` |
 | `test_gitconfig_helper.py` | [pytest](https://docs.pytest.org/) | `gitconfig_helper.py` — `_slugify`, `LABEL_PREFIX` selection, `_have`, `_default_branch`, `get_git_aliases` |
+| `update-gitconfig.bats` | bats-core | `scripts/shared/update-gitconfig.sh` — branch prune via `git for-each-ref` (a `: gone]` commit subject can't trigger a delete), `-d` before `-D`, tip SHAs logged, worktree skip, exit codes ([#228](https://github.com/J-MaFf/gitconfig/issues/228)) |
+| `test_gitconfig_helper.py` | [pytest](https://docs.pytest.org/) | `gitconfig_helper.py` — `_slugify`, `LABEL_PREFIX` selection, `_have`, `_default_branch`, `get_git_aliases`, branch cleanup, `git main`, `git start --no-track`, CLI exit codes |
 
 ## Running
 
@@ -39,5 +41,8 @@ python -m pip install pytest rich   # rich is gitconfig_helper.py's own dependen
 pytest tests/shared/test_gitconfig_helper.py
 ```
 
-The pytest suite imports `gitconfig_helper.py` by path and monkeypatches
-`run_git`, so it needs neither a real repository nor network access.
+The pytest suite imports `gitconfig_helper.py` by path. Most tests monkeypatch
+`run_git`; the branch-cleanup, `git main` and `git start` tests build throwaway
+repos (with a local bare remote) under pytest's `tmp_path`, with
+`GIT_CONFIG_GLOBAL` redirected, so they need no network and never touch your
+config.

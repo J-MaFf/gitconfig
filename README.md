@@ -155,8 +155,8 @@ git pushf          # Force-push the current branch safely (--force-with-lease)
 git sync           # Update the current branch with rebase + autostash
 git start <issue#> # Make a conventionally named branch from a GitHub issue's title
 git branches       # Track all remote branches
-git cleanup        # Clean up merged local branches
-git main           # Switch to main with fetch, pull, and branch cleanup
+git cleanup        # Delete local branches whose remote is gone (--force: merged local-only too)
+git main           # Switch to the default branch: fetch, fast-forward only, branch cleanup
 git main --all     # Run the above for every git repo in immediate subdirectories (alias: -a)
 ```
 

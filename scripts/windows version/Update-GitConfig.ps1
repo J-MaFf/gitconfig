@@ -37,6 +37,11 @@ if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path 
 $previousTerminalPrompt = $env:GIT_TERMINAL_PROMPT
 $env:GIT_TERMINAL_PROMPT = '0'
 
+# Non-zero when ~/.gitconfig could not be converged or a branch could not be
+# deleted; a failed pull or fetch (offline) is only logged. Without an explicit
+# exit, powershell -File reports 0 whatever happened.
+$exitCode = 0
+
 try {
     Write-Log "Starting git repository synchronization..."
 
@@ -91,6 +96,7 @@ try {
     }
     else {
         Write-Log "ERROR: convergence failed (exit code $LASTEXITCODE)"
+        $exitCode = 1
     }
 
     # Step 2c: Ensure the declared Python deps are present (rich required; textual
@@ -101,38 +107,56 @@ try {
     Install-PythonDeps -RepoRoot $RepoPath -Logger { param($m) Write-Log $m }
 
     # Step 3: Prune merged branches. Drop stale remote-tracking refs, then delete
-    # local branches whose upstream remote has been deleted (": gone]"). Mirrors
-    # the `git cleanup` alias. We don't recreate local branches for every remote
+    # local branches whose upstream remote has been deleted. Mirrors the
+    # `git cleanup` alias. We don't recreate local branches for every remote
     # here; the on-demand `git branches` alias covers that when wanted.
+    #
+    # Branch state comes from `git for-each-ref`, not `git branch -vv`: that
+    # text includes each branch's last commit subject, so a subject containing
+    # ": gone]" used to get a live branch deleted. Fields are separated by the
+    # ASCII unit separator (0x1f), which never appears in a ref name.
     Write-Log "Pruning merged branches..."
     $fetchResult = git fetch --prune 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Log "SUCCESS: git fetch --prune completed"
-        $branchLines = git branch -vv
+        $sep = [char]0x1f
+        $branchLines = git for-each-ref --format='%(refname:short)%1f%(HEAD)%1f%(upstream:track)%1f%(worktreepath)%1f%(objectname:short)' refs/heads/
         foreach ($line in $branchLines) {
-            # Skip the current branch (marked with a leading '*').
-            if ($line -match '^\*') { continue }
+            $fields = $line -split [regex]::Escape([string]$sep)
+            if ($fields.Count -ne 5) { continue }
+            $branch, $isHead, $track, $worktree, $tip = $fields
+            # Skip the current branch.
+            if ($isHead -eq '*') { continue }
             # Only delete branches whose upstream remote is gone.
-            if ($line -notmatch ': gone\]') { continue }
-            # Skip branches checked out in another worktree (leading '+');
-            # git refuses to delete them until the worktree is removed.
-            if ($line -match '^\+\s+(\S+)') {
-                Write-Log "Skipped merged branch checked out in a worktree: $($Matches[1])"
+            if ($track -ne '[gone]') { continue }
+            # Skip branches checked out in another worktree; git refuses to
+            # delete them until the worktree is removed.
+            if ($worktree) {
+                Write-Log "Skipped merged branch checked out in a worktree: $branch"
                 continue
             }
-            $goneBranch = ($line.Trim() -split '\s+')[0]
-            $deleteResult = git branch -D $goneBranch 2>&1
+            # -d first: it succeeds when the branch is merged into HEAD. A
+            # squash-merged PR branch never is, so fall back to -D for a gone
+            # branch, and log its tip so it can be restored.
+            git branch -d $branch 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) {
-                Write-Log "Deleted merged branch: $goneBranch"
+                Write-Log "Deleted merged branch: $branch (was $tip)"
+                continue
+            }
+            $deleteResult = git branch -D $branch 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "Deleted gone branch with commits not in HEAD (-D): $branch (was $tip; restore with: git branch $branch $tip)"
             }
             else {
-                Write-Log "WARNING: Failed to delete branch: $goneBranch"
+                Write-Log "WARNING: Failed to delete branch: $branch"
                 Write-Log "Output: $deleteResult"
+                $exitCode = 1
             }
         }
         Write-Log "SUCCESS: Merged branches pruned"
     }
     else {
+        # Offline at login is routine: log it, but don't fail the run for it.
         Write-Log "ERROR: git fetch --prune failed with exit code $LASTEXITCODE"
         Write-Log "Output: $fetchResult"
     }
@@ -148,3 +172,5 @@ catch {
 finally {
     $env:GIT_TERMINAL_PROMPT = $previousTerminalPrompt
 }
+
+exit $exitCode

@@ -36,29 +36,151 @@ def run_git(*args, check=False):
 
 
 def _default_branch():
-    """Return the configured default branch name, falling back to 'main'."""
-    result = run_git("config", "--get", "init.defaultBranch")
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
+    """Return the repository's default branch name.
+
+    The remote's own default (origin/HEAD, set by clone, by `git remote set-head
+    origin --auto`, or by fetch on git 2.48+) wins. init.defaultBranch only says
+    what *new* repos are called, so it is only a fallback; 'main' is the last
+    resort.
+    """
+    head = run_git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+    ref = head.stdout.strip() if head.returncode == 0 else ""
+    if ref.startswith("origin/") and len(ref) > len("origin/"):
+        return ref[len("origin/"):]
+    configured = run_git("config", "--get", "init.defaultBranch")
+    if configured.returncode == 0 and configured.stdout.strip():
+        return configured.stdout.strip()
     return "main"
 
 
-def cleanup_branches(force=False):
-    """Run git cleanup and display deleted branches in a table.
+# One field per branch property, separated by the ASCII unit separator (0x1f),
+# which can appear in neither a ref name nor a sane path.
+_BRANCH_FIELDS = ("name", "head", "upstream", "track", "worktree", "tip")
+_BRANCH_FORMAT = "%1f".join(
+    (
+        "%(refname:short)",
+        "%(HEAD)",
+        "%(upstream)",
+        "%(upstream:track)",
+        "%(worktreepath)",
+        "%(objectname:short)",
+    )
+)
+
+
+def _local_branches():
+    """Return the local branches as dicts, read with `git for-each-ref`.
+
+    Keys: name, tip (short SHA), current (checked out here), upstream (full ref
+    or "" when none is configured), gone (an upstream is configured but its ref
+    no longer exists), worktree (checked out in another worktree).
+
+    Structured fields replace the old scrape of `git branch -vv`, whose text
+    includes each branch's last commit subject: ": gone]" in a subject marked a
+    live branch as gone, and a branch tracking any remote other than origin read
+    as local-only. Returns None if git fails.
+    """
+    result = run_git("for-each-ref", f"--format={_BRANCH_FORMAT}", "refs/heads/")
+    if result.returncode != 0:
+        return None
+    branches = []
+    for line in result.stdout.splitlines():
+        fields = line.split("\x1f")
+        if len(fields) != len(_BRANCH_FIELDS):
+            continue
+        info = dict(zip(_BRANCH_FIELDS, fields))
+        current = info["head"] == "*"
+        branches.append(
+            {
+                "name": info["name"],
+                "tip": info["tip"],
+                "current": current,
+                "upstream": info["upstream"],
+                "gone": info["track"] == "[gone]",
+                "worktree": bool(info["worktree"]) and not current,
+            }
+        )
+    return branches
+
+
+def _delete_branch(branch, gone):
+    """Delete a branch with `git branch -d`, falling back to -D only if gone.
+
+    `-d` succeeds when the branch is merged into HEAD. When it refuses, `-D` is
+    used only for a branch whose upstream is gone (a squash-merged PR branch
+    always lands here, since its commits never reach main as-is). A local-only
+    branch is never force-deleted.
+
+    Returns (outcome, detail): outcome is "deleted" (-d), "forced" (-D),
+    "kept" (unmerged local-only branch, left alone; detail is git's refusal)
+    or "failed" (git refused even -D; detail is its stderr).
+    """
+    first = run_git("branch", "-d", branch)
+    if first.returncode == 0:
+        return "deleted", ""
+    if not gone:
+        return "kept", first.stderr.strip()
+    forced = run_git("branch", "-D", branch)
+    if forced.returncode == 0:
+        return "forced", ""
+    return "failed", forced.stderr.strip()
+
+
+def _fast_forward(console, label):
+    """Fast-forward the current branch to its upstream: the pull half of `pull --ff-only`.
+
+    Callers have just run `git fetch --prune`, so merging @{upstream} with
+    --ff-only completes a single pull without a second network round trip, and
+    never creates a merge commit. Returns True on success.
+    """
+    result = run_git("merge", "--ff-only", "@{upstream}")
+    if result.returncode == 0:
+        return True
+    console.print(f"[red]Error: Could not fast-forward {label}[/red]")
+    console.print(f"[red]{escape(result.stderr.strip())}[/red]")
+    # --ff-only never starts a merge, so this should be empty; checked anyway
+    # so an unexpected conflict is reported precisely (not by substring-matching
+    # `git status` output, which also matched file names like UU_notes.md).
+    conflicts = run_git("diff", "--name-only", "--diff-filter=U")
+    if conflicts.returncode == 0 and conflicts.stdout.strip():
+        console.print("[red]Unmerged paths:[/red]")
+        console.print(escape(conflicts.stdout.rstrip()))
+        return False
+    ahead = run_git("rev-list", "--count", "@{upstream}..HEAD")
+    if ahead.returncode == 0 and ahead.stdout.strip() not in ("", "0"):
+        console.print(
+            f"[yellow]Local {label} has {ahead.stdout.strip()} commit(s) that are not on its "
+            "upstream, so it can't be fast-forwarded. Inspect with: "
+            "git log --oneline --left-right HEAD...@{upstream}[/yellow]"
+        )
+    return False
+
+
+def cleanup_branches(force=False, update=True):
+    """Delete local branches whose work is finished; return an exit code.
+
+    Every deletion tries `git branch -d` first. A branch whose upstream is gone
+    falls back to `-D` (squash-merged PR branches are never "merged" as far as
+    -d can tell); its tip SHA is printed so it can be restored. Branches checked
+    out in another worktree are skipped and listed.
 
     Args:
-        force: If True, delete both branches with deleted remotes AND local-only branches.
-               If False, only delete branches where the remote has been deleted (merged branches).
+        force: Also delete local-only branches (no upstream at all), but only
+               those `-d` accepts; unmerged ones are kept and listed.
+        update: Fetch with --prune and fast-forward the default branch first.
+                switch_to_main() passes False because it has just done both.
+
+    Returns 0 on success, 1 if the cleanup could not run, the fetch failed, a
+    deletion failed, or the original branch could not be restored.
     """
     console = Console()
+    exit_code = 0
 
     try:
         # Verify we're in a git repository
-        try:
-            run_git("rev-parse", "--git-dir", check=True)
-        except subprocess.CalledProcessError:
+        if run_git("rev-parse", "--git-dir").returncode != 0:
             console.print("[red]Error: Not in a git repository[/red]")
-            return
+            return 1
 
         # Get current branch
         result_current = run_git("rev-parse", "--abbrev-ref", "HEAD", check=True)
@@ -66,86 +188,77 @@ def cleanup_branches(force=False):
         switched_branch = False
         default_branch = _default_branch()
 
-        # Switch to default branch if not already on it
+        # Switch to the default branch if not already on it, so that -d checks
+        # merged-ness against it and the branch we were on can be deleted too.
         if current_branch != default_branch:
             console.print(
                 f"[cyan]Switching from '{current_branch}' to '{default_branch}'...[/cyan]"
             )
             result = run_git("checkout", default_branch)
             if result.returncode != 0:
-                console.print("[red]Error: Failed to switch to main branch[/red]")
-                console.print(f"[red]{result.stderr.strip()}[/red]")
-                return
+                console.print(f"[red]Error: Failed to switch to {default_branch}[/red]")
+                console.print(f"[red]{escape(result.stderr.strip())}[/red]")
+                return 1
             switched_branch = True
 
-        # Get all branches before cleanup
-        result_before = run_git("branch", "-vv", check=True)
-        branches_before = set(
-            line.lstrip("*+").split()[0]
-            for line in result_before.stdout.strip().split("\n")
-            if line.strip()
-        )
-
-        # Run the actual cleanup command (not the alias to avoid recursion)
-        console.print("[cyan]Running git cleanup...[/cyan]")
-        run_git("fetch", "-p")
-
-        # Pull latest changes on main so local doesn't fall behind after cleanup
-        console.print("[cyan]Pulling latest changes on main...[/cyan]")
-        pull_result = run_git("pull")
-        if pull_result.returncode != 0:
-            console.print(f"[yellow]Warning: git pull failed: {pull_result.stderr.strip()}[/yellow]")
-
-        # Get list of branches to delete:
-        # 1. Branches with no remote tracking (no [origin/...] in output) - requires confirmation
-        # 2. Branches where the remote has been deleted (contains ": gone]") - auto-delete
-        result_vv = run_git("branch", "-vv")
-
-        # Handle empty or failed output
-        if not result_vv.stdout:
-            console.print("[yellow]Warning: Could not get branch information[/yellow]")
-            return
-
-        branches_to_delete = []
-        worktree_branches = []
-        for line in result_vv.stdout.strip().split("\n"):
-            if not line.strip():
-                continue
-            # Skip the current branch (marked with *)
-            if line.startswith("*"):
-                continue
-
-            # Extract branch name (first field, after stripping the * / + marker)
-            parts = line.lstrip("*+").split()
-            if not parts:
-                continue
-            branch_name = parts[0]
-
-            # Check if branch has no remote tracking or remote is gone
-            has_no_remote = "[origin/" not in line
-            remote_is_gone = ": gone]" in line
-
-            # Branches checked out in another worktree (marked with +) can't be
-            # deleted until that worktree is removed; report the gone ones instead.
-            if line.startswith("+"):
-                if remote_is_gone:
-                    worktree_branches.append(branch_name)
-                continue
-
-            if remote_is_gone:
-                # Auto-delete branches where remote has been deleted (merged branches)
-                branches_to_delete.append(branch_name)
-            elif has_no_remote and force:
-                # Delete local-only branches (never had a remote) only with --force flag
-                branches_to_delete.append(branch_name)
-
-        # Delete the identified branches
-        for branch in branches_to_delete:
-            result = run_git("branch", "-D", branch)
-            if result.returncode != 0:
+        if update:
+            console.print("[cyan]Running git cleanup...[/cyan]")
+            fetch_result = run_git("fetch", "--prune")
+            if fetch_result.returncode != 0:
+                # Carry on from the last known remote state, but report failure.
                 console.print(
-                    f"[yellow]Warning: Failed to delete branch '{branch}': {result.stderr.strip()}[/yellow]"
+                    f"[yellow]Warning: git fetch --prune failed: {escape(fetch_result.stderr.strip())}[/yellow]"
                 )
+                exit_code = 1
+            else:
+                # Keep the default branch current; a failure here is only a
+                # warning because it doesn't affect which branches are pruned.
+                console.print(f"[cyan]Fast-forwarding {default_branch}...[/cyan]")
+                if not _fast_forward(console, default_branch):
+                    console.print("[yellow]Warning: continuing with branch cleanup[/yellow]")
+
+        branches = _local_branches()
+        if branches is None:
+            console.print("[red]Error: Could not read branch information[/red]")
+            return 1
+
+        deleted = []  # (name, tip, how) with how in {"merged", "forced"}
+        kept = []  # local-only branches -d refused (unmerged)
+        worktree_branches = []
+        for branch in branches:
+            name = branch["name"]
+            if branch["current"] or name == default_branch:
+                continue
+            local_only = not branch["upstream"]
+            if not branch["gone"] and not (force and local_only):
+                continue
+            # Branches checked out in another worktree can't be deleted until
+            # that worktree is removed; report the gone ones instead.
+            if branch["worktree"]:
+                if branch["gone"]:
+                    worktree_branches.append(name)
+                continue
+
+            outcome, detail = _delete_branch(name, gone=branch["gone"])
+            if outcome == "deleted":
+                deleted.append((name, branch["tip"], "merged"))
+            elif outcome == "forced":
+                deleted.append((name, branch["tip"], "forced"))
+            elif outcome == "kept":
+                kept.append((name, branch["tip"]))
+            else:
+                exit_code = 1
+                console.print(
+                    f"[yellow]Warning: Failed to delete branch '{escape(name)}': {escape(detail)}[/yellow]"
+                )
+
+        if kept:
+            console.print(
+                f"[yellow]Kept {len(kept)} local-only branch(es) not merged into {default_branch} "
+                "(delete with 'git branch -D <name>' if you're sure):[/yellow]"
+            )
+            for name, tip in sorted(kept):
+                console.print(f"[yellow]  {escape(name)} ({tip})[/yellow]")
 
         if worktree_branches:
             console.print(
@@ -153,23 +266,14 @@ def cleanup_branches(force=False):
                 "(see 'git worktree list'; remove the worktree, then re-run cleanup):[/yellow]"
             )
             for branch in sorted(worktree_branches):
-                console.print(f"[yellow]  {branch}[/yellow]")
+                console.print(f"[yellow]  {escape(branch)}[/yellow]")
 
-        # Get all branches after cleanup
-        result_after = run_git("branch", "-vv", check=True)
-        branches_after = set(
-            line.lstrip("*+").split()[0]
-            for line in result_after.stdout.strip().split("\n")
-            if line.strip()
-        )
-
-        # Find deleted branches
-        deleted_branches = sorted(branches_before - branches_after)
+        deleted_names = {name for name, _, _ in deleted}
 
         # Switch back to original branch if we switched
         if switched_branch:
             # Check if the original branch was deleted during cleanup
-            if current_branch in deleted_branches:
+            if current_branch in deleted_names:
                 console.print(
                     f"[yellow]Note: Your original branch '{current_branch}' was deleted during cleanup.[/yellow]"
                 )
@@ -178,32 +282,43 @@ def cleanup_branches(force=False):
                 console.print(f"[cyan]Switching back to '{current_branch}'...[/cyan]")
                 result = run_git("checkout", current_branch)
                 if result.returncode != 0:
+                    exit_code = 1
                     console.print(
                         f"[yellow]Warning: Failed to switch back to '{current_branch}'[/yellow]"
                     )
-                    console.print(f"[yellow]{result.stderr.strip()}[/yellow]\n")
+                    console.print(f"[yellow]{escape(result.stderr.strip())}[/yellow]\n")
 
-        # Print summary of deleted branches
-        if deleted_branches:
+        # Print summary of deleted branches, with each tip so any can be restored.
+        if deleted:
             table = Table(
                 title="Deleted Branches", show_lines=True, header_style="bold green"
             )
             table.add_column("Branch Name", justify="left", style="cyan")
+            table.add_column("Tip", justify="left")
+            table.add_column("How", justify="left")
 
-            for branch in deleted_branches:
-                table.add_row(branch)
+            how_label = {
+                "merged": "merged (-d)",
+                "forced": f"[yellow]remote gone, not merged into {default_branch} (-D)[/yellow]",
+            }
+            for name, tip, how in sorted(deleted):
+                table.add_row(escape(name), tip, how_label[how])
 
             console.print(table)
             console.print(
-                f"[green][OK] Successfully deleted {len(deleted_branches)} branch(es)[/green]\n"
+                f"[green][OK] Successfully deleted {len(deleted)} branch(es)[/green] "
+                "[dim](restore one with: git branch <name> <tip>)[/dim]\n"
             )
         else:
             console.print(
                 "[dim]No branches were deleted. All local branches are up to date.[/dim]\n"
             )
 
+        return exit_code
+
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Error running git cleanup: {e}[/red]")
+        return 1
 
 
 # Category ordering for the alias table and the interactive browser's tabs.
@@ -231,7 +346,7 @@ ALIAS_METADATA = {
     # Branch & Sync
     "branches": ("Branch & Sync", "Download all remote branches and create local tracking branches"),
     "cleanup": ("Branch & Sync", "Delete branches with deleted remotes (merged). Use --force for local-only too"),
-    "main": ("Branch & Sync", "Switch to main (fetch, pull, cleanup). Use --all/-a for every repo in the Scripts root"),
+    "main": ("Branch & Sync", "Switch to the default branch (fetch, fast-forward, cleanup). Use --all/-a for every repo in the Scripts root"),
     "nb": ("Branch & Sync", "Create and switch to a new branch (git nb <name>)"),
     "pushf": ("Branch & Sync", "Force-push the current branch safely (--force-with-lease)"),
     "sync": ("Branch & Sync", "Update the current branch with rebase and autostash"),
@@ -1000,7 +1115,11 @@ def start_branch(issue):
         switch = run_git("switch", branch)
     else:
         console.print(f"[green]Creating branch[/green] [bold]{branch}[/bold] [green]from {base}[/green]")
-        switch = run_git("switch", "-c", branch, base)
+        # --no-track: without it the branch tracks origin/<default>, so the
+        # first `git push` fails (push.default=simple refuses a differently
+        # named upstream; push.autoSetupRemote only acts when there is none)
+        # and the branch never reads as gone, so cleanup never prunes it.
+        switch = run_git("switch", "--no-track", "-c", branch, base)
 
     if switch.returncode != 0:
         console.print("[red]Error: failed to create or switch to the branch[/red]")
@@ -1015,16 +1134,17 @@ def start_branch(issue):
 
 
 def switch_to_main():
-    """Switch to main branch with full error handling and conflict detection.
+    """Switch to the default branch and update it, with full error handling.
 
     Steps:
     1. Verify we're in a git repository
     2. Fetch updates from remote
     3. Check for uncommitted changes
-    4. Switch to main branch
-    5. Pull latest changes
-    6. Clean up branches with deleted remotes
-    7. Detect and report merge conflicts
+    4. Switch to the default branch (origin/HEAD; see _default_branch)
+    5. Fast-forward it to the fetched upstream (--ff-only, never a merge)
+    6. Clean up branches with deleted remotes (no second fetch or pull)
+
+    Returns 0 on success, 1 on any failure (including a failed cleanup).
     """
     console = Console()
 
@@ -1042,7 +1162,7 @@ def switch_to_main():
 
         # Step 2: Fetch updates
         console.print("[cyan]Fetching updates from remote...[/cyan]")
-        result = run_git("fetch", "-p")
+        result = run_git("fetch", "--prune")
         if result.returncode != 0:
             console.print("[red]Error: Failed to fetch from remote[/red]")
             console.print(f"[red]{result.stderr.strip()}[/red]")
@@ -1073,36 +1193,20 @@ def switch_to_main():
         else:
             console.print(f"[cyan]Already on {default_branch} branch[/cyan]")
 
-        # Step 5: Pull latest changes
-        console.print("[cyan]Pulling latest changes...[/cyan]")
-        result = run_git("pull")
+        # Step 5: Fast-forward from the fetch above (one pull, --ff-only): a
+        # local default branch that has diverged is reported, never merged.
+        console.print("[cyan]Fast-forwarding to the fetched upstream...[/cyan]")
+        if not _fast_forward(console, default_branch):
+            return 1
 
-        if result.returncode != 0:
-            # Check if it's a merge conflict
-            result_status = run_git("status", "--porcelain", check=True)
-
-            if (
-                "UU" in result_status.stdout
-                or "AA" in result_status.stdout
-                or "DD" in result_status.stdout
-            ):
-                console.print("[red]Error: Merge conflict detected during pull![/red]")
-                console.print("[yellow]Resolve conflicts and commit:[/yellow]")
-                console.print(result_status.stdout)
-                console.print(
-                    "[cyan]After resolving, run: git add . && git commit[/cyan]"
-                )
-                return 1
-            else:
-                console.print("[red]Error: Pull failed[/red]")
-                console.print(f"[red]{result.stderr.strip()}[/red]")
-                return 1
-
-        # Step 6: Clean up branches with deleted remotes
+        # Step 6: Clean up branches with deleted remotes. update=False: the
+        # fetch --prune and pull above already ran; don't repeat them.
         console.print("[cyan]Cleaning up branches with deleted remotes...[/cyan]")
-        cleanup_branches(force=False)
+        if cleanup_branches(force=False, update=False) != 0:
+            console.print("[red]Error: Branch cleanup reported a failure (see above)[/red]")
+            return 1
 
-        console.print("[green]OK Successfully switched to main and updated![/green]")
+        console.print(f"[green]OK Successfully switched to {default_branch} and updated![/green]")
         return 0
 
     except subprocess.CalledProcessError as e:
@@ -1189,10 +1293,10 @@ def update_all_main():
     Scans the immediate subdirectories of the derived Scripts root (the parent
     of the repo containing this helper -- see _scripts_root_repos()), regardless
     of the current working directory. For each git repo that is clean, runs
-    switch_to_main() (fetch, switch to main, pull, branch cleanup). Repos with a
-    dirty working tree are NOT switched -- instead a triage report (branch
-    position vs origin/main, last-commit age, working-tree breakdown) is printed
-    so the user can judge stale-vs-active themselves. The working tree is never
+    switch_to_main() (fetch, switch to the default branch, fast-forward, branch
+    cleanup). Repos with a dirty working tree are NOT switched -- instead a
+    triage report (branch position vs origin/main, last-commit age, working-tree
+    breakdown) is printed so the user can judge stale-vs-active themselves. The working tree is never
     mutated.
 
     Prints a per-repo header and a final summary table classifying each repo as
@@ -1374,6 +1478,23 @@ def list_issues(args):
     search page); it cannot be combined with --local.
     """
     console = Console()
+
+    # Reject anything unrecognised, so a typo like `--lable bug` fails instead
+    # of silently listing everything. --label/-l consume the next argument
+    # (a missing value is reported by the --label check below).
+    known = {"--all", "-a", "--local", "--web", "-w", "--mine", "-m"}
+    i = 0
+    while i < len(args):
+        if args[i] in ("--label", "-l"):
+            i += 2
+            continue
+        if args[i] not in known:
+            Console(stderr=True).print(
+                f"[red]Unknown argument: {escape(args[i])}[/red]\n"
+                + escape("Usage: git issues [--all|-a [--local]] [--mine|-m] [--label|-l <name>] [--web|-w]")
+            )
+            return 2
+        i += 1
 
     all_mode = "--all" in args or "-a" in args
     local = "--local" in args
@@ -1867,7 +1988,7 @@ if __name__ == "__main__":
         elif function_name == "cleanup":
             # Check for --force flag
             force = "--force" in sys.argv or "-f" in sys.argv
-            cleanup_branches(force=force)
+            sys.exit(cleanup_branches(force=force))
         elif function_name == "switch_to_main":
             # `git main --all` / `-a` updates every repo in immediate subdirectories
             if "--all" in sys.argv or "-a" in sys.argv:
@@ -1880,6 +2001,8 @@ if __name__ == "__main__":
         elif function_name == "issues":
             sys.exit(list_issues(sys.argv[2:]))
         else:
-            print(f"Function {function_name} not found.")
+            print(f"Function {function_name} not found.", file=sys.stderr)
+            sys.exit(2)
     else:
-        print("No function name provided.")
+        print("No function name provided.", file=sys.stderr)
+        sys.exit(2)

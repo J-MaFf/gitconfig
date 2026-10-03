@@ -1,16 +1,18 @@
 # Pytest suite for the pure-logic helpers in gitconfig_helper.py.
 #
 # These run on the primary dev platforms (Linux/macOS), complementing the
-# Windows-only Pester suite. They exercise the deterministic, side-effect-free
-# parts of the helper (slugifying, label->prefix mapping, default-branch
-# resolution, alias parsing) so regressions are caught without needing a real
-# repository or network access.
+# Windows-only Pester suite. Most exercise the deterministic parts of the helper
+# (slugifying, label->prefix mapping, default-branch resolution, alias parsing)
+# with run_git monkeypatched. The branch-cleanup, `git main` and `git start`
+# tests build throwaway repos under tmp_path with a local bare remote and an
+# isolated GIT_CONFIG_GLOBAL: no network, and the developer's config is untouched.
 #
 # Run with:  pytest tests/shared/test_gitconfig_helper.py
 # Requires:  pytest and the helper's own dependency, `rich`.
 
 import importlib.util
 import os
+import subprocess
 import sys
 
 import pytest
@@ -113,25 +115,118 @@ class TestHave:
 
 
 # --------------------------------------------------------------------------
-# _default_branch  (reads git config init.defaultBranch, falls back to main)
+# _default_branch  (origin/HEAD, then init.defaultBranch, then main)
 # --------------------------------------------------------------------------
 
-class TestDefaultBranch:
-    def test_falls_back_to_main_when_unset(self, helper, monkeypatch):
-        class _Result:
-            returncode = 1
-            stdout = ""
+class _Result:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
 
-        monkeypatch.setattr(helper, "run_git", lambda *a, **k: _Result())
+
+def _fake_git(responses):
+    """run_git stand-in: map the first git argument to a _Result (default: failure)."""
+    def run_git(*args, **kwargs):
+        return responses.get(args[0], _Result(returncode=1))
+    return run_git
+
+
+class TestDefaultBranch:
+    def test_uses_origin_head(self, helper, monkeypatch):
+        monkeypatch.setattr(helper, "run_git", _fake_git({
+            "symbolic-ref": _Result(stdout="origin/trunk\n"),
+            "config": _Result(stdout="main\n"),
+        }))
+        assert helper._default_branch() == "trunk"
+
+    def test_origin_head_wins_over_init_default_branch(self, helper, monkeypatch):
+        # init.defaultBranch only names *new* repos; it used to override the
+        # remote's real default and send `git main` to the wrong branch.
+        monkeypatch.setattr(helper, "run_git", _fake_git({
+            "symbolic-ref": _Result(stdout="origin/master\n"),
+            "config": _Result(stdout="main\n"),
+        }))
+        assert helper._default_branch() == "master"
+
+    def test_falls_back_to_init_default_branch(self, helper, monkeypatch):
+        monkeypatch.setattr(helper, "run_git", _fake_git({
+            "config": _Result(stdout="develop\n"),
+        }))
+        assert helper._default_branch() == "develop"
+
+    def test_falls_back_to_main_when_nothing_is_set(self, helper, monkeypatch):
+        monkeypatch.setattr(helper, "run_git", _fake_git({}))
         assert helper._default_branch() == "main"
 
-    def test_uses_configured_value(self, helper, monkeypatch):
-        class _Result:
-            returncode = 0
-            stdout = "trunk\n"
 
-        monkeypatch.setattr(helper, "run_git", lambda *a, **k: _Result())
-        assert helper._default_branch() == "trunk"
+# --------------------------------------------------------------------------
+# _local_branches / _delete_branch  (branch state from for-each-ref)
+# --------------------------------------------------------------------------
+
+def _ref_line(name, head="", upstream="", track="", worktree="", tip="abc1234"):
+    return "\x1f".join((name, head, upstream, track, worktree, tip))
+
+
+class TestLocalBranches:
+    def test_parses_structured_fields(self, helper, monkeypatch):
+        stdout = "\n".join([
+            _ref_line("main", head="*", upstream="refs/remotes/origin/main"),
+            _ref_line("feat/x", upstream="refs/remotes/origin/feat/x", track="[gone]", tip="1111111"),
+            _ref_line("fork", upstream="refs/remotes/upstream/main", track="[behind 2]"),
+            _ref_line("wt", upstream="refs/remotes/origin/wt", track="[gone]", worktree="/tmp/wt"),
+            _ref_line("local"),
+        ]) + "\n"
+        monkeypatch.setattr(helper, "run_git", _fake_git({"for-each-ref": _Result(stdout=stdout)}))
+        by_name = {b["name"]: b for b in helper._local_branches()}
+
+        assert by_name["main"]["current"] is True
+        assert by_name["main"]["worktree"] is False  # its own worktree path is not "another"
+        assert by_name["feat/x"]["gone"] is True
+        assert by_name["feat/x"]["tip"] == "1111111"
+        # A branch tracking a non-origin remote is neither gone nor local-only.
+        assert by_name["fork"]["gone"] is False
+        assert by_name["fork"]["upstream"] == "refs/remotes/upstream/main"
+        assert by_name["wt"]["worktree"] is True
+        assert by_name["local"]["upstream"] == ""
+        assert by_name["local"]["gone"] is False
+
+    def test_git_failure_returns_none(self, helper, monkeypatch):
+        monkeypatch.setattr(helper, "run_git", _fake_git({}))
+        assert helper._local_branches() is None
+
+
+class TestDeleteBranch:
+    @staticmethod
+    def _patch(helper, monkeypatch, d_ok, big_d_ok):
+        calls = []
+
+        def run_git(*args, **kwargs):
+            calls.append(args)
+            ok = d_ok if args[1] == "-d" else big_d_ok
+            return _Result(returncode=0 if ok else 1, stderr="" if ok else "error: nope")
+
+        monkeypatch.setattr(helper, "run_git", run_git)
+        return calls
+
+    def test_merged_branch_uses_d_only(self, helper, monkeypatch):
+        calls = self._patch(helper, monkeypatch, d_ok=True, big_d_ok=True)
+        assert helper._delete_branch("b", gone=True) == ("deleted", "")
+        assert calls == [("branch", "-d", "b")]
+
+    def test_gone_unmerged_branch_falls_back_to_force(self, helper, monkeypatch):
+        calls = self._patch(helper, monkeypatch, d_ok=False, big_d_ok=True)
+        assert helper._delete_branch("b", gone=True) == ("forced", "")
+        assert calls == [("branch", "-d", "b"), ("branch", "-D", "b")]
+
+    def test_unmerged_local_only_branch_is_never_forced(self, helper, monkeypatch):
+        calls = self._patch(helper, monkeypatch, d_ok=False, big_d_ok=True)
+        assert helper._delete_branch("b", gone=False) == ("kept", "error: nope")
+        assert ("branch", "-D", "b") not in calls
+
+    def test_reports_failure_when_force_fails(self, helper, monkeypatch):
+        self._patch(helper, monkeypatch, d_ok=False, big_d_ok=False)
+        assert helper._delete_branch("b", gone=True) == ("failed", "error: nope")
 
 
 # --------------------------------------------------------------------------
@@ -326,6 +421,244 @@ class TestRepoDirt:
         out = capsys.readouterr().out
         assert "8 uncommitted file(s)" in out
         assert "and 3 more" in out
+
+
+# --------------------------------------------------------------------------
+# Real-git behaviour: cleanup, git main, git start, CLI dispatch
+# --------------------------------------------------------------------------
+
+def _git(cwd, *args):
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _commit(cwd, name, subject):
+    (cwd / name).write_text(subject + "\n")
+    _git(cwd, "add", name)
+    _git(cwd, "commit", "-q", "-m", subject)
+
+
+@pytest.fixture
+def git_env(tmp_path, monkeypatch):
+    """Isolate git from the developer's config (signing, hooks, aliases)."""
+    gitconfig = tmp_path / "gitconfig"
+    gitconfig.write_text(
+        "[user]\n\tname = Test\n\temail = test@example.com\n"
+        "[commit]\n\tgpgsign = false\n"
+        "[init]\n\tdefaultBranch = main\n"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(gitconfig))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    return tmp_path
+
+
+@pytest.fixture
+def repo(git_env, monkeypatch):
+    """A clone of a bare remote, on main, with origin/HEAD -> origin/main."""
+    remote = git_env / "remote.git"
+    _git(git_env, "init", "-q", "--bare", "-b", "main", str(remote))
+    work = git_env / "work"
+    _git(git_env, "clone", "-q", str(remote), str(work))
+    _commit(work, "README.md", "Initial")
+    _git(work, "push", "-q", "-u", "origin", "main")
+    _git(work, "remote", "set-head", "origin", "main")
+    monkeypatch.chdir(work)
+    return work
+
+
+def _branches(cwd):
+    return set(_git(cwd, "for-each-ref", "--format=%(refname:short)", "refs/heads/").split())
+
+
+class TestCleanupBranches:
+    @staticmethod
+    def _build(repo, tmp_path):
+        tips = {}
+        # gone-merged: fast-forwarded into main, then its remote branch deleted.
+        _git(repo, "switch", "-q", "-c", "gone-merged")
+        _commit(repo, "m.txt", "merged work")
+        _git(repo, "push", "-q", "-u", "origin", "gone-merged")
+        _git(repo, "switch", "-q", "main")
+        _git(repo, "merge", "-q", "--ff-only", "gone-merged")
+        _git(repo, "push", "-q", "origin", "main")
+        # gone-unmerged: squash-merge stand-in (commits never reach main as-is).
+        _git(repo, "switch", "-q", "-c", "gone-unmerged")
+        _commit(repo, "u.txt", "squashed work")
+        _git(repo, "push", "-q", "-u", "origin", "gone-unmerged")
+        tips["gone-unmerged"] = _git(repo, "rev-parse", "--short", "HEAD")
+        # trap: live branch whose subject contains ": gone]".
+        _git(repo, "switch", "-q", "-c", "trap", "main")
+        _commit(repo, "t.txt", "docs: gone] marks a deleted upstream")
+        _git(repo, "push", "-q", "-u", "origin", "trap")
+        # fork: tracks a second remote, which the old parser read as local-only.
+        upstream = tmp_path / "upstream.git"
+        _git(tmp_path, "clone", "-q", "--bare", str(tmp_path / "remote.git"), str(upstream))
+        _git(repo, "remote", "add", "upstream", str(upstream))
+        _git(repo, "fetch", "-q", "upstream")
+        _git(repo, "switch", "-q", "-c", "fork", "main")
+        _commit(repo, "f.txt", "fork work")
+        _git(repo, "branch", "-q", "--set-upstream-to=upstream/main")
+        # local-merged / local-unmerged: no upstream at all.
+        _git(repo, "branch", "local-merged", "main")
+        _git(repo, "switch", "-q", "-c", "local-unmerged", "main")
+        _commit(repo, "l.txt", "local work")
+        tips["local-unmerged"] = _git(repo, "rev-parse", "--short", "HEAD")
+        # gone-worktree: gone, but checked out in another worktree.
+        _git(repo, "switch", "-q", "-c", "gone-worktree", "main")
+        _commit(repo, "w.txt", "worktree work")
+        _git(repo, "push", "-q", "-u", "origin", "gone-worktree")
+        _git(repo, "switch", "-q", "main")
+        _git(repo, "worktree", "add", "-q", str(tmp_path / "wt"), "gone-worktree")
+        for b in ("gone-merged", "gone-unmerged", "gone-worktree"):
+            _git(repo, "push", "-q", "origin", "--delete", b)
+        _git(repo, "switch", "-q", "trap")  # start somewhere other than main
+        return tips
+
+    def test_force_cleanup(self, helper, repo, tmp_path, capsys):
+        tips = self._build(repo, tmp_path)
+        assert helper.cleanup_branches(force=True) == 0
+        out = capsys.readouterr().out
+        assert _branches(repo) == {
+            "main", "trap", "fork", "local-unmerged", "gone-worktree",
+        }
+        assert _git(repo, "branch", "--show-current") == "trap"
+        assert tips["gone-unmerged"] in out  # tip printed so it can be restored
+        assert "local-unmerged" in out and tips["local-unmerged"] in out  # kept, listed
+        assert "gone-worktree" in out  # skipped, listed
+
+    def test_default_cleanup_leaves_local_only_branches(self, helper, repo, tmp_path):
+        self._build(repo, tmp_path)
+        assert helper.cleanup_branches(force=False) == 0
+        assert _branches(repo) == {
+            "main", "trap", "fork", "local-merged", "local-unmerged", "gone-worktree",
+        }
+
+    def test_failed_deletion_returns_1(self, helper, repo, tmp_path):
+        self._build(repo, tmp_path)
+        (repo / ".git" / "refs" / "heads" / "gone-unmerged.lock").write_text("")
+        assert helper.cleanup_branches(force=False) == 1
+        assert "gone-unmerged" in _branches(repo)
+
+    def test_failed_fetch_returns_1(self, helper, repo, tmp_path):
+        self._build(repo, tmp_path)
+        _git(repo, "remote", "set-url", "origin", str(tmp_path / "missing.git"))
+        assert helper.cleanup_branches(force=False) == 1
+
+
+class TestSwitchToMain:
+    @staticmethod
+    def _advance_remote(tmp_path):
+        other = tmp_path / "other"
+        _git(tmp_path, "clone", "-q", str(tmp_path / "remote.git"), str(other))
+        _commit(other, "remote.txt", "remote work")
+        _git(other, "push", "-q", "origin", "main")
+        return _git(other, "rev-parse", "HEAD")
+
+    def test_fetches_once_and_fast_forwards(self, helper, repo, tmp_path, monkeypatch):
+        remote_head = self._advance_remote(tmp_path)
+        _git(repo, "switch", "-q", "-c", "work")
+        calls = []
+        real = helper.run_git
+
+        def spy(*args, **kwargs):
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(helper, "run_git", spy)
+        assert helper.switch_to_main() == 0
+        assert _git(repo, "rev-parse", "HEAD") == remote_head
+        assert _git(repo, "branch", "--show-current") == "main"
+        assert sum(1 for c in calls if c[0] == "fetch") == 1
+        assert not any(c[0] == "pull" for c in calls)
+
+    def test_diverged_main_fails_without_merging(self, helper, repo, tmp_path, capsys):
+        self._advance_remote(tmp_path)
+        _commit(repo, "local.txt", "local-only commit on main")
+        before = _git(repo, "rev-parse", "HEAD")
+        assert helper.switch_to_main() == 1
+        assert _git(repo, "rev-parse", "HEAD") == before  # no merge commit
+        assert "1 commit(s)" in capsys.readouterr().out
+
+    def test_follows_origin_head_not_init_default_branch(self, helper, repo, tmp_path):
+        # The remote's default is "trunk"; init.defaultBranch says "main".
+        _git(repo, "push", "-q", "origin", "main:trunk")
+        _git(repo, "remote", "set-head", "origin", "trunk")
+        _git(repo, "switch", "-q", "-c", "trunk", "--track", "origin/trunk")
+        _git(repo, "switch", "-q", "main")
+        assert helper.switch_to_main() == 0
+        assert _git(repo, "branch", "--show-current") == "trunk"
+
+
+class TestFastForwardConflictReport:
+    """Unmerged paths come from `git diff --diff-filter=U`, not from searching
+    `git status` text for "UU"/"AA"/"DD" (which also matched file names)."""
+
+    @staticmethod
+    def _patch(helper, monkeypatch, unmerged):
+        monkeypatch.setattr(helper, "run_git", _fake_git({
+            "merge": _Result(returncode=1, stderr="fatal: Not possible to fast-forward"),
+            "diff": _Result(stdout=unmerged),
+            "status": _Result(stdout="?? UU_notes.md\n"),
+            "rev-list": _Result(stdout="0\n"),
+        }))
+
+    def test_status_code_lookalike_file_name_is_not_a_conflict(self, helper, monkeypatch, capsys):
+        self._patch(helper, monkeypatch, unmerged="")
+        assert helper._fast_forward(helper.Console(), "main") is False
+        assert "Unmerged paths" not in capsys.readouterr().out
+
+    def test_reports_real_unmerged_paths(self, helper, monkeypatch, capsys):
+        self._patch(helper, monkeypatch, unmerged="src/a.py\n")
+        assert helper._fast_forward(helper.Console(), "main") is False
+        out = capsys.readouterr().out
+        assert "Unmerged paths" in out and "src/a.py" in out
+
+
+class TestStartBranch:
+    def test_new_branch_has_no_upstream(self, helper, repo, monkeypatch):
+        real_run = subprocess.run
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd[0] == "gh":
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout='{"title": "Fix the thing", "labels": [{"name": "bug"}]}', stderr=""
+                )
+            return real_run(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(helper, "_have", lambda cmd: True)
+        monkeypatch.setattr(helper.subprocess, "run", fake_run)
+        assert helper.start_branch("7") == 0
+        assert _git(repo, "branch", "--show-current") == "fix/fix-the-thing"
+        upstream = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "@{upstream}"], cwd=repo, capture_output=True
+        )
+        assert upstream.returncode != 0  # untracked: first push sets it
+
+
+class TestCli:
+    @staticmethod
+    def _run(*args):
+        return subprocess.run(
+            [sys.executable, HELPER_PATH, *args], capture_output=True, text=True
+        )
+
+    def test_unknown_function_exits_2_on_stderr(self):
+        result = self._run("bogus")
+        assert result.returncode == 2
+        assert "bogus" in result.stderr
+        assert result.stdout == ""
+
+    def test_missing_function_exits_2(self):
+        result = self._run()
+        assert result.returncode == 2
+        assert result.stderr
+
+    def test_issues_rejects_unknown_flag(self, helper, monkeypatch, capsys):
+        monkeypatch.setattr(helper, "_have", lambda cmd: pytest.fail("must not reach gh"))
+        monkeypatch.setattr(helper, "_run_gh", lambda *a, **k: pytest.fail("must not reach gh"))
+        assert helper.list_issues(["--lable", "bug"]) == 2
+        assert "--lable" in capsys.readouterr().err
 
 
 if __name__ == "__main__":
