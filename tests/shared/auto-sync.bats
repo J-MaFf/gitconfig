@@ -145,13 +145,14 @@ EOF
     run ! grep -rnE '\(\([A-Za-z_]+(\+\+|--)\)\)' "$REPO_ROOT/scripts" --include='*.sh'
 }
 
-# A crontab stub backed by a file: `crontab -l` prints it, `crontab -` replaces it.
+# A crontab stub backed by a file: `crontab -l` prints it, `crontab -` replaces it
+# once stdin ends (like real crontab), so `crontab -l | ... | crontab -` is safe.
 _stub_crontab() {
     cat > "$SANDBOX/bin/crontab" <<EOF
 #!/bin/sh
 case "\$1" in
     -l) [ -f "$SANDBOX/crontab.txt" ] || exit 1; cat "$SANDBOX/crontab.txt" ;;
-    -)  cat > "$SANDBOX/crontab.txt" ;;
+    -)  cat > "$SANDBOX/crontab.new" && mv "$SANDBOX/crontab.new" "$SANDBOX/crontab.txt" ;;
     *)  exit 2 ;;
 esac
 EOF
@@ -167,8 +168,8 @@ EOF
     grep -qF "\"$REPO_ROOT/scripts/linux version/update-gitconfig.sh\" \"$REPO_ROOT\"" "$SANDBOX/crontab.txt"
 }
 
-@test "linux install finishes when crontab is not installed" {
-    # A PATH that has the usual tools but no crontab binary.
+# A PATH dir ($SANDBOX/sysbin) with the usual tools but no crontab binary.
+_path_without_crontab() {
     mkdir -p "$SANDBOX/sysbin"
     for dir in /usr/local/bin /usr/bin /bin; do
         [ -d "$dir" ] || continue
@@ -178,9 +179,37 @@ EOF
             [ -e "$SANDBOX/sysbin/$name" ] || [ -L "$SANDBOX/sysbin/$name" ] || ln -s "$tool" "$SANDBOX/sysbin/$name"
         done
     done
-    run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$SANDBOX/sysbin" \
-        bash -c 'command -v crontab'
+    run env PATH="$SANDBOX/bin:$SANDBOX/sysbin" bash -c 'command -v crontab'
     [ "$status" -ne 0 ]
+}
+
+@test "linux cleanup removes the cron entry install added" {
+    _stub_crontab
+    printf '0 8 * * * echo keep-me\n' > "$SANDBOX/crontab.txt"
+    run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" \
+        bash "$REPO_ROOT/scripts/linux version/install.sh" --force
+    [ "$status" -eq 0 ]
+    grep -qF "update-gitconfig.sh" "$SANDBOX/crontab.txt"
+
+    run env PATH="$SANDBOX/bin:$PATH" bash "$REPO_ROOT/scripts/linux version/cleanup-gitconfig.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] Removed cron job"* ]]
+    ! grep -qF "update-gitconfig.sh" "$SANDBOX/crontab.txt"
+    # Other users' entries survive.
+    grep -qF "keep-me" "$SANDBOX/crontab.txt"
+}
+
+@test "linux cleanup finishes when crontab is not installed" {
+    _path_without_crontab
+    run env PATH="$SANDBOX/bin:$SANDBOX/sysbin" \
+        bash "$REPO_ROOT/scripts/linux version/cleanup-gitconfig.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"crontab not found"* ]]
+    [[ "$output" == *"Cleanup SUCCESSFUL!"* ]]
+}
+
+@test "linux install finishes when crontab is not installed" {
+    _path_without_crontab
 
     run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$SANDBOX/sysbin" \
         bash "$REPO_ROOT/scripts/linux version/install.sh" --force
