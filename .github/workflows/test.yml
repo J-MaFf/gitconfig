@@ -82,8 +82,22 @@ jobs:
           }
           Write-Host "PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition)), Pester $($pester.Version)"
 
+      - name: Configure git like a machine with this repo installed
+        # The tests create throwaway repos with plain `git init` and expect the
+        # branch to be main, which .gitconfig.template's init.defaultBranch
+        # gives every installed machine. A fresh runner defaults to master.
+        shell: pwsh
+        run: git config --global init.defaultBranch main
+
       - name: Run Pester suite
-        run: ./tests/run-tests.ps1
+        run: |
+          # Run the suite in a fresh process, the way a developer does. GitHub's
+          # pwsh/powershell step wrapper sets $ErrorActionPreference = 'stop',
+          # and under Windows PowerShell 5.1 that turns every git stderr line
+          # the tests capture with 2>&1 into a terminating error.
+          $exe = (Get-Process -Id $PID).Path
+          & $exe -NoProfile -ExecutionPolicy Bypass -File ./tests/run-tests.ps1
+          exit $LASTEXITCODE
 
   pester-integration:
     name: Pester integration (pwsh)
@@ -118,9 +132,19 @@ jobs:
               Install-Module -Name Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck -Scope CurrentUser
           }
 
+      - name: Configure git like a machine with this repo installed
+        # The tests create throwaway repos with plain `git init` and expect the
+        # branch to be main, which .gitconfig.template's init.defaultBranch
+        # gives every installed machine. A fresh runner defaults to master.
+        shell: pwsh
+        run: git config --global init.defaultBranch main
+
       - name: Run Pester suite including integration tests
         shell: pwsh
-        run: ./tests/run-tests.ps1 -IncludeIntegration
+        run: |
+          # Fresh process for the same reason as the unit job.
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./tests/run-tests.ps1 -IncludeIntegration
+          exit $LASTEXITCODE
 
   unix:
     name: bats + pytest (${{ matrix.os }})
