@@ -26,8 +26,13 @@ generate_gitconfig() {
 
     local generated_content
     generated_content=$(cat "$template_path")
-    generated_content="${generated_content//\{\{REPO_PATH\}\}/$repo_root}"
-    generated_content="${generated_content//\{\{HOME_DIR\}\}/$home_dir}"
+    # Quote the replacement so it is taken literally: under bash 5.2+
+    # patsub_replacement an unquoted & means "the matched text", which turned a
+    # repo at /a&b into /a{{REPO_PATH}}b. The assignment itself stays unquoted
+    # because bash <= 4.2 (macOS /bin/bash 3.2) keeps the inner quotes literally
+    # when the whole expansion is double-quoted.
+    generated_content=${generated_content//\{\{REPO_PATH\}\}/"$repo_root"}
+    generated_content=${generated_content//\{\{HOME_DIR\}\}/"$home_dir"}
 
     # Idempotent: if ~/.gitconfig already matches the rendered template, do nothing
     # (no prompt, no backup, no write). This makes the auto-update convergent and

@@ -310,6 +310,24 @@ backups_of() {
     run ! grep -q '{{' "$HOME_DIR/.gitconfig"
 }
 
+@test "generate_gitconfig keeps an & in the repo and home paths literal" {
+    # Under bash 5.2+ patsub_replacement an unquoted & in the replacement
+    # expands to the matched text, turning /a&b into /a{{REPO_PATH}}b.
+    local repo="$TESTDIR/a&b"
+    local home="$TESTDIR/h&me"
+    mkdir -p "$repo" "$home"
+    printf '[core]\n\trepo = {{REPO_PATH}}\n\thome = {{HOME_DIR}}\n' > "$repo/.gitconfig.template"
+
+    run generate_gitconfig "$repo" "$home" true
+    [ "$status" -eq 0 ]
+    grep -qxF $'\t'"repo = $TESTDIR/a&b" "$home/.gitconfig"
+    grep -qxF $'\t'"home = $TESTDIR/h&me" "$home/.gitconfig"
+    run ! grep -q '{{' "$home/.gitconfig"
+    # Older bash keeps quotes in a double-quoted replacement literally; make
+    # sure none leaked into the output.
+    run ! grep -qF '"' "$home/.gitconfig"
+}
+
 @test "generate_gitconfig errors when the template is missing" {
     local repo="$TESTDIR/repo-no-template"
     mkdir -p "$repo"

@@ -352,42 +352,44 @@ git branch
 
 Automatic repository synchronization and maintenance.
 
-### Update-GitConfig.ps1 (formerly pull-daily.ps1)
+### Update-GitConfig.ps1
 
 **Purpose**: Automatically synchronize repository changes at user login
 
-**What it does**:
+**What it does** (`scripts\windows version\Update-GitConfig.ps1`):
 
-1. Runs at Windows user login, one minute after logon (via the "GitConfig Pull at Login" scheduled task, which passes the repo path with `-RepoPath`)
-2. On main, fast-forwards it with `git pull --ff-only`; on any other branch, leaves that branch checked out and fast-forwards main in place with `git fetch origin main:main`
-3. Re-renders `~/.gitconfig` from the template
-4. Prunes local branches whose remote was deleted (doesn't touch local-only branches)
-5. Logs all operations
+1. Runs at Windows user login, one minute after logon (via the `GitConfig Pull at Login` scheduled task, which passes the repo path with `-RepoPath`)
+2. On main with a clean working tree, fast-forwards it with `git pull --ff-only`; on any other branch, leaves that branch checked out and fast-forwards main in place with `git fetch origin main:main`
+3. Regenerates `~/.gitconfig` from the template when it has drifted
+4. Installs any missing Python dependencies declared in `pyproject.toml`
+5. Runs `git fetch --prune` and deletes local branches whose upstream is gone (doesn't touch local-only branches)
+6. Logs all operations
 
 **Log location**:
 
 ```
-C:\Users\{username}\Documents\Scripts\gitconfig\docs\pull-daily.log
+C:\Users\{username}\Documents\Scripts\gitconfig\docs\update-gitconfig.log
 ```
 
 **Log format**:
 
 ```
-[2025-12-18 09:15:32] Update-GitConfig started
-[2025-12-18 09:15:33] Switched to branch 'main'
-[2025-12-18 09:15:34] Pulling latest changes...
-[2025-12-18 09:15:35] Pull completed successfully
-[2025-12-18 09:15:36] Syncing remote tracking branches...
+2025-12-18 09:15:32 - Starting git repository synchronization...
+2025-12-18 09:15:33 - Fetching and fast-forwarding...
+2025-12-18 09:15:35 - SUCCESS: repo up to date
+2025-12-18 09:15:36 - Converging ~/.gitconfig to template...
+2025-12-18 09:15:38 - Pruning merged branches...
+2025-12-18 09:15:39 - Repository synchronization process completed
 ```
 
 **Manual sync option**:
 
-```bash
+```powershell
 # Run manually anytime
-C:\Users\{username}\Documents\Scripts\gitconfig\scripts\Update-GitConfig.ps1
+& "$env:USERPROFILE\Documents\Scripts\gitconfig\scripts\windows version\Update-GitConfig.ps1"
 
-# Or from PowerShell
-pwsh -File "C:\Users\{username}\Documents\Scripts\gitconfig\scripts\Update-GitConfig.ps1"
+# Or from a non-PowerShell shell
+pwsh -File "C:\Users\{username}\Documents\Scripts\gitconfig\scripts\windows version\Update-GitConfig.ps1"
 ```
 
 ### Scheduled Task Management
@@ -395,26 +397,26 @@ pwsh -File "C:\Users\{username}\Documents\Scripts\gitconfig\scripts\Update-GitCo
 **View scheduled task**:
 
 ```powershell
-Get-ScheduledTask -TaskName "Update Git Config" | Select-Object *
+Get-ScheduledTask -TaskName "GitConfig Pull at Login" | Select-Object *
 ```
 
 **Manual task trigger**:
 
 ```powershell
-Start-ScheduledTask -TaskName "Update Git Config"
+Start-ScheduledTask -TaskName "GitConfig Pull at Login"
 ```
 
 **View task history**:
 
 ```powershell
-Get-ScheduledTaskInfo -TaskName "Update Git Config"
+Get-ScheduledTaskInfo -TaskName "GitConfig Pull at Login"
 ```
 
 **Check if auto-sync is running**:
 
-```bash
+```powershell
 # Look for recent log entries
-Get-Content "C:\Users\7maff\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 20
+Get-Content "$env:USERPROFILE\Documents\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 20
 ```
 
 ### Customizing Auto-Sync
@@ -422,21 +424,21 @@ Get-Content "C:\Users\7maff\Documents\Scripts\gitconfig\docs\pull-daily.log" -Ta
 **Disable scheduled task** (if needed):
 
 ```powershell
-Disable-ScheduledTask -TaskName "Update Git Config"
+Disable-ScheduledTask -TaskName "GitConfig Pull at Login"
 ```
 
 **Re-enable scheduled task**:
 
 ```powershell
-Enable-ScheduledTask -TaskName "Update Git Config"
+Enable-ScheduledTask -TaskName "GitConfig Pull at Login"
 ```
 
 **Change auto-sync frequency**:
 Edit the scheduled task via Task Scheduler:
 
 1. Open Task Scheduler
-2. Navigate to `Library\Microsoft\Windows\PowerShell\ScheduledJobs`
-3. Find "Update Git Config" task
+2. Select `Task Scheduler Library` (the task is registered at the root)
+3. Find the "GitConfig Pull at Login" task
 4. Right-click → Properties
 5. Modify triggers as needed
 
@@ -448,9 +450,9 @@ Typical workflow from feature creation to merge.
 
 ### Morning: Start of Day
 
-```bash
+```powershell
 # 1. Automated sync already ran (or run manually)
-C:\Users\{username}\Documents\Scripts\gitconfig\scripts\Update-GitConfig.ps1
+& "$env:USERPROFILE\Documents\Scripts\gitconfig\scripts\windows version\Update-GitConfig.ps1"
 
 # 2. Check latest branches
 git branches
@@ -618,7 +620,7 @@ cmd /c dir "$env:USERPROFILE\gitconfig_helper.py" /L
 ```powershell
 # Run setup script
 cd ~\Documents\Scripts\gitconfig
-.\scripts\install.ps1 -Force
+& ".\scripts\windows version\install.ps1" -Force
 ```
 
 ---
@@ -637,7 +639,7 @@ git config --get-all alias.alias
 Get-Command gitconfig_helper.py
 
 # Re-run setup
-.\scripts\install.ps1 -Force
+& ".\scripts\windows version\install.ps1" -Force
 ```
 
 ---
@@ -649,7 +651,7 @@ Get-Command gitconfig_helper.py
 **Check task status**:
 
 ```powershell
-Get-ScheduledTask -TaskName "Update Git Config" | Select-Object State, LastTaskResult
+Get-ScheduledTask -TaskName "GitConfig Pull at Login" | Select-Object State, LastTaskResult
 
 # Should show State: Enabled
 # LastTaskResult: 0 (success)
@@ -658,23 +660,23 @@ Get-ScheduledTask -TaskName "Update Git Config" | Select-Object State, LastTaskR
 **View task history**:
 
 ```powershell
-Get-ScheduledTaskInfo -TaskName "Update Git Config" | Select-Object LastRunTime, LastTaskResult
+Get-ScheduledTaskInfo -TaskName "GitConfig Pull at Login" | Select-Object LastRunTime, LastTaskResult
 ```
 
 **Manually trigger task**:
 
 ```powershell
-Start-ScheduledTask -TaskName "Update Git Config"
+Start-ScheduledTask -TaskName "GitConfig Pull at Login"
 
 # Check log immediately
-Get-Content "~\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 10
+Get-Content "~\Documents\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 10
 ```
 
 **Re-register task if needed**:
 
 ```powershell
-.\scripts\Cleanup-GitConfig.ps1 -Force
-.\scripts\install.ps1 -Force
+& ".\scripts\windows version\Cleanup-GitConfig.ps1" -Force
+& ".\scripts\windows version\install.ps1" -Force
 ```
 
 ---
@@ -696,7 +698,7 @@ python "~\Documents\Scripts\gitconfig\gitconfig_helper.py"
 pip install --upgrade rich
 
 # Re-run setup
-.\scripts\install.ps1 -Force
+& ".\scripts\windows version\install.ps1" -Force
 ```
 
 ---
@@ -712,7 +714,7 @@ The setup scripts automatically request admin elevation. If you still get permis
 ```powershell
 # Run PowerShell as Administrator
 # Then run setup again
-.\scripts\install.ps1 -Force
+& ".\scripts\windows version\install.ps1" -Force
 ```
 
 ---
@@ -767,10 +769,10 @@ git branches
 git cleanup
 
 # 5. Check scheduled task
-Get-ScheduledTask -TaskName "Update Git Config" | Select-Object State
+Get-ScheduledTask -TaskName "GitConfig Pull at Login" | Select-Object State
 
 # 6. View logs
-Get-Content "~\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 5
+Get-Content "~\Documents\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 5
 ```
 
 **If everything shows green** ✅ - Your setup is working correctly!
@@ -778,7 +780,7 @@ Get-Content "~\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 5
 **If something fails** ❌ - Run the setup script:
 
 ```powershell
-.\scripts\install.ps1 -Force
+& ".\scripts\windows version\install.ps1" -Force
 ```
 
 ---
@@ -798,10 +800,10 @@ git cleanup
 git alias
 
 # Check automated sync
-Get-Content "~\Documents\Scripts\gitconfig\docs\pull-daily.log" -Tail 10
+Get-Content "~\Documents\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 10
 
 # Manual sync
-.\scripts\Update-GitConfig.ps1
+& ".\scripts\windows version\Update-GitConfig.ps1"
 ```
 
 ### When to Use Each Alias

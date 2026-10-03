@@ -27,6 +27,27 @@ Describe "Cleanup-GitConfig.ps1" {
         }
     }
 
+    Context "Help text" {
+        BeforeAll {
+            # -Help prints via Write-Host (information stream 6) and exits before
+            # the elevation check, so it is safe to run on any platform.
+            $script:helpText = & $scriptPath -Help 6>&1 | Out-String
+        }
+
+        It "Should name the scheduled task it actually removes" {
+            $taskName = [regex]::Match((Get-Content $scriptPath -Raw), '\$taskName\s*=\s*"([^"]+)"').Groups[1].Value
+            $taskName | Should -Not -BeNullOrEmpty
+            $script:helpText | Should -Match ([regex]::Escape("`"$taskName`""))
+        }
+
+        It "Should not list a signing-config step the script does not perform" {
+            # The script never touches user.signingkey / gpg.*; the help used to
+            # claim a 'Clears git SSH signing config' step.
+            $script:helpText | Should -Not -Match '(?i)signing'
+            Get-Content $scriptPath -Raw | Should -Not -Match '(?i)--unset[^\r\n]*(signingkey|gpg\.)'
+        }
+    }
+
     Context "Preserve machine-specific config" {
         It "Should skip removing .gitconfig.local when -KeepLocal is set" {
             $scriptContent = Get-Content $scriptPath -Raw

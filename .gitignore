@@ -29,3 +29,6 @@ __pycache__/
 
 # Beads / Dolt files (added by bd init)
 .beads/proxieddb/
+
+# Beads gate lock (was hidden only by the old global *.lock ignore)
+.beads.gate.lock

@@ -75,7 +75,7 @@ Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` 
 & ".\scripts\windows version\Cleanup-GitConfig.ps1"
 ```
 
-Removes: `~/.gitconfig`, symlinks, `~/.gitconfig.local`, and the `Update-GitConfig` scheduled task.
+Removes: `~/.gitconfig`, symlinks, `~/.gitconfig.local`, and the `GitConfig Pull at Login` scheduled task.
 
 ### Linux
 
@@ -197,7 +197,7 @@ git skill publish        # Publish new/edited skills via a PR (prompts for a mes
 ## Contents
 
 - **`.gitconfig.template`** - Template for generating machine-specific Git configuration
-- **`.gitignore_global`** - Global gitignore patterns for IDEs, OS files, and build artifacts
+- **`.gitignore_global`** - Global gitignore patterns for editor/OS junk and secrets only (language and build patterns belong in each project's own `.gitignore`)
 - **`gitconfig_helper.py`** - Python utility for managing git aliases, branch cleanup, and main branch operations
 - **`scripts/`** - Platform-specific setup and automation scripts
 

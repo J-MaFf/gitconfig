@@ -1,56 +1,61 @@
-# Global .gitignore patterns for common IDEs, OS files, and development tools
+# Global .gitignore: editor/OS junk and secrets only.
 # This file is meant to be used with: git config --global core.excludesfile ~/.gitignore_global
+#
+# A global ignore applies to EVERY repository on the machine and is invisible to
+# collaborators, so it only lists files that no repository should ever commit
+# (plus __pycache__/, which Python writes beside every module it imports).
+# Language and build patterns (node_modules/, __pycache__/, dist/, lockfiles,
+# bin/, lib/, ...) belong in each project's own .gitignore, where they are
+# visible and versioned. Globally ignoring them silently hides files that some
+# projects must commit (package-lock.json, a bin/ of scripts, a lib/ package).
 
 # ============================================================================
-# IDE and Editor Files
+# Editors
 # ============================================================================
 
-# VS Code
-.vscode/
-*.code-workspace
-.VSCodeCounter/
-
-# JetBrains IDEs (IntelliJ, PyCharm, WebStorm, etc.)
-.idea/
-*.iml
-*.iws
-*.ipr
+# Vim / Neovim
 *.swp
 *.swo
-*~
-
-# Vim
-.vim/
-*.vim
-.vimrc
+*.un~
 .netrwhist
-*~
-*.swp
-*.swo
-
-# Sublime Text
-*.sublime-project
-*.sublime-workspace
+Session.vim
 
 # Emacs
 *~
 \#*\#
 .\#*
 
-# Atom
-.atom/
+# JetBrains IDEs (IntelliJ, PyCharm, WebStorm, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
 
-# Eclipse
+# Eclipse / Spring Tool Suite
 .classpath
 .project
 .settings/
-.vscode/
+.factorypath
+.sts4-cache/
 
-# Notepad++
+# Sublime Text (per-user workspace state)
+*.sublime-workspace
+
+# VS Code extensions that write output into the workspace
+.VSCodeCounter/
+
+# Claude Code per-user settings
+**/.claude/settings.local.json
+
+# Editor, merge-tool and scratch backups
 *.bak
+*.backup
+*.orig
+*.tmp
+*.temp
 
 # ============================================================================
-# OS-Specific Files
+# OS files
 # ============================================================================
 
 # macOS
@@ -61,7 +66,6 @@
 .Trashes
 .VolumeIcon.icns
 .TemporaryItems
-*.swp
 *~.nib
 
 # Windows
@@ -69,160 +73,24 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
-*.lnk
-*.exe
-*.bat
-*.cmd
-*.com
 
-# Linux
+# Linux (KDE Dolphin folder settings)
 .directory
 
 # ============================================================================
-# Python
+# Interpreter caches (generated next to source, never committed)
 # ============================================================================
 
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-.pytest_cache/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.tox/
-.nox/
-.pylint.d/
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.pyre/
-venv/
-ENV/
-env/
-.venv
-*.pyo
 
 # ============================================================================
-# Node.js / npm
-# ============================================================================
-
-node_modules/
-npm-debug.log
-npm-debug.log.*
-yarn-debug.log
-yarn-error.log
-.npm
-package-lock.json
-yarn.lock
-
-# ============================================================================
-# Ruby / Bundler
-# ============================================================================
-
-Gemfile.lock
-.bundle/
-vendor/bundle/
-
-# ============================================================================
-# Go
-# ============================================================================
-
-*.o
-*.a
-*.so
-*.dylib
-*.test
-*.out
-/dist/
-
-# ============================================================================
-# Java
-# ============================================================================
-
-*.class
-*.jar
-*.war
-*.ear
-.classpath
-.project
-.gradle/
-build/
-*.log
-
-# ============================================================================
-# C / C++
-# ============================================================================
-
-*.o
-*.a
-*.so
-*.dylib
-*.exe
-*.out
-*.app
-
-# ============================================================================
-# Build and Compilation Outputs
-# ============================================================================
-
-bin/
-obj/
-build/
-dist/
-target/
-out/
-.gradle
-*.log
-*.out
-*.tmp
-*.swp
-
-# ============================================================================
-# Dependency Management
-# ============================================================================
-
-vendor/
-node_modules/
-.bundle/
-*.lock
-Gemfile.lock
-
-# ============================================================================
-# Local Configuration Files
+# Secrets and local credentials
 # ============================================================================
 
 .env
 .env.local
 .env.*.local
 .secrets
-config/local/
-local_config.yaml
-private.key
 *.pem
 *.key
 credentials.json
@@ -230,61 +98,3 @@ oauth_token
 .aws/credentials
 .ssh/
 .pgpass
-
-# ============================================================================
-# Temporary and Cache Files
-# ============================================================================
-
-*.tmp
-*.temp
-*.cache
-.cache/
-*.bak
-*.backup
-*.orig
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-.directory
-
-# ============================================================================
-# IDE-Specific Project Files
-# ============================================================================
-
-.classpath
-.project
-.factorypath
-.sts4-cache/
-.springBeans
-.sts4-cache
-
-# ============================================================================
-# Testing
-# ============================================================================
-
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.hypothesis/
-.pytest_cache/
-
-# ============================================================================
-# Documentation
-# ============================================================================
-
-site/
-docs/_build/
-dist/
-
-# ============================================================================
-# Misc
-# ============================================================================
-
-*.md.swp
-.vimrc.custom
-Session.vim
-
-**/.claude/settings.local.json
