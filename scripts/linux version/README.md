@@ -258,7 +258,7 @@ git config --list
 
 ## Notes
 
-- All scripts use bash 4.0+ features (associative arrays for consistency)
+- The setup scripts use no bash 4-only features and run under bash 3.2+; only the optional Ctrl-G alias widget for bash needs bash 4.0+ (`READLINE_LINE`)
 - Scripts preserve existing files by backing them up as `<file>.bak.YYYYMMDD-HHMMSS`; the newest 5 per file are kept (`GITCONFIG_BACKUP_KEEP` changes this, `0` keeps all)
 - No root/sudo required unless dealing with system-wide git config
 - Cron job logs to `/tmp/gitconfig-update.log`

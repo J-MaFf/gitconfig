@@ -25,8 +25,9 @@ DESCRIPTION:
     Removes all gitconfig-related setup:
     1. Moves .gitconfig, .gitignore_global and gitconfig_helper.py away
     2. Moves .gitconfig.local away (unless -KeepLocal)
-    3. Removes the Ctrl-G git-alias keybinding from the PowerShell profile
-    4. Deletes scheduled task (if it exists)
+    3. Removes the Ctrl-G git-alias browser keybinding from your profile
+    4. Deletes the "GitConfig Pull at Login" scheduled task (if it exists)
+    5. Verifies the cleanup
 
     Removed files are kept as timestamped backups (<file>.bak.yyyyMMdd-HHmmss,
     newest 5 per file; set GITCONFIG_BACKUP_KEEP to change, 0 keeps all).
