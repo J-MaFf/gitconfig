@@ -13,6 +13,9 @@ linux setup scripts depend on. They complement the Windows-only Pester suite in
 
 ## Running
 
+CI (`.github/workflows/test.yml`) runs both suites on `ubuntu-latest` and
+`macos-latest` for every pull request. To run them locally:
+
 ### Bash (bats)
 
 ```sh

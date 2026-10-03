@@ -1,0 +1,176 @@
+name: Tests
+
+# Runs every test suite on each platform the repo supports:
+#   - windows-latest: the Pester unit suite (tests/run-tests.ps1) under pwsh 7
+#     and under Windows PowerShell 5.1, which is what the login task and an
+#     elevated install.ps1 actually run.
+#   - windows-latest: the Pester suite again with -IncludeIntegration. Those
+#     tests run install.ps1 / Cleanup-GitConfig.ps1 for real (scheduled task,
+#     symlinks, ~/.gitconfig), which is safe here because a GitHub-hosted runner
+#     is a fresh VM that is thrown away after the job.
+#   - ubuntu-latest, macos-latest: the bats suites and the pytest suite in
+#     tests/shared/. On macOS the bats suites run under the system /bin/bash
+#     (3.2), the bash a stock Mac runs the scripts with.
+#   - ps-lint: parse check + PSScriptAnalyzer (Error severity fails), via the
+#     shared reusable workflow in J-MaFf/.github.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pester:
+    name: Pester (${{ matrix.shell }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # pwsh = PowerShell 7, powershell = Windows PowerShell 5.1
+        shell: [pwsh, powershell]
+    env:
+      # Make the py launcher (which the scripts and tests try first) pick the
+      # interpreter set up below rather than another preinstalled version.
+      PY_PYTHON: '3.12'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          # Install into every interpreter the scripts' py -> python3 -> python
+          # resolution could pick, so a test never sees one without rich.
+          foreach ($name in 'py', 'python3', 'python') {
+              if (Get-Command $name -CommandType Application -ErrorAction SilentlyContinue) {
+                  Write-Host "$name -> $(& $name -c 'import sys; print(sys.executable)')"
+                  & $name -m pip install --quiet --disable-pip-version-check rich textual
+                  if ($LASTEXITCODE -ne 0) { throw "pip install failed for $name" }
+              }
+          }
+
+      - name: Ensure Pester 5+ is installed
+        shell: ${{ matrix.shell }}
+        run: |
+          $pester = Get-Module -ListAvailable -Name Pester |
+              Where-Object { $_.Version -ge [Version]'5.0' } |
+              Sort-Object Version -Descending |
+              Select-Object -First 1
+          if (-not $pester) {
+              Write-Host 'Pester 5+ not found - installing...'
+              Install-Module -Name Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck -Scope CurrentUser
+              $pester = Get-Module -ListAvailable -Name Pester |
+                  Where-Object { $_.Version -ge [Version]'5.0' } |
+                  Select-Object -First 1
+          }
+          Write-Host "PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition)), Pester $($pester.Version)"
+
+      - name: Run Pester suite
+        shell: ${{ matrix.shell }}
+        run: ./tests/run-tests.ps1
+
+  pester-integration:
+    name: Pester integration (pwsh)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      PY_PYTHON: '3.12'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          foreach ($name in 'py', 'python3', 'python') {
+              if (Get-Command $name -CommandType Application -ErrorAction SilentlyContinue) {
+                  Write-Host "$name -> $(& $name -c 'import sys; print(sys.executable)')"
+                  & $name -m pip install --quiet --disable-pip-version-check rich textual
+                  if ($LASTEXITCODE -ne 0) { throw "pip install failed for $name" }
+              }
+          }
+
+      - name: Ensure Pester 5+ is installed
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable -Name Pester | Where-Object { $_.Version -ge [Version]'5.0' })) {
+              Install-Module -Name Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+
+      - name: Run Pester suite including integration tests
+        shell: pwsh
+        run: ./tests/run-tests.ps1 -IncludeIntegration
+
+  unix:
+    name: bats + pytest (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install bats
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install bats-core
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq bats
+          fi
+          bats --version
+
+      - name: Use the system bash 3.2 on macOS
+        if: runner.os == 'macOS'
+        run: |
+          # The runner image puts Homebrew's bash 5 first on PATH; a stock Mac
+          # runs the scripts with /bin/bash 3.2. The bats suites call `bash`
+          # from PATH, so shadow it with the system one.
+          mkdir -p "$RUNNER_TEMP/system-bash"
+          ln -sf /bin/bash "$RUNNER_TEMP/system-bash/bash"
+          echo "$RUNNER_TEMP/system-bash" >> "$GITHUB_PATH"
+
+      - name: Install Python dependencies
+        run: python -m pip install --quiet --disable-pip-version-check pytest rich textual
+
+      - name: Run bats suites
+        run: |
+          echo "bash on PATH: $(command -v bash) ($(bash -c 'echo $BASH_VERSION'))"
+          bats tests/shared/
+
+      - name: Run pytest suite
+        # Run even when bats failed, so one job reports both suites.
+        if: ${{ !cancelled() }}
+        run: python -m pytest tests/shared/ -v
+
+  ps-lint:
+    uses: J-MaFf/.github/.github/workflows/ps-lint.yml@main
+    permissions:
+      contents: read
