@@ -153,18 +153,17 @@ Describe "Initialize-GitConfig.ps1" {
             # Run generation with Force
             & $script:scriptPath -Force | Out-Null
 
-            # Check backup was created
-            $backupPath = "$($script:outputPath).bak"
-            $backupPath | Should -Exist
+            # Check a timestamped backup was created
+            $backups = @(Get-ChildItem -LiteralPath $script:testHome -Force -Filter ".gitconfig.bak.*")
+            $backups.Count | Should -Be 1
+            $backups[0].Name | Should -Match '^\.gitconfig\.bak\.\d{8}-\d{6}$'
 
             # Verify backup contains old content
-            $backupContent = Get-Content $backupPath -Raw
+            $backupContent = Get-Content $backups[0].FullName -Raw
             $backupContent | Should -Match "# Test config"
 
             # Clean up backup
-            if (Test-Path $backupPath) {
-                Remove-Item $backupPath -Force
-            }
+            $backups | Remove-Item -Force
         }
     }
 

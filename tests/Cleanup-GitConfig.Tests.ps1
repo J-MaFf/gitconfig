@@ -43,14 +43,15 @@ Describe "Cleanup-GitConfig.ps1" {
 
         It "Should contain cleanup logic" {
             $scriptContent = Get-Content $scriptPath -Raw
-            $scriptContent | Should -Match 'Remove-Item'
+            $scriptContent | Should -Match 'Backup-UserFile'
             $scriptContent | Should -Match 'ScheduledTask'
         }
 
-        It "Should have backup mechanism" {
+        It "Should move files to timestamped backups, skipping links into the repo" {
+            # Behaviour of Backup-UserFile is covered in Backups.Tests.ps1.
             $scriptContent = Get-Content $scriptPath -Raw
-            $scriptContent | Should -Match 'Existing\.'
-            $scriptContent | Should -Match '\.bak'
+            $scriptContent | Should -Match 'Backup-UserFile -Path \$Path -Move -RepoRoot \$repoRoot'
+            $scriptContent | Should -Not -Match 'Existing\.'
         }
     }
 

@@ -16,7 +16,8 @@ USAGE:
 
 OPTIONS:
     -Force      Regenerate (overwrite) an existing .gitconfig.local from the
-                template. Without -Force, an existing file is preserved.
+                template, keeping the old file as .gitconfig.local.bak.<timestamp>.
+                Without -Force, an existing file is preserved.
     -Help       Display this help message
 
 DESCRIPTION:
@@ -106,6 +107,9 @@ function Update-AllowedSigners {
 $homeDir = $env:USERPROFILE
 $localConfigPath = "$homeDir\.gitconfig.local"
 
+# Shared helpers: timestamped backups (Backup-UserFile).
+. (Join-Path $PSScriptRoot "Functions.ps1")
+
 Write-Host "Git Local Configuration Setup" -ForegroundColor Cyan
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host "Home Directory: $homeDir" -ForegroundColor Green
@@ -159,6 +163,15 @@ try {
 	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-app-setup
 	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-install
 "@
+
+        # -Force regenerate: keep the user's current file as a timestamped backup
+        # first (older backups are kept, see Backup-UserFile).
+        if ($localConfigExists) {
+            $backupPath = Backup-UserFile -Path $localConfigPath
+            if ($backupPath) {
+                Write-Host "[INFO] Backed up existing .gitconfig.local to $(Split-Path -Leaf $backupPath)" -ForegroundColor Yellow
+            }
+        }
 
         # Create or overwrite the local config file
         Set-Content -Path $localConfigPath -Value $configContent -Force

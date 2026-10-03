@@ -17,23 +17,24 @@ This directory provides a complete Linux/Unix version of the gitconfig setup sys
 ### Main Scripts
 
 - **install.sh** - Main setup wrapper orchestrates complete installation
-  - Cleans previous installation
+  - With `--reinstall` only: tears down the previous installation first
   - Generates .gitconfig from template
-  - Creates symlinks
-  - Generates .gitconfig.local
-  - Configures global gitignore
+  - Creates symlinks (links that already point into the repo are left alone)
+  - Generates .gitconfig.local (which also sets the global gitignore)
   - Sets up cron job (optional)
   - Verifies complete setup
 
 - **cleanup-gitconfig.sh** - Removes all gitconfig-related files and cron jobs
-  - Backs up all removed files
+  - Backs up removed files (timestamped `*.bak.YYYYMMDD-HHMMSS`); symlinks
+    into the repo are just removed
   - Useful for testing fresh setup
 
 ### Helper Scripts
 
 - **initialize-gitconfig.sh** - Generates .gitconfig from template
   - Handles placeholder substitution
-  - Creates backups of existing config
+  - Creates a timestamped backup of the existing config, and warns (key names
+    only) about settings the template would drop
   - Verifies git can read the generated config
 
 - **initialize-local-config.sh** - Creates machine-specific .gitconfig.local
@@ -149,7 +150,7 @@ To undo the installation:
 ./cleanup-gitconfig.sh --force
 ```
 
-All files are backed up to `~/*.bak` before removal.
+Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks that point into the repo are just removed). To tear down and set up again in one go, run `./install.sh --reinstall`.
 
 ## What Gets Installed
 
@@ -165,7 +166,8 @@ All files are backed up to `~/*.bak` before removal.
 
 ### Git Configuration
 
-- Global gitignore configured via `core.excludesfile`
+- Global gitignore configured via `core.excludesfile` in `~/.gitconfig.local`
+- Put your own settings in `~/.gitconfig.local`; `~/.gitconfig` is regenerated from the template
 - Safe directories configured for trusted repos
 
 ### Automation (Optional)
@@ -256,7 +258,7 @@ git config --list
 ## Notes
 
 - All scripts use bash 4.0+ features (associative arrays for consistency)
-- Scripts preserve existing files by backing them up with `.bak` extension
+- Scripts preserve existing files by backing them up as `<file>.bak.YYYYMMDD-HHMMSS`; the newest 5 per file are kept (`GITCONFIG_BACKUP_KEEP` changes this, `0` keeps all)
 - No root/sudo required unless dealing with system-wide git config
 - Cron job logs to `/tmp/gitconfig-update.log`
 - Windows-specific paths and settings are excluded

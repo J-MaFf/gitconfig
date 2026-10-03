@@ -211,3 +211,161 @@ function Install-PythonDeps {
         else { & $say "[WARN] Optional Python deps unavailable ($($needOptional -join ' ')); 'git alias' uses the static table" }
     }
 }
+
+# ---------------------------------------------------------------------------
+# Backups
+#
+# Every backup is timestamped (<file>.bak.yyyyMMdd-HHmmss) so a second install
+# or the login auto-update can never overwrite the backup of the user's
+# original file. Only the newest $env:GITCONFIG_BACKUP_KEEP backups of each file
+# are kept (default 5; 0 keeps them all). Older single-slot backups from earlier
+# versions (Existing.<file>.bak, .gitconfig.bak) are never touched. Mirrors the
+# bash helpers in scripts/shared/functions.sh.
+# ---------------------------------------------------------------------------
+
+# Return the item at Path without following a symlink (so a dangling link is
+# still found), or $null if nothing is there.
+function Get-LinkAwareItem {
+    param([Parameter(Mandatory)][string]$Path)
+    Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+}
+
+# How many backups of each file to keep. Invalid values fall back to 5.
+function Get-BackupKeep {
+    $keep = 0
+    if ($env:GITCONFIG_BACKUP_KEEP -and [int]::TryParse($env:GITCONFIG_BACKUP_KEEP, [ref]$keep) -and $keep -ge 0) {
+        return $keep
+    }
+    return 5
+}
+
+# Return a not-yet-used timestamped backup path for Path. The timestamp goes last
+# so names sort oldest-first; a same-second collision gets a zero-padded counter,
+# which still sorts after the bare stamp.
+function New-BackupPath {
+    param([Parameter(Mandatory)][string]$Path)
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $candidate = "$Path.bak.$stamp"
+    $n = 1
+    while (Get-LinkAwareItem -Path $candidate) {
+        $candidate = "$Path.bak.$stamp-{0:D2}" -f $n
+        $n++
+    }
+    return $candidate
+}
+
+# Delete all but the newest -Keep timestamped backups of Path (default:
+# Get-BackupKeep). 0 disables pruning. Only names New-BackupPath produces count.
+function Remove-OldBackups {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [int]$Keep = -1
+    )
+    if ($Keep -lt 0) { $Keep = Get-BackupKeep }
+    if ($Keep -eq 0) { return }
+    $dir = Split-Path -Parent $Path
+    $name = Split-Path -Leaf $Path
+    $pattern = '^' + [regex]::Escape($name) + '\.bak\.\d{8}-\d{6}(-\d{2,})?$'
+    $backups = @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -cmatch $pattern } |
+        Sort-Object -Property Name)
+    if ($backups.Count -le $Keep) { return }
+    $backups | Select-Object -First ($backups.Count - $Keep) | ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# True if Path is a symlink whose target lies inside Directory (e.g. a link this
+# tool created into the repo). Such a link holds no user data, so it is replaced
+# or removed without a backup.
+function Test-LinkIntoDirectory {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Directory
+    )
+    $item = Get-LinkAwareItem -Path $Path
+    if (-not $item -or $item.LinkType -ne 'SymbolicLink') { return $false }
+    $target = @($item.Target)[0]
+    if (-not $target) { return $false }
+    if (-not [IO.Path]::IsPathRooted($target)) {
+        $target = Join-Path (Split-Path -Parent $item.FullName) $target
+    }
+    $sep = [IO.Path]::DirectorySeparatorChar
+    $full = [IO.Path]::GetFullPath($target)
+    $root = [IO.Path]::GetFullPath($Directory).TrimEnd('\', '/') + $sep
+    return $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)
+}
+
+# True if Path is a symlink that already resolves to Target.
+function Test-LinkPointsTo {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Target
+    )
+    $item = Get-LinkAwareItem -Path $Path
+    if (-not $item -or $item.LinkType -ne 'SymbolicLink') { return $false }
+    $linkTarget = @($item.Target)[0]
+    if (-not $linkTarget) { return $false }
+    if (-not [IO.Path]::IsPathRooted($linkTarget)) {
+        $linkTarget = Join-Path (Split-Path -Parent $item.FullName) $linkTarget
+    }
+    return [string]::Equals([IO.Path]::GetFullPath($linkTarget), [IO.Path]::GetFullPath($Target), [StringComparison]::OrdinalIgnoreCase)
+}
+
+# Back up Path to a timestamped file in the same directory, then prune old
+# backups. -Move moves Path away (use before replacing or removing it);
+# otherwise it is copied and stays in place (use before overwriting it). With
+# -RepoRoot, a symlink into the repo is simply removed instead (-Move) or left
+# alone (copy): it is ours and backing it up would push a real backup out of the
+# retention window. Returns the backup path, or $null if nothing was backed up.
+function Backup-UserFile {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$Move,
+        [string]$RepoRoot
+    )
+    $item = Get-LinkAwareItem -Path $Path
+    if (-not $item) { return $null }
+
+    if ($RepoRoot -and (Test-LinkIntoDirectory -Path $Path -Directory $RepoRoot)) {
+        if ($Move) { Remove-Item -LiteralPath $Path -Force }
+        return $null
+    }
+
+    $backup = New-BackupPath -Path $Path
+    if ($Move) {
+        Move-Item -LiteralPath $Path -Destination $backup -Force
+    }
+    else {
+        Copy-Item -LiteralPath $Path -Destination $backup -Force
+    }
+    Remove-OldBackups -Path $Path
+    return $backup
+}
+
+# Return the names of settings in ExistingPath that NewContent (the rendered
+# template) doesn't have, e.g. ones `gh auth setup-git`, `git lfs install` or
+# `git config --global` wrote. Regenerating ~/.gitconfig drops them, so callers
+# warn before rewriting. Only key names are returned, never values.
+function Get-DroppedGitConfigKeys {
+    param(
+        [Parameter(Mandatory)][string]$ExistingPath,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$NewContent
+    )
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return @() }
+    $tmp = [IO.Path]::GetTempFileName()
+    try {
+        [IO.File]::WriteAllText($tmp, $NewContent)
+        $old = @(& git config --file $ExistingPath --list 2>$null)
+        $new = @(& git config --file $tmp --list 2>$null)
+    }
+    finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+    $newSet = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    foreach ($line in $new) { [void]$newSet.Add($line) }
+    $dropped = foreach ($line in $old) {
+        if (-not $newSet.Contains($line)) { ($line -split '=', 2)[0] }
+    }
+    return @($dropped | Sort-Object -Unique)
+}

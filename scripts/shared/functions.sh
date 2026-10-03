@@ -37,6 +37,15 @@ generate_gitconfig() {
         return 0
     fi
 
+    # A ~/.gitconfig that is a symlink into this repo is a leftover from an old
+    # install that linked it instead of generating it. Writing through it would
+    # clobber a file inside the repo, and backing it up would only save a link,
+    # so drop the link and write a real file in its place.
+    if _link_points_into "$output_path" "$repo_root"; then
+        rm -f "$output_path"
+        echo "[INFO] Replaced the old ~/.gitconfig symlink into the repo with a generated file"
+    fi
+
     if [ -f "$output_path" ] && [ "$force" = "false" ]; then
         echo ".gitconfig already exists at: $output_path"
         read -p "Overwrite? (y/n) " -n 1 -r
@@ -48,8 +57,8 @@ generate_gitconfig() {
     fi
 
     if [ -f "$output_path" ]; then
-        cp "$output_path" "$output_path.bak"
-        echo "[INFO] Backed up existing .gitconfig to .gitconfig.bak"
+        warn_dropped_gitconfig_keys "$output_path" "$generated_content"
+        backup_copy "$output_path"
     fi
 
     echo "$generated_content" > "$output_path"
@@ -75,35 +84,146 @@ generate_gitconfig() {
     echo ""
 }
 
-# Back up then remove a file (backs up to Existing.<name>.bak in same directory)
-# Usage: backup_file TARGET_PATH
-# Returns 0 if backed up, 1 if not found (skipped)
-backup_file() {
-    local target="$1"
-    local dir
-    dir="$(dirname "$target")"
-    local filename
-    filename="$(basename "$target")"
-    local backup="$dir/Existing.$filename.bak"
+# Warn about settings in EXISTING_PATH that the rendered template doesn't have
+# (e.g. ones `gh auth setup-git`, `git lfs install` or `git config --global`
+# wrote), because regenerating ~/.gitconfig drops them. Only key names are
+# printed, never values; the backup taken right after keeps the values.
+# Usage: warn_dropped_gitconfig_keys EXISTING_PATH NEW_CONTENT
+warn_dropped_gitconfig_keys() {
+    local existing="$1" new_content="$2" tmp old_list new_list dropped
+    command -v git >/dev/null 2>&1 || return 0
+    tmp="$(mktemp "${TMPDIR:-/tmp}/gitconfig-new.XXXXXX")" || return 0
+    printf '%s\n' "$new_content" > "$tmp"
+    old_list="$(git config --file "$existing" --list 2>/dev/null)"
+    new_list="$(git config --file "$tmp" --list 2>/dev/null)"
+    rm -f "$tmp"
+    [ -n "$old_list" ] || return 0
+    dropped="$(printf '%s\n' "$old_list" | while IFS= read -r line; do
+        if ! printf '%s\n' "$new_list" | grep -Fqx -- "$line"; then
+            printf '%s\n' "${line%%=*}"
+        fi
+    done | LC_ALL=C sort -u)"
+    [ -n "$dropped" ] || return 0
+    echo "[WARN] ~/.gitconfig has settings the template doesn't; regenerating drops them:"
+    printf '%s\n' "$dropped" | sed 's/^/         /'
+    echo "       They are kept in the backup below. To keep a setting, put it in"
+    echo "       ~/.gitconfig.local (git config --file ~/.gitconfig.local <key> <value>)."
+}
 
-    if [ -e "$target" ] || [ -L "$target" ]; then
-        [ -e "$backup" ] && rm -f "$backup"
-        mv "$target" "$backup"
-        echo "[OK] Backed up $filename to Existing.$filename.bak"
-        return 0
-    else
+# ---------------------------------------------------------------------------
+# Backups
+#
+# Every backup is timestamped (<file>.bak.YYYYMMDD-HHMMSS) so a second install
+# or the login auto-update can never overwrite the backup of the user's
+# original file. Only the newest GITCONFIG_BACKUP_KEEP backups of each file are
+# kept (default 5; 0 keeps them all). Older single-slot backups from previous
+# versions (Existing.<file>.bak, .gitconfig.bak) are never touched.
+# ---------------------------------------------------------------------------
+
+# Print a not-yet-used timestamped backup path for TARGET.
+# The timestamp goes last so the names sort oldest-first; a same-second
+# collision gets a zero-padded counter, which still sorts after the bare stamp.
+# Usage: _backup_path TARGET
+_backup_path() {
+    local target="$1" stamp candidate n=1
+    stamp="$(date '+%Y%m%d-%H%M%S')"
+    candidate="$target.bak.$stamp"
+    while [ -e "$candidate" ] || [ -L "$candidate" ]; do
+        candidate="$target.bak.$stamp-$(printf '%02d' "$n")"
+        n=$((n + 1))
+    done
+    printf '%s\n' "$candidate"
+}
+
+# Delete all but the newest KEEP timestamped backups of TARGET.
+# KEEP defaults to $GITCONFIG_BACKUP_KEEP, then 5. 0 disables pruning.
+# Only names this file's _backup_path produces are considered.
+# Usage: prune_backups TARGET [KEEP]
+prune_backups() {
+    local target="$1" keep="${2:-${GITCONFIG_BACKUP_KEEP:-5}}" list count f
+    case "$keep" in ''|*[!0-9]*) keep=5 ;; esac
+    if [ "$keep" -eq 0 ]; then return 0; fi
+    list="$(
+        for f in "$target".bak.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]*; do
+            if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\n' "$f"; fi
+        done | LC_ALL=C sort
+    )"
+    [ -n "$list" ] || return 0
+    count="$(printf '%s\n' "$list" | wc -l | tr -d ' ')"
+    [ "$count" -gt "$keep" ] || return 0
+    printf '%s\n' "$list" | head -n "$((count - keep))" | while IFS= read -r f; do
+        rm -f -- "$f"
+    done
+}
+
+# Succeed if PATH is a symlink whose target lies inside DIR (e.g. a link this
+# tool created into the repo). Such a link holds no user data, so it is
+# replaced or removed without a backup.
+# Usage: _link_points_into PATH DIR
+_link_points_into() {
+    local link="$1" dir="$2" target target_dir real_dir
+    [ -n "$dir" ] && [ -L "$link" ] || return 1
+    target="$(readlink "$link")" || return 1
+    case "$target" in /*) ;; *) target="$(dirname "$link")/$target" ;; esac
+    real_dir="$(cd -P "$dir" 2>/dev/null && pwd -P)" || real_dir="$dir"
+    target_dir="$(cd -P "$(dirname "$target")" 2>/dev/null && pwd -P)" || target_dir="$(dirname "$target")"
+    case "$target_dir/" in "$real_dir"/*) return 0 ;; esac
+    case "$target" in "$dir"/*) return 0 ;; esac
+    return 1
+}
+
+# Copy TARGET to a timestamped backup (TARGET stays in place), then prune.
+# Use before overwriting a file in place.
+# Usage: backup_copy TARGET
+backup_copy() {
+    local target="$1" backup
+    [ -f "$target" ] || return 1
+    backup="$(_backup_path "$target")"
+    cp -p "$target" "$backup"
+    echo "[INFO] Backed up existing $(basename "$target") to $(basename "$backup")"
+    prune_backups "$target"
+    return 0
+}
+
+# Move TARGET out of the way to a timestamped backup, then prune.
+# If REPO_ROOT is given and TARGET is a symlink into it, the link is just
+# removed: it is ours and holds nothing worth keeping, and backing it up would
+# push a real backup out of the retention window.
+# Returns 0 if TARGET was backed up or removed, 1 if it was not found.
+# Usage: backup_file TARGET [REPO_ROOT]
+backup_file() {
+    local target="$1" repo_root="${2:-}" filename backup
+    filename="$(basename "$target")"
+
+    if [ ! -e "$target" ] && [ ! -L "$target" ]; then
         echo "[SKIP] $filename not found"
         return 1
     fi
+
+    if [ -n "$repo_root" ] && _link_points_into "$target" "$repo_root"; then
+        rm -f "$target"
+        echo "[OK] Removed $filename (symlink into the repo; no backup needed)"
+        return 0
+    fi
+
+    backup="$(_backup_path "$target")"
+    mv "$target" "$backup"
+    echo "[OK] Backed up $filename to $(basename "$backup")"
+    prune_backups "$target"
+    return 0
 }
 
-# Create a symlink from SOURCE to LINK, backing up any existing file at LINK
-# Usage: create_symlink SOURCE LINK FORCE
+# Create a symlink from SOURCE to LINK. An existing LINK that is already the
+# right symlink is left alone; a symlink into REPO_ROOT (default: the directory
+# holding SOURCE) is replaced without a backup; anything else is moved to a
+# timestamped backup first.
+# Usage: create_symlink SOURCE LINK FORCE [REPO_ROOT]
 # Returns 0 on success or skip, 1 on error
 create_symlink() {
     local source_file="$1"
     local link_path="$2"
     local force="${3:-false}"
+    local repo_root="${4:-$(dirname "$1")}"
     local file
     file="$(basename "$link_path")"
 
@@ -112,7 +232,14 @@ create_symlink() {
         return 1
     fi
 
-    if [ -e "$link_path" ] || [ -L "$link_path" ]; then
+    if [ -L "$link_path" ] && [ "$link_path" -ef "$source_file" ]; then
+        echo "[OK] $file already linked"
+        return 0
+    fi
+
+    if _link_points_into "$link_path" "$repo_root"; then
+        rm -f "$link_path"
+    elif [ -e "$link_path" ] || [ -L "$link_path" ]; then
         if [ "$force" = "false" ]; then
             read -p "$file exists. Overwrite? (y/n) " -n 1 -r
             echo
@@ -121,11 +248,7 @@ create_symlink() {
                 return 0
             fi
         fi
-        local backup
-        backup="$(dirname "$link_path")/Existing.$file.bak"
-        [ -e "$backup" ] && rm -f "$backup"
-        mv "$link_path" "$backup"
-        echo "Backed up existing $file to Existing.$file.bak"
+        backup_file "$link_path"
     fi
 
     if ln -s "$source_file" "$link_path" 2>/dev/null; then
@@ -204,23 +327,6 @@ update_allowed_signers() {
     else
         printf '%s\n' "$line" >> "$allowed_signers_path"
         echo "[OK] Updated $allowed_signers_path"
-    fi
-}
-
-# Set git global core.excludesfile to HOME_DIR/.gitignore_global
-# Usage: configure_global_gitignore HOME_DIR
-configure_global_gitignore() {
-    local home_dir="$1"
-    local gitignore_path="$home_dir/.gitignore_global"
-
-    if [ -e "$gitignore_path" ]; then
-        if git config --global core.excludesfile "$gitignore_path" 2>/dev/null; then
-            echo "[OK] Configured global excludesfile"
-        else
-            echo "[FAIL] Could not configure global excludesfile"
-        fi
-    else
-        echo "[WARN] .gitignore_global not found"
     fi
 }
 

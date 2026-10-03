@@ -5,6 +5,7 @@
 param(
     [switch]$Force = $false,
     [switch]$NoTask = $false,
+    [switch]$Reinstall = $false,
     [switch]$Help = $false
 )
 
@@ -17,14 +18,27 @@ USAGE: .\install.ps1 [OPTIONS]
 OPTIONS:
     -Force      Overwrite existing files without prompting
     -NoTask     Skip Windows scheduled task creation
+    -Reinstall  Tear down the existing install first (Cleanup-GitConfig.ps1
+                -Force -KeepLocal), which also removes the scheduled task.
+                Without it, existing files are kept and only replaced after a
+                timestamped backup (<file>.bak.yyyyMMdd-HHmmss).
     -Help       Display this help message
 
 DESCRIPTION:
+    0. With -Reinstall only: removes the previous install
     1. Generates machine-specific .gitconfig from template
-    2. Creates symlinks (.gitconfig, .gitignore_global, gitconfig_helper.py)
-    3. Generates machine-specific .gitconfig.local
-    4. Creates Windows scheduled task for auto-sync (optional)
-    5. Verifies the complete setup
+    2. Creates symlinks (.gitignore_global, gitconfig_helper.py)
+    3. Generates machine-specific .gitconfig.local (kept if it exists)
+    5. Creates Windows scheduled task for auto-sync (optional)
+    6. Installs Python dependencies and the Ctrl-G alias browser
+    7. Verifies the complete setup
+
+    Put your own git settings in ~/.gitconfig.local: ~/.gitconfig is regenerated
+    from the template, and settings added to it (git config --global ...) are
+    dropped at the next login sync (they stay in the timestamped backup).
+
+    Backups: the newest 5 per file are kept; set GITCONFIG_BACKUP_KEEP to change
+    that (0 keeps them all).
 
 REQUIREMENTS: Administrator privileges
 "@
@@ -52,6 +66,7 @@ if (-not $isAdmin) {
     $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", "`"$scriptPath`"")
     if ($Force)  { $scriptArgs += "-Force" }
     if ($NoTask) { $scriptArgs += "-NoTask" }
+    if ($Reinstall) { $scriptArgs += "-Reinstall" }
 
     Write-Host "Relaunching with administrator privileges..." -ForegroundColor Cyan
     Write-Host ""
@@ -82,20 +97,25 @@ Write-Host "Repository: $repoRoot" -ForegroundColor Green
 Write-Host "Home Directory: $homeDir" -ForegroundColor Green
 Write-Host ""
 
-# STEP 0: Clean up any existing installation first
-Write-Host "[STEP 0] Cleaning up previous installation..." -ForegroundColor Cyan
-Write-Host "-----" -ForegroundColor Cyan
-try {
-    # -KeepLocal: the preflight teardown must not delete ~/.gitconfig.local, which
-    # holds user-owned machine state (safe.directory entries, etc.). A full reset
-    # is available via the standalone Cleanup-GitConfig.ps1 (without -KeepLocal).
-    & $cleanupScript -Force -KeepLocal -ErrorAction Stop | Out-Null
-    Write-Host "[OK] Previous installation cleaned up" -ForegroundColor Green
+# STEP 0: Clean up the existing installation, only when asked (-Reinstall). An
+# unconditional teardown used to run here; it moved every file away before the
+# later steps could ask "Overwrite?", and running install twice replaced the
+# backup of the user's original files. The steps below back up what they replace.
+if ($Reinstall) {
+    Write-Host "[STEP 0] Cleaning up previous installation..." -ForegroundColor Cyan
+    Write-Host "-----" -ForegroundColor Cyan
+    try {
+        # -KeepLocal: the teardown must not delete ~/.gitconfig.local, which holds
+        # user-owned machine state (safe.directory entries, etc.). A full reset is
+        # available via the standalone Cleanup-GitConfig.ps1 (without -KeepLocal).
+        & $cleanupScript -Force -KeepLocal -ErrorAction Stop | Out-Null
+        Write-Host "[OK] Previous installation cleaned up" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[WARN] No previous installation found or cleanup failed (this is OK)" -ForegroundColor Yellow
+    }
+    Write-Host ""
 }
-catch {
-    Write-Host "[WARN] No previous installation found or cleanup failed (this is OK)" -ForegroundColor Yellow
-}
-Write-Host ""
 
 # STEP 1: Generate .gitconfig from template
 Write-Host "[STEP 1] Generating .gitconfig from template..." -ForegroundColor Cyan
@@ -141,24 +161,9 @@ catch {
 }
 Write-Host ""
 
-# STEP 4: Configure global gitignore
-Write-Host "[STEP 4] Configuring global gitignore..." -ForegroundColor Cyan
-Write-Host "-----" -ForegroundColor Cyan
-$gitignoreGlobalPath = "$homeDir\.gitignore_global"
-if (Test-Path $gitignoreGlobalPath) {
-    try {
-        $gitignoreGlobalForward = $gitignoreGlobalPath -replace '\\', '/'
-        & git config --global core.excludesfile $gitignoreGlobalForward
-        Write-Host "[OK] Configured global excludesfile" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "[FAIL] Could not configure global excludesfile" -ForegroundColor Red
-    }
-}
-else {
-    Write-Host "[WARN] .gitignore_global symlink not found" -ForegroundColor Yellow
-}
-Write-Host ""
+# (No STEP 4: core.excludesfile is set by ~/.gitconfig.local. Writing it again
+# with git config --global made ~/.gitconfig differ from the template, so the
+# next login sync regenerated it.)
 
 # STEP 5: Create scheduled task (delegates to Register-LoginTask.ps1)
 if (-not $NoTask) {

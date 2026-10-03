@@ -705,21 +705,25 @@ Describe "Update-GitConfig.ps1" {
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
 
             (Get-Content $cfg -Raw) | Should -Not -Match "STALE-MARKER-DO-NOT-KEEP"
-            "$cfg.bak" | Should -Exist   # the stale version was backed up
+            # the stale version was backed up to a timestamped file
+            $backups = @(Get-ChildItem -LiteralPath $script:fakeHome -Force -Filter ".gitconfig.bak.*")
+            $backups.Count | Should -BeGreaterThan 0
+            ($backups | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n" | Should -Match "STALE-MARKER-DO-NOT-KEEP"
         }
 
         It "Should not rewrite ~/.gitconfig when it already matches the template" {
             # First run creates it from the template; the second run must be a no-op.
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
             $cfg = Join-Path $script:fakeHome ".gitconfig"
-            if (Test-Path "$cfg.bak") { Remove-Item "$cfg.bak" -Force }
+            Get-ChildItem -LiteralPath $script:fakeHome -Force -Filter ".gitconfig.bak*" | Remove-Item -Force
             if (Test-Path $script:logFile) { Remove-Item $script:logFile -Force }
 
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
 
             $logContent = Get-Content $script:logFile -Raw
             $logContent | Should -Match "already up to date"
-            "$cfg.bak" | Should -Not -Exist   # no rewrite => no backup made
+            # no rewrite => no backup made
+            @(Get-ChildItem -LiteralPath $script:fakeHome -Force -Filter ".gitconfig.bak*").Count | Should -Be 0
         }
     }
 }

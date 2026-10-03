@@ -26,8 +26,11 @@ OPTIONS:
 
 DESCRIPTION:
     Removes all gitconfig-related setup:
-    1. Backs up and removes .gitconfig, .gitignore_global, gitconfig_helper.py
+    1. Removes .gitconfig, .gitignore_global, gitconfig_helper.py
     2. Removes .gitconfig.local
+    Removed files are kept as timestamped backups (<file>.bak.YYYYMMDD-HHMMSS,
+    newest $GITCONFIG_BACKUP_KEEP kept, default 5). Symlinks into this repo are
+    removed without a backup.
     3. Removes cron job (if it exists)
 EOF
     exit 0
@@ -60,7 +63,7 @@ REMOVED=0
 echo "[STEP 1] Removing symlinks..."
 echo "-----"
 for file in ".gitconfig" ".gitignore_global" "gitconfig_helper.py"; do
-    backup_file "$HOME_DIR/$file" && ((REMOVED++)) || true
+    backup_file "$HOME_DIR/$file" "$REPO_ROOT" && ((REMOVED++)) || true
 done
 echo ""
 
