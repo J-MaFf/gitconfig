@@ -130,76 +130,25 @@ function New-Symlink {
     }
 }
 
-# Function to create scheduled task for git pull at login
+# Function to create scheduled task for git pull at login. Delegates to
+# Register-LoginTask.ps1 so both install paths register the same task (repo
+# path, -ExecutionPolicy Bypass, per-user trigger, time limit); that script
+# keeps an up-to-date task and replaces a stale one on its own.
 function Register-LoginTask {
     param(
         [string]$RepoRoot,
         [bool]$Force
     )
 
-    $taskName = "GitConfig Pull at Login"
-    $scriptPath = Join-Path $repoRoot "scripts\windows version\Update-GitConfig.ps1"
-
-    # Check if script exists
-    if (-not (Test-Path $scriptPath)) {
-        Write-Host "[WARN] Update-GitConfig.ps1 not found at $scriptPath" -ForegroundColor Yellow
+    $registerScript = Join-Path $RepoRoot "scripts\windows version\Register-LoginTask.ps1"
+    if (-not (Test-Path $registerScript)) {
+        Write-Host "[WARN] Register-LoginTask.ps1 not found at $registerScript" -ForegroundColor Yellow
         Write-Host "  Skipping scheduled task creation." -ForegroundColor Yellow
         return $false
     }
 
-    # Check if task already exists
-    $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-
-    if ($existingTask) {
-        if (-not $Force) {
-            $response = Read-Host "Scheduled task '$taskName' already exists. Replace? (y/n)"
-            if ($response -ne "y") {
-                Write-Host "Skipped scheduled task" -ForegroundColor Yellow
-                return $false
-            }
-        }
-        try {
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false | Out-Null
-            Write-Host "Removed existing scheduled task: $taskName" -ForegroundColor Yellow
-        }
-        catch {
-            Write-Host "[FAIL] Failed to remove existing scheduled task" -ForegroundColor Red
-            return $false
-        }
-    }
-
-    try {
-        # Create task action
-        $action = New-ScheduledTaskAction `
-            -Execute "PowerShell.exe" `
-            -Argument "-NoProfile -WindowStyle Hidden -File `"$scriptPath`""
-
-        # Create task trigger (at login)
-        $trigger = New-ScheduledTaskTrigger -AtLogOn
-
-        # Create task settings
-        $settings = New-ScheduledTaskSettingsSet `
-            -AllowStartIfOnBatteries `
-            -DontStopIfGoingOnBatteries `
-            -StartWhenAvailable
-
-        # Register the task
-        Register-ScheduledTask `
-            -TaskName $taskName `
-            -Action $action `
-            -Trigger $trigger `
-            -Settings $settings `
-            -Description "Automatically pull latest changes from gitconfig repository at user login" `
-            -Force | Out-Null
-
-        Write-Host "[OK] Created scheduled task: $taskName" -ForegroundColor Green
-        return $true
-    }
-    catch {
-        Write-Host "[FAIL] Failed to create scheduled task" -ForegroundColor Red
-        Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
-        return $false
-    }
+    if ($Force) { & $registerScript -RepoPath $RepoRoot -Force } else { & $registerScript -RepoPath $RepoRoot }
+    return ($LASTEXITCODE -eq 0)
 }
 
 # Create symlinks

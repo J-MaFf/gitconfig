@@ -44,7 +44,7 @@
 	skill = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py skill \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 	# Pull the latest gitconfig repo and reinstall ~/.gitconfig from the template
 	# on demand. Dispatches by OS: Git-for-Windows reports MINGW/MSYS/CYGWIN.
-	selfupdate = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -File '{{REPO_PATH}}/scripts/windows version/Update-GitConfig.ps1' -RepoPath '{{REPO_PATH}}' ;; *) bash '{{REPO_PATH}}/scripts/shared/update-gitconfig.sh' '{{REPO_PATH}}' ;; esac; }; f"
+	selfupdate = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{{REPO_PATH}}/scripts/windows version/Update-GitConfig.ps1' -RepoPath '{{REPO_PATH}}' ;; *) bash '{{REPO_PATH}}/scripts/shared/update-gitconfig.sh' '{{REPO_PATH}}' ;; esac; }; f"
 
 	# --- Inspect ---
 	# Short, branch-aware working-tree status

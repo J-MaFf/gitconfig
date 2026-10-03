@@ -3,9 +3,16 @@
 # Pulls the gitconfig repo, reinstalls ~/.gitconfig if the template changed, and
 # prunes merged branches; triggered by launchd/cron at login.
 
-REPO_PATH="${1:-$HOME/Documents/Scripts/gitconfig}"
-LOG_FILE="$REPO_PATH/docs/update-gitconfig.log"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Default to the repo this script lives in (scripts/shared -> repo root), not a
+# fixed ~/Documents path, so a clone anywhere still syncs. The installers also
+# pass the path explicitly.
+REPO_PATH="${1:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+LOG_FILE="$REPO_PATH/docs/update-gitconfig.log"
+
+# Headless (cron/launchd/login): a git credential prompt would block forever
+# with nobody to answer it. Fail the network step instead; it is best-effort.
+export GIT_TERMINAL_PROMPT=0
 
 log_message() {
     local timestamp
@@ -18,15 +25,18 @@ log_message() {
     echo "[$timestamp] $1"
 }
 
+# Check the path BEFORE creating anything: a wrong path must not leave a stray
+# "<path>/docs" tree behind. The log lives inside the repo, so this error can
+# only go to stderr (the cron entry and launchd plist capture it).
+if [ ! -d "$REPO_PATH" ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: Repository path not found: $REPO_PATH" >&2
+    exit 1
+fi
+
 mkdir -p "$(dirname "$LOG_FILE")"
 
 {
     log_message "Starting git repository synchronization..."
-
-    if [ ! -d "$REPO_PATH" ]; then
-        log_message "ERROR: Repository path not found: $REPO_PATH"
-        exit 1
-    fi
 
     cd "$REPO_PATH" || exit 1
 
@@ -34,13 +44,23 @@ mkdir -p "$(dirname "$LOG_FILE")"
     # A dirty tree, offline state, or diverged history must not stop us from
     # converging ~/.gitconfig below. --untracked-files=no: the log we just wrote
     # under docs/ is untracked and must not count as "dirty" (untracked files
-    # don't block a checkout or ff-only pull).
-    if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    # don't block an ff-only pull).
+    # Never switch branches: a feature branch is someone's work in progress, and
+    # checking out main under them at login is a surprise. Off main, fast-forward
+    # main in place instead (`fetch origin main:main` refuses a non-fast-forward
+    # and never touches the working tree); the template rendered below is still
+    # the one in the checked-out branch.
+    CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    if [ "$CURRENT_BRANCH" != "main" ]; then
+        log_message "On '$CURRENT_BRANCH', not main; leaving it checked out and fast-forwarding main in place..."
+        if git fetch origin main:main; then
+            log_message "SUCCESS: main up to date (still on '$CURRENT_BRANCH')"
+        else
+            log_message "WARN: could not fast-forward main (offline, diverged, or checked out elsewhere); continuing"
+        fi
+    elif [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
         log_message "WARN: working tree not clean; skipping pull (will still converge ~/.gitconfig)"
     else
-        if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" != "main" ]; then
-            git checkout main >/dev/null 2>&1 || log_message "WARN: could not switch to main; pulling current branch"
-        fi
         log_message "Fetching and fast-forwarding..."
         if git pull --ff-only; then
             log_message "SUCCESS: repo up to date"

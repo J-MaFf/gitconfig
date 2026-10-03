@@ -157,76 +157,119 @@ Describe "Update-GitConfig.ps1" {
         }
     }
 
-    Context "Step 1: Switch to Main Branch" {
+    Context "Step 1: Stay on the Current Branch" {
+        # Off main, the updater must leave the user's branch checked out (it used
+        # to `git checkout main`, yanking a work-in-progress branch at login) and
+        # fast-forward main in place with `git fetch origin main:main` (#225).
         BeforeEach {
-            # Create test repository
-            New-TestRepository -Path $script:testRepo
+            $suffix = [guid]::NewGuid().ToString("N")
+            $script:testRepo = Join-Path $TestDrive "test-repo-$suffix"
+            $script:logFile = Join-Path $script:testRepo "docs\update-gitconfig.log"
+            $script:remoteRepo = Join-Path $TestDrive "remote-repo-$suffix"
+            New-RemoteRepository -Path $script:remoteRepo
 
-            # Create a feature branch and switch to it
+            New-Item -Path $script:testRepo -ItemType Directory -Force | Out-Null
             Push-Location $script:testRepo
-            git checkout -b feature-branch 2>&1 | Out-Null
-            Pop-Location
-
-            # Ensure we're not in the test repo directory for cleanup
-            $currentPath = Get-Location
-            if ($currentPath.Path -eq $script:testRepo) {
+            try {
+                git clone $script:remoteRepo . 2>&1 | Out-Null
+                git config user.email "test@example.com"
+                git config user.name "Test User"
+                git config commit.gpgsign false
+                New-Item -Path "docs" -ItemType Directory -Force | Out-Null
+                "# Test" | Out-File -FilePath "README.md" -Encoding utf8
+                git add . 2>&1 | Out-Null
+                git commit -m "Initial" 2>&1 | Out-Null
+                git push origin HEAD:main 2>&1 | Out-Null
+                git checkout -b main 2>&1 | Out-Null
+                git branch --set-upstream-to=origin/main main 2>&1 | Out-Null
+                git checkout -b feature-branch 2>&1 | Out-Null
+            }
+            finally {
                 Pop-Location
             }
 
-            # Remove existing log file
-            if (Test-Path $script:logFile) {
-                Remove-Item $script:logFile -Force
+            # Advance origin/main from a throwaway clone so main has something to catch up to.
+            $work = Join-Path $TestDrive "work-$suffix"
+            git clone $script:remoteRepo $work 2>&1 | Out-Null
+            Push-Location $work
+            try {
+                git config user.email "test@example.com"
+                git config user.name "Test User"
+                git config commit.gpgsign false
+                "upstream" | Out-File -FilePath "upstream.txt" -Encoding utf8
+                git add . 2>&1 | Out-Null
+                git commit -m "Upstream change" 2>&1 | Out-Null
+                git push origin HEAD:main 2>&1 | Out-Null
+                $script:upstreamHead = git rev-parse HEAD
+            }
+            finally {
+                Pop-Location
             }
         }
 
         AfterEach {
-            if (Test-Path $script:testRepo) {
-                Remove-Item $script:testRepo -Recurse -Force
+            foreach ($p in @($script:testRepo, $script:remoteRepo)) {
+                if ($p -and (Test-Path $p)) {
+                    Remove-Item $p -Recurse -Force
+                }
             }
         }
 
-        It "Should switch to main branch successfully" {
-            # Verify we're on feature branch
+        It "Should leave the feature branch checked out" {
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
             Push-Location $script:testRepo
             $currentBranch = git branch --show-current
             Pop-Location
             $currentBranch | Should -Be "feature-branch"
+        }
 
-            # Run script
+        It "Should fast-forward main in place without checking it out" {
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
 
-            # Verify we switched to main
+            Push-Location $script:testRepo
+            $mainHead = git rev-parse main
+            Pop-Location
+            $mainHead | Should -Be $script:upstreamHead
+
+            $logContent = Get-Content $script:logFile -Raw
+            $logContent | Should -Match "SUCCESS: main up to date \(still on 'feature-branch'\)"
+            $logContent | Should -Not -Match "could not switch to main"
+        }
+
+        It "Should keep a dirty feature branch and its edits" {
+            $readme = Join-Path $script:testRepo "README.md"
+            "local edit" | Out-File -FilePath $readme -Encoding utf8
+
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
             Push-Location $script:testRepo
             $currentBranch = git branch --show-current
             Pop-Location
-            $currentBranch | Should -Be "main"
+            $currentBranch | Should -Be "feature-branch"
+            (Get-Content $readme -Raw) | Should -Match "local edit"
         }
 
-        It "Should log switch to main branch" {
-            # Run script
-            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
-
-            # Read log content
-            $logContent = Get-Content $script:logFile -Raw
-
-            # Verify the fetch/fast-forward step ran after switching to main
-            $logContent | Should -Match "Fetching and fast-forwarding"
-        }
-
-        It "Should handle failed branch switch gracefully" {
-            # Delete main branch to force failure
+        It "Should warn and carry on when main cannot be fast-forwarded" {
+            # A local commit on main makes the fetch a non-fast-forward, which
+            # git refuses; the run must log it and still finish.
             Push-Location $script:testRepo
-            git branch -D main 2>&1 | Out-Null
-            Pop-Location
+            try {
+                git checkout main 2>&1 | Out-Null
+                "diverge" | Out-File -FilePath "local.txt" -Encoding utf8
+                git add . 2>&1 | Out-Null
+                git commit -m "Local only" 2>&1 | Out-Null
+                git checkout feature-branch 2>&1 | Out-Null
+            }
+            finally {
+                Pop-Location
+            }
 
-            # Run script (should not throw)
             { & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null } | Should -Not -Throw
 
-            # Read log content
             $logContent = Get-Content $script:logFile -Raw
-
-            # Verify the failed switch was logged as a warning (non-fatal now)
-            $logContent | Should -Match "WARN: could not switch to main"
+            $logContent | Should -Match "WARN: could not fast-forward main"
+            $logContent | Should -Match "Repository synchronization process completed"
         }
     }
 
@@ -469,15 +512,62 @@ Describe "Update-GitConfig.ps1" {
     }
 
     Context "Error Handling" {
-        It "Should handle non-existent repository path" {
+        It "Should fail with exit 1 and create nothing for a non-existent repository path" {
             $nonExistentPath = Join-Path $TestDrive "non-existent-repo"
 
-            # NOTE: The script currently throws when trying to write to log file in non-existent directory.
-            # This is a known limitation - the script attempts to log before verifying the path exists.
-            # TODO: Consider enhancing Update-GitConfig.ps1 to check directory existence before logging,
-            # or ensure log directory exists before attempting writes.
-            # In production, the scheduled task always points to a valid path, so this is low priority.
-            { & $script:scriptPath -RepoPath $nonExistentPath 2>&1 } | Should -Throw
+            # The path is checked before the docs dir is created, so a wrong path
+            # is reported instead of being half-created (#225).
+            { & $script:scriptPath -RepoPath $nonExistentPath 2>$null | Out-Null } | Should -Not -Throw
+            $LASTEXITCODE | Should -Be 1
+            $nonExistentPath | Should -Not -Exist
+        }
+
+        It "Should default RepoPath to the repo the script lives in" {
+            # Lay out a repo with the updater inside it and run it with no
+            # -RepoPath: the log must land in that repo, not ~/Documents/Scripts.
+            New-TestRepository -Path $script:testRepo
+            $winDir = Join-Path $script:testRepo "scripts\windows version"
+            New-Item -Path $winDir -ItemType Directory -Force | Out-Null
+            $srcDir = Split-Path -Parent $script:scriptPath
+            foreach ($f in @("Update-GitConfig.ps1", "Functions.ps1", "Initialize-GitConfig.ps1")) {
+                Copy-Item (Join-Path $srcDir $f) $winDir
+            }
+            try {
+                & (Join-Path $winDir "Update-GitConfig.ps1") 2>&1 | Out-Null
+                $script:logFile | Should -Exist
+                (Get-Content $script:logFile -Raw) | Should -Match "Repository synchronization process completed"
+            }
+            finally {
+                Remove-Item $script:testRepo -Recurse -Force
+            }
+        }
+
+        It "Should run git with GIT_TERMINAL_PROMPT=0 and restore the caller's value" {
+            New-TestRepository -Path $script:testRepo
+            # Globals: $script: inside the shim would resolve to the updater's scope.
+            $global:ugcPromptSeen = [System.Collections.Generic.List[string]]::new()
+            $global:ugcRealGit = (Get-Command git -CommandType Application | Select-Object -First 1).Source
+            # A function shadows the git executable inside the script (which
+            # runs in this session), recording what each call sees.
+            function global:git {
+                $global:ugcPromptSeen.Add([string]$env:GIT_TERMINAL_PROMPT)
+                & $global:ugcRealGit @args
+            }
+            $env:GIT_TERMINAL_PROMPT = 'caller-value'
+            try {
+                & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+            }
+            finally {
+                Remove-Item Function:\git -ErrorAction SilentlyContinue
+                $after = $env:GIT_TERMINAL_PROMPT
+                Remove-Item Env:\GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue
+                Remove-Item $script:testRepo -Recurse -Force
+            }
+            $seen = @($global:ugcPromptSeen)
+            Remove-Variable ugcPromptSeen, ugcRealGit -Scope Global -ErrorAction SilentlyContinue
+            $seen.Count | Should -BeGreaterThan 0
+            ($seen | Sort-Object -Unique) | Should -Be @('0')
+            $after | Should -Be 'caller-value'
         }
 
         It "Should verify repository directory before processing" {
@@ -589,8 +679,8 @@ Describe "Update-GitConfig.ps1" {
             $branches = git branch --format='%(refname:short)'
             Pop-Location
 
-            # Should be on main
-            $currentBranch | Should -Be "main"
+            # Stays on the branch the user left (#225)
+            $currentBranch | Should -Be "local-feature"
 
             # merged-feature pruned (remote gone); local-only branch preserved
             $branches | Should -Not -Contain "merged-feature"
@@ -601,7 +691,7 @@ Describe "Update-GitConfig.ps1" {
 
             # Verify all steps were logged
             $logContent | Should -Match "Starting git repository synchronization"
-            $logContent | Should -Match "Fetching and fast-forwarding"
+            $logContent | Should -Match "SUCCESS: main up to date \(still on 'local-feature'\)"
             $logContent | Should -Match "SUCCESS: ~/.gitconfig converged to template"
             $logContent | Should -Match "Pruning merged branches"
             $logContent | Should -Match "SUCCESS: git fetch --prune completed"

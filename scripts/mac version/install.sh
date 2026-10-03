@@ -126,7 +126,7 @@ echo "[STEP 2] Creating symlinks..."
 echo "-----"
 LINK_ERRORS=0
 for file in ".gitignore_global" "gitconfig_helper.py"; do
-    create_symlink "$REPO_ROOT/$file" "$HOME_DIR/$file" "$FORCE" "$REPO_ROOT" || ((LINK_ERRORS++))
+    create_symlink "$REPO_ROOT/$file" "$HOME_DIR/$file" "$FORCE" "$REPO_ROOT" || LINK_ERRORS=$((LINK_ERRORS+1))
 done
 echo ""
 
@@ -153,6 +153,10 @@ if [ "$NO_LAUNCHD" = false ]; then
     PLIST_LABEL="com.gitconfig.update"
     LAUNCH_AGENTS_DIR="$HOME_DIR/Library/LaunchAgents"
     PLIST_PATH="$LAUNCH_AGENTS_DIR/$PLIST_LABEL.plist"
+    # launchd starts agents with PATH=/usr/bin:/bin:/usr/sbin:/sbin, which finds
+    # Apple's stub git/python3 (or none) instead of Homebrew's, plus gh/op used by
+    # credential and signing helpers. Put Homebrew first (Apple silicon, then Intel).
+    LAUNCHD_PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
 
     if [ ! -f "$UPDATE_SCRIPT" ]; then
         echo "[WARN] update-gitconfig.sh not found — skipping launchd setup"
@@ -190,6 +194,11 @@ if [ "$NO_LAUNCHD" = false ]; then
         <string>$UPDATE_SCRIPT</string>
         <string>$REPO_ROOT</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>$LAUNCHD_PATH</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
@@ -241,10 +250,10 @@ echo "-----"
 
 ERRORS=0
 
-[ -f "$HOME_DIR/.gitconfig" ]       && echo "[OK] .gitconfig verified"       || { echo "[FAIL] .gitconfig missing";       ((ERRORS++)); }
-[ -e "$HOME_DIR/.gitignore_global" ] && echo "[OK] .gitignore_global verified" || { echo "[FAIL] .gitignore_global missing"; ((ERRORS++)); }
-[ -e "$HOME_DIR/gitconfig_helper.py" ] && echo "[OK] gitconfig_helper.py verified" || { echo "[FAIL] gitconfig_helper.py missing"; ((ERRORS++)); }
-[ -f "$HOME_DIR/.gitconfig.local" ] && echo "[OK] .gitconfig.local verified"  || { echo "[FAIL] .gitconfig.local missing";  ((ERRORS++)); }
+[ -f "$HOME_DIR/.gitconfig" ]       && echo "[OK] .gitconfig verified"       || { echo "[FAIL] .gitconfig missing";       ERRORS=$((ERRORS+1)); }
+[ -e "$HOME_DIR/.gitignore_global" ] && echo "[OK] .gitignore_global verified" || { echo "[FAIL] .gitignore_global missing"; ERRORS=$((ERRORS+1)); }
+[ -e "$HOME_DIR/gitconfig_helper.py" ] && echo "[OK] gitconfig_helper.py verified" || { echo "[FAIL] gitconfig_helper.py missing"; ERRORS=$((ERRORS+1)); }
+[ -f "$HOME_DIR/.gitconfig.local" ] && echo "[OK] .gitconfig.local verified"  || { echo "[FAIL] .gitconfig.local missing";  ERRORS=$((ERRORS+1)); }
 
 if [ "$NO_LAUNCHD" = false ]; then
     PLIST_PATH="$HOME_DIR/Library/LaunchAgents/com.gitconfig.update.plist"

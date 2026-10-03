@@ -123,7 +123,7 @@ echo "[STEP 2] Creating symlinks..."
 echo "-----"
 LINK_ERRORS=0
 for file in ".gitignore_global" "gitconfig_helper.py"; do
-    create_symlink "$REPO_ROOT/$file" "$HOME_DIR/$file" "$FORCE" "$REPO_ROOT" || ((LINK_ERRORS++))
+    create_symlink "$REPO_ROOT/$file" "$HOME_DIR/$file" "$FORCE" "$REPO_ROOT" || LINK_ERRORS=$((LINK_ERRORS+1))
 done
 echo ""
 
@@ -148,12 +148,20 @@ if [ "$NO_CRON" = false ]; then
 
     CRON_SCRIPT="$SCRIPT_DIR/update-gitconfig.sh"
 
-    if [ ! -f "$CRON_SCRIPT" ]; then
+    # Guard: without a crontab binary (common on WSL, containers, minimal
+    # Fedora/Arch) the `... | crontab -` pipeline below fails, and under set -e
+    # that would end the install here, silently skipping the remaining steps.
+    if ! command -v crontab >/dev/null 2>&1; then
+        echo "[WARN] crontab not found; skipping auto-sync job (install cron, then re-run)"
+        echo "       To sync by hand: git selfupdate"
+    elif [ ! -f "$CRON_SCRIPT" ]; then
         echo "[WARN] update-gitconfig.sh not found"
     else
-        CRON_ENTRY="0 9 * * * bash \"$CRON_SCRIPT\" >> /tmp/gitconfig-update.log 2>&1"
+        # Pass the repo path explicitly: the updater must sync THIS clone, wherever
+        # it lives, not a default location.
+        CRON_ENTRY="0 9 * * * bash \"$CRON_SCRIPT\" \"$REPO_ROOT\" >> /tmp/gitconfig-update.log 2>&1"
 
-        if crontab -l 2>/dev/null | grep -q "$CRON_SCRIPT"; then
+        if crontab -l 2>/dev/null | grep -qF "$CRON_SCRIPT"; then
             if [ "$FORCE" = false ]; then
                 read -p "Cron job already exists. Replace? (y/n) " -n 1 -r
                 echo
@@ -164,13 +172,12 @@ if [ "$NO_CRON" = false ]; then
                 fi
             fi
             if [ "$NO_CRON" = false ]; then
-                crontab -l 2>/dev/null | grep -v "$CRON_SCRIPT" | crontab - 2>/dev/null || true
+                crontab -l 2>/dev/null | grep -vF "$CRON_SCRIPT" | crontab - 2>/dev/null || true
             fi
         fi
 
         if [ "$NO_CRON" = false ]; then
-            (crontab -l 2>/dev/null || true; echo "$CRON_ENTRY") | crontab - 2>/dev/null
-            if [ $? -eq 0 ]; then
+            if (crontab -l 2>/dev/null || true; echo "$CRON_ENTRY") | crontab - 2>/dev/null; then
                 echo "[OK] Created cron job for daily updates at 9 AM"
             else
                 echo "[WARN] Could not create cron job (cron may not be available)"
@@ -201,10 +208,10 @@ echo "-----"
 
 ERRORS=0
 
-[ -f "$HOME_DIR/.gitconfig" ]          && echo "[OK] .gitconfig verified"          || { echo "[FAIL] .gitconfig missing";          ((ERRORS++)); }
-[ -e "$HOME_DIR/.gitignore_global" ]   && echo "[OK] .gitignore_global verified"   || { echo "[FAIL] .gitignore_global missing";   ((ERRORS++)); }
-[ -e "$HOME_DIR/gitconfig_helper.py" ] && echo "[OK] gitconfig_helper.py verified" || { echo "[FAIL] gitconfig_helper.py missing"; ((ERRORS++)); }
-[ -f "$HOME_DIR/.gitconfig.local" ]    && echo "[OK] .gitconfig.local verified"    || { echo "[FAIL] .gitconfig.local missing";    ((ERRORS++)); }
+[ -f "$HOME_DIR/.gitconfig" ]          && echo "[OK] .gitconfig verified"          || { echo "[FAIL] .gitconfig missing";          ERRORS=$((ERRORS+1)); }
+[ -e "$HOME_DIR/.gitignore_global" ]   && echo "[OK] .gitignore_global verified"   || { echo "[FAIL] .gitignore_global missing";   ERRORS=$((ERRORS+1)); }
+[ -e "$HOME_DIR/gitconfig_helper.py" ] && echo "[OK] gitconfig_helper.py verified" || { echo "[FAIL] gitconfig_helper.py missing"; ERRORS=$((ERRORS+1)); }
+[ -f "$HOME_DIR/.gitconfig.local" ]    && echo "[OK] .gitconfig.local verified"    || { echo "[FAIL] .gitconfig.local missing";    ERRORS=$((ERRORS+1)); }
 
 git config --list > /dev/null 2>&1 && echo "[OK] Git configuration accessible" || echo "[WARN] Could not verify git configuration"
 python3 -c "import rich" &>/dev/null && echo "[OK] Python 'rich' importable" || echo "[WARN] Python 'rich' not importable"
