@@ -37,6 +37,10 @@ jobs:
       matrix:
         # pwsh = PowerShell 7, powershell = Windows PowerShell 5.1
         shell: [pwsh, powershell]
+    defaults:
+      run:
+        # Steps without their own shell: run under the matrix shell.
+        shell: ${{ matrix.shell }}
     env:
       # Make the py launcher (which the scripts and tests try first) pick the
       # interpreter set up below rather than another preinstalled version.
@@ -64,7 +68,6 @@ jobs:
           }
 
       - name: Ensure Pester 5+ is installed
-        shell: ${{ matrix.shell }}
         run: |
           $pester = Get-Module -ListAvailable -Name Pester |
               Where-Object { $_.Version -ge [Version]'5.0' } |
@@ -80,7 +83,6 @@ jobs:
           Write-Host "PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition)), Pester $($pester.Version)"
 
       - name: Run Pester suite
-        shell: ${{ matrix.shell }}
         run: ./tests/run-tests.ps1
 
   pester-integration:
