@@ -36,6 +36,9 @@ setup() {
     # The script refuses to run on a macOS host (issue #179); the sandbox makes
     # cross-OS runs safe, so opt out of the guard for every test.
     export GITCONFIG_ALLOW_CROSS_OS=1
+    # op-ssh-sign is probed at /opt/1Password/op-ssh-sign since #229; pin it
+    # absent so the suite doesn't depend on the host having 1Password.
+    export GITCONFIG_OP_SSH_SIGN=""
     : > "$GIT_CONFIG_GLOBAL"
 }
 
@@ -161,4 +164,59 @@ make_fake_gh() {
     [[ "$output" == *"Linux script"* ]]
     # Nothing was written: the guard fires before any config generation.
     [ ! -f "$SANDBOX/.gitconfig.local" ]
+}
+
+# --- Signing parity with macOS (issue #229) ---------------------------------
+
+@test "writes allowedSignersFile when git already has a signing key (finding 28)" {
+    git config --global user.signingkey "ssh-ed25519 AAAALITERALKEY"
+    git config --global user.email "dev@example.com"
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" \
+        bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get gpg.ssh.allowedSignersFile)" = \
+        "$SANDBOX/.ssh/allowed_signers" ]
+    grep -qF 'dev@example.com namespaces="git" ssh-ed25519 AAAALITERALKEY' "$SANDBOX/.ssh/allowed_signers"
+}
+
+@test "uses 1Password's op-ssh-sign when no key file exists" {
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" \
+        GITCONFIG_OP_SSH_SIGN=/opt/1Password/op-ssh-sign bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get gpg.ssh.program)" = /opt/1Password/op-ssh-sign ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get commit.gpgsign)" = true ]
+}
+
+@test "prefers ~/.ssh/claude_desktop and the no-agent wrapper, like macOS" {
+    mkdir -p "$SANDBOX/.ssh"
+    for k in claude_desktop id_ed25519_signing; do
+        echo "fake private key" > "$SANDBOX/.ssh/$k"
+        echo "ssh-ed25519 AAAA$k comment" > "$SANDBOX/.ssh/$k.pub"
+    done
+    printf '#!/bin/sh
+exit 0
+' > "$SANDBOX/.ssh/git-sign-no-agent"
+    chmod +x "$SANDBOX/.ssh/git-sign-no-agent"
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get user.signingkey)" = "$SANDBOX/.ssh/claude_desktop" ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get gpg.ssh.program)" = "$SANDBOX/.ssh/git-sign-no-agent" ]
+}
+
+@test "ignores a key file without its .pub" {
+    mkdir -p "$SANDBOX/.ssh"
+    echo "fake private key" > "$SANDBOX/.ssh/id_ed25519_signing"
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    run git config --file "$SANDBOX/.gitconfig.local" --get user.signingkey
+    [ "$status" -ne 0 ]
+    grep -qF '# Uncomment to enable file-based SSH commit signing:' "$SANDBOX/.gitconfig.local"
+}
+
+@test "never adds the Homebrew safe directory on Linux" {
+    mkdir -p "$SANDBOX/homebrew/.git"
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" HOMEBREW_REPO="$SANDBOX/homebrew" \
+        bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    run ! grep -qF "$SANDBOX/homebrew" "$SANDBOX/.gitconfig.local"
 }

@@ -13,14 +13,14 @@ Personal Git configuration and utilities for cross-machine synchronization.
 ```bash
 git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
 cd ~/Documents/Scripts/gitconfig
-bash scripts/mac\ version/install.sh --force
+bash scripts/unix/install.sh --force
 ```
 
 *(Optional)* Enable SSH commit signing with 1Password:
 
 ```bash
 brew install 1password-cli
-bash scripts/mac\ version/install.sh --force
+bash scripts/unix/install.sh --force
 ```
 
 ### Windows (PowerShell)
@@ -35,13 +35,15 @@ cd ~/Documents/Scripts/gitconfig
 
 ### Linux
 
-**Requirements:** bash 4.0+, cron, Python 3
+**Requirements:** bash, Python 3, cron (optional, for auto-update)
 
 ```bash
 git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
 cd ~/Documents/Scripts/gitconfig
-bash scripts/linux\ version/install.sh --force
+bash scripts/unix/install.sh --force
 ```
+
+macOS and Linux share one set of scripts in `scripts/unix/`; they detect the OS. The older `scripts/mac version/` and `scripts/linux version/` commands still work: they run the same scripts and refuse to run on the other OS. Pass `--no-scheduler` to skip the auto-update job (`--no-launchd` and `--no-cron` still work too).
 
 The setup script handles generating `~/.gitconfig` from the template, creating symlinks, installing the `rich` Python dependency, and registering an auto-update job (launchd on macOS, Task Scheduler on Windows, cron on Linux).
 
@@ -64,7 +66,7 @@ Each platform has a cleanup script that removes symlinks, local config, and the 
 ### macOS
 
 ```bash
-bash scripts/mac\ version/cleanup-gitconfig.sh
+bash scripts/unix/cleanup-gitconfig.sh
 ```
 
 Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` symlink, `~/.gitconfig.local`, and the launchd login agent.
@@ -80,10 +82,10 @@ Removes: `~/.gitconfig`, symlinks, `~/.gitconfig.local`, and the `GitConfig Pull
 ### Linux
 
 ```bash
-bash scripts/linux\ version/cleanup-gitconfig.sh
+bash scripts/unix/cleanup-gitconfig.sh
 ```
 
-Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` symlink, `~/.gitconfig.local`, and the cron job.
+Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` symlink, `~/.gitconfig.local`, and the cron job (the line tagged `# gitconfig-autoupdate`, plus an untagged one from an older install; other cron entries are kept).
 
 ## Usage
 

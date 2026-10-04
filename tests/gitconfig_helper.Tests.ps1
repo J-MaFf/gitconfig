@@ -935,8 +935,11 @@ import gitconfig_helper
             $functions = Get-Content (Join-Path $script:repoRoot "scripts/shared/functions.sh") -Raw
             $functions | Should -Match "enable_git_alias_widget"
             $functions | Should -Match "disable_git_alias_widget"
-            $macInstall = Get-Content (Join-Path $script:repoRoot "scripts/mac version/install.sh") -Raw
-            $macInstall | Should -Match "enable_git_alias_widget"
+            # macOS and Linux share scripts/unix/install.sh since #229.
+            $unixInstall = Get-Content (Join-Path $script:repoRoot "scripts/unix/install.sh") -Raw
+            $unixInstall | Should -Match "enable_git_alias_widget"
+            $unixCleanup = Get-Content (Join-Path $script:repoRoot "scripts/unix/cleanup-gitconfig.sh") -Raw
+            $unixCleanup | Should -Match "disable_git_alias_widget"
         }
     }
 
