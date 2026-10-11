@@ -24,6 +24,18 @@ except ImportError:
     sys.exit(1)
 
 
+def _print_ext(console, text, style=None):
+    """Print external text verbatim: never parsed as rich markup (#239).
+
+    Use for anything the helper didn't write itself - git/gh stdout and
+    stderr, issue titles, branch, path and repo names, exception text. Inside
+    a markup string, wrap the external part in escape() instead. Unescaped,
+    rich reads "[/]" in an issue title as a closing tag (MarkupError) and
+    silently drops "[rejected]" or "[slug]" from git output and paths.
+    """
+    console.print(str(text), style=style, markup=False, highlight=False)
+
+
 def run_git(*args, check=False):
     return subprocess.run(
         ["git", *args],
@@ -217,19 +229,19 @@ def _fast_forward(console, label, cwd=None):
     if result.returncode == 0:
         return True
     console.print(f"[red]Error: Could not fast-forward {escape(label)}[/red]")
-    console.print(f"[red]{escape(result.stderr.strip())}[/red]")
+    _print_ext(console, result.stderr.strip(), "red")
     # --ff-only never starts a merge, so this should be empty; checked anyway
     # so an unexpected conflict is reported precisely (not by substring-matching
     # `git status` output, which also matched file names like UU_notes.md).
     conflicts = _git_in(cwd, "diff", "--name-only", "--diff-filter=U")
     if conflicts.returncode == 0 and conflicts.stdout.strip():
         console.print("[red]Unmerged paths:[/red]")
-        console.print(escape(conflicts.stdout.rstrip()))
+        _print_ext(console, conflicts.stdout.rstrip())
         return False
     ahead = _git_in(cwd, "rev-list", "--count", "@{upstream}..HEAD")
     if ahead.returncode == 0 and ahead.stdout.strip() not in ("", "0"):
         console.print(
-            f"[yellow]Local {label} has {ahead.stdout.strip()} commit(s) that are not on its "
+            f"[yellow]Local {escape(label)} has {escape(ahead.stdout.strip())} commit(s) that are not on its "
             "upstream, so it can't be fast-forwarded. Inspect with: "
             "git log --oneline --left-right HEAD...@{upstream}[/yellow]"
         )
@@ -298,7 +310,7 @@ def cleanup_branches(force=False, update=True):
                 result = run_git("checkout", default_branch)
                 if result.returncode != 0:
                     console.print(f"[red]Error: Failed to switch to {escape(default_branch)}[/red]")
-                    console.print(f"[red]{escape(result.stderr.strip())}[/red]")
+                    _print_ext(console, result.stderr.strip(), "red")
                     return 1
                 switched_branch = True
 
@@ -364,7 +376,7 @@ def cleanup_branches(force=False, update=True):
 
         if kept:
             console.print(
-                f"[yellow]Kept {len(kept)} local-only branch(es) not merged into {default_branch} "
+                f"[yellow]Kept {len(kept)} local-only branch(es) not merged into {escape(default_branch)} "
                 "(delete with 'git branch -D <name>' if you're sure):[/yellow]"
             )
             for name, tip in sorted(kept):
@@ -399,7 +411,7 @@ def cleanup_branches(force=False, update=True):
                 console.print(
                     f"[yellow]Note: Your original branch '{escape(current_branch)}' was deleted during cleanup.[/yellow]"
                 )
-                console.print(f"[cyan]Staying on '{default_branch}'.[/cyan]\n")
+                console.print(f"[cyan]Staying on '{escape(default_branch)}'.[/cyan]\n")
             else:
                 console.print(f"[cyan]Switching back to '{escape(here)}'...[/cyan]")
                 if current_branch is None:
@@ -442,7 +454,7 @@ def cleanup_branches(force=False, update=True):
         return exit_code
 
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]Error running git cleanup: {e}[/red]")
+        console.print(f"[red]Error running git cleanup: {escape(str(e))}[/red]")
         return 1
 
 
@@ -624,7 +636,7 @@ def _require_skills_dir():
     if os.path.isdir(SKILLS_DIR):
         return True
     Console(stderr=True).print(
-        f"[red]git skill: {SKILLS_DIR} not found - the claude-skills repo isn't "
+        f"[red]git skill: {escape(SKILLS_DIR)} not found - the claude-skills repo isn't "
         f"installed on this machine.[/red]\n"
         f"[yellow]It's a separate repo that supplies the skills and the wrapper "
         f"scripts these aliases drive. Install it:[/yellow]\n"
@@ -644,7 +656,7 @@ def list_skills():
     console = Console()
     skills_dir = SKILLS_DIR
     if not os.path.isdir(skills_dir):
-        console.print(f"[red]Skills directory not found: {skills_dir}[/red]")
+        console.print(f"[red]Skills directory not found: {escape(skills_dir)}[/red]")
         return 1
 
     rows = []
@@ -659,7 +671,7 @@ def list_skills():
         rows.append((name, description, updated))
 
     if not rows:
-        console.print(f"[yellow]No skills found in {skills_dir}[/yellow]")
+        console.print(f"[yellow]No skills found in {escape(skills_dir)}[/yellow]")
         return 0
 
     table = Table(title="Claude Skills", show_lines=True, header_style="bold yellow")
@@ -668,11 +680,11 @@ def list_skills():
     table.add_column("Updated", justify="left", style="green", no_wrap=True)
     for name, description, updated in rows:
         table.add_row(
-            name, escape(description) if description else "(no description)", updated
+            escape(name), escape(description) if description else "(no description)", updated
         )
 
     console.print(table)
-    console.print(f"\n[dim]{len(rows)} skills in {skills_dir}[/dim]")
+    console.print(f"\n[dim]{len(rows)} skills in {escape(skills_dir)}[/dim]")
     return 0
 
 
@@ -733,7 +745,7 @@ def _run_skill_script(base):
         cmd = ["bash", script]
     if not os.path.isfile(script):
         Console(stderr=True).print(
-            f"[red]git skill: wrapper script not found: {script}[/red]"
+            f"[red]git skill: wrapper script not found: {escape(script)}[/red]"
         )
         return 1
     return subprocess.run(cmd).returncode
@@ -1046,21 +1058,21 @@ def _print_skill_header(console, title):
     """Print the repo line, a not-on-main warning, and the last scheduled sync."""
     label, detached = _head_label("-C", SKILLS_DIR)
     if detached:
-        console.print(f"[bold]{title}[/bold]  [dim]{SKILLS_DIR} (detached HEAD at {label})[/dim]")
+        console.print(f"[bold]{title}[/bold]  [dim]{escape(SKILLS_DIR)} (detached HEAD at {escape(label)})[/dim]")
         console.print(
-            f"  [yellow][!] Detached HEAD at {label}, not main - sync can't pull until "
+            f"  [yellow][!] Detached HEAD at {escape(label)}, not main - sync can't pull until "
             f"you check out a branch[/yellow]"
         )
         label = None  # warned already; skip the not-on-main line below
     else:
-        console.print(f"[bold]{title}[/bold]  [dim]{SKILLS_DIR} (branch: {label or '?'})[/dim]")
+        console.print(f"[bold]{title}[/bold]  [dim]{escape(SKILLS_DIR)} (branch: {escape(label or '?')})[/dim]")
     if label not in ("main", None):
         console.print(
-            f"  [yellow][!] On branch '{label}', not main - sync pulls the current branch[/yellow]"
+            f"  [yellow][!] On branch '{escape(label)}', not main - sync pulls the current branch[/yellow]"
         )
     last = _last_background_sync()
     if last:
-        console.print(f"  Last scheduled sync: [dim]{last[0]}[/dim] - {last[1]}")
+        console.print(f"  Last scheduled sync: [dim]{escape(last[0])}[/dim] - {last[1]}")
     else:
         console.print(
             "  [dim]No background-sync log yet (scheduled sync may not be installed)[/dim]"
@@ -1124,7 +1136,7 @@ def _skill_sync_or_status(sub):
         return skill_sync() if sub == "sync" else skill_status()
     except Exception as exc:  # noqa: BLE001 - degrade to the wrapper on any failure
         Console(stderr=True).print(
-            f"[yellow]git skill {sub}: rich view failed ({exc}); "
+            f"[yellow]git skill {sub}: rich view failed ({escape(str(exc))}); "
             f"falling back to the wrapper script[/yellow]"
         )
         return _run_skill_script(SKILL_SCRIPTS[sub])
@@ -1157,7 +1169,7 @@ def skill_diff(args):
     if target is not None:
         if target not in names:
             Console(stderr=True).print(
-                f"[red]git skill diff: '{target}' is not drifted (aligned, "
+                f"[red]git skill diff: '{escape(target)}' is not drifted (aligned, "
                 f"untracked, unknown, or misspelled) - nothing to diff[/red]"
             )
             return 1
@@ -1169,7 +1181,7 @@ def skill_diff(args):
 
     failed = False
     for name in names:
-        console.print(f"[bold]{escape(name)}[/bold]")
+        _print_ext(console, name, "bold")
         # skill-audit counts a skill as drifted from `git status --porcelain`,
         # which includes staged and untracked files. A bare `git diff` shows
         # only unstaged edits, so diff against HEAD (staged + unstaged) and
@@ -1179,10 +1191,10 @@ def skill_diff(args):
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         for line in proc.stdout.splitlines():
-            console.print(escape(line))
+            _print_ext(console, line)
         if proc.stderr.strip():
             for line in proc.stderr.splitlines():
-                console.print(f"[red]{escape(line)}[/red]")
+                _print_ext(console, line, "red")
         failed = failed or proc.returncode != 0
         untracked = subprocess.run(
             ["git", "-C", SKILLS_DIR, "ls-files", "--others", "--exclude-standard",
@@ -1196,7 +1208,7 @@ def skill_diff(args):
                 console.print(f"  [yellow]{escape(path)}[/yellow]")
         if untracked.returncode != 0:
             for line in untracked.stderr.splitlines():
-                console.print(f"[red]{escape(line)}[/red]")
+                _print_ext(console, line, "red")
             failed = True
         console.print("")
     return 1 if failed else 0
@@ -1255,7 +1267,7 @@ def skill(args):
         return 0
     if sub not in ("list", "diff") and sub not in SKILL_SCRIPTS:
         Console(stderr=True).print(
-            f"[red]git skill: unknown subcommand '{sub}' "
+            f"[red]git skill: unknown subcommand '{escape(sub)}' "
             f"(try: list, sync, status, diff, publish)[/red]"
         )
         return 1
@@ -1402,7 +1414,7 @@ def start_branch(issue):
     )
     if view.returncode != 0:
         console.print(f"[red]Error: could not load issue #{number}[/red]")
-        console.print(f"[red]{escape(view.stderr.strip())}[/red]")
+        _print_ext(console, view.stderr.strip(), "red")
         return 1
 
     try:
@@ -1478,7 +1490,7 @@ def start_branch(issue):
 
     if switch.returncode != 0:
         console.print("[red]Error: failed to create or switch to the branch[/red]")
-        console.print(f"[red]{escape(switch.stderr.strip())}[/red]")
+        _print_ext(console, switch.stderr.strip(), "red")
         return 1
 
     console.print(
@@ -1526,7 +1538,7 @@ def switch_to_main():
             result = run_git(*fetch_args)
             if result.returncode != 0:
                 console.print("[red]Error: Failed to fetch from remote[/red]")
-                console.print(f"[red]{escape(result.stderr.strip())}[/red]")
+                _print_ext(console, result.stderr.strip(), "red")
                 return 1
             console.print("[green]OK Fetch complete[/green]")
         # Resolved after the fetch, which can create origin/HEAD (git 2.48+).
@@ -1544,7 +1556,7 @@ def switch_to_main():
             console.print(
                 f"[yellow]Please commit or stash your changes before switching to {escape(default_branch)}:[/yellow]"
             )
-            console.print(escape(result_status.stdout.rstrip()))
+            _print_ext(console, result_status.stdout.rstrip())
             return 1
 
         # Step 4: Switch to default branch (if not already there)
@@ -1555,7 +1567,7 @@ def switch_to_main():
             result = run_git("checkout", default_branch)
             if result.returncode != 0:
                 console.print(f"[red]Error: Failed to checkout {escape(default_branch)} branch[/red]")
-                console.print(f"[red]{escape(result.stderr.strip())}[/red]")
+                _print_ext(console, result.stderr.strip(), "red")
                 return 1
             console.print(f"[green]OK Switched to {escape(default_branch)}[/green]")
         else:
@@ -1609,7 +1621,7 @@ def _update_default_in_worktree(console, default_branch, holder, here):
             f"[red]Error: Uncommitted changes in {escape(holder)}; "
             f"not fast-forwarding {escape(default_branch)}[/red]"
         )
-        console.print(escape((status.stdout or status.stderr).rstrip()))
+        _print_ext(console, (status.stdout or status.stderr).rstrip())
         return 1
 
     console.print("[cyan]Fast-forwarding to the fetched upstream...[/cyan]")
@@ -1671,7 +1683,7 @@ def _dirty_triage_lines(default_branch):
     last_commit = age_result.stdout.strip() if age_result.returncode == 0 and age_result.stdout.strip() else "unknown"
 
     return [
-        f"   [cyan]branch:[/cyan] {branch}  ({position}, last commit {last_commit})",
+        f"   [cyan]branch:[/cyan] {escape(branch)}  ({escape(position)}, last commit {escape(last_commit)})",
         f"   [cyan]working tree:[/cyan] {modified} modified, {untracked} untracked",
     ]
 
@@ -1728,13 +1740,13 @@ def update_all_main():
 
     if not repos:
         console.print(
-            f"[yellow]No git repositories found in immediate subdirectories of {root}.[/yellow]"
+            f"[yellow]No git repositories found in immediate subdirectories of {escape(root)}.[/yellow]"
         )
         return 1
 
     results = []  # (repo_name, outcome) where outcome in {"ok", "skipped", "failed"}
     for repo in repos:
-        console.print(f"\n[bold]-- {repo} --[/bold]")
+        console.print(f"\n[bold]-- {escape(repo)} --[/bold]")
         try:
             os.chdir(os.path.join(root, repo))
             # Detect a dirty working tree up front (no fetch needed for status).
@@ -1754,7 +1766,7 @@ def update_all_main():
                 outcome = "ok" if switch_to_main() == 0 else "failed"
         except Exception as e:
             # Don't let one repo abort the whole sweep
-            console.print(f"[red]Error updating '{repo}': {e}[/red]")
+            console.print(f"[red]Error updating '{escape(repo)}': {escape(str(e))}[/red]")
             outcome = "failed"
         finally:
             os.chdir(original_cwd)
@@ -1773,7 +1785,7 @@ def update_all_main():
         "failed": "[red]Failed[/red]",
     }
     for repo, outcome in results:
-        table.add_row(repo, status_label[outcome])
+        table.add_row(escape(repo), status_label[outcome])
 
     ok_count = sum(1 for _, o in results if o == "ok")
     skipped_count = sum(1 for _, o in results if o == "skipped")
@@ -1940,7 +1952,7 @@ def list_issues(args):
         if flag in args:
             idx = args.index(flag)
             if idx + 1 >= len(args) or args[idx + 1].startswith("-"):
-                console.print(f"[red]Usage: git issues {flag} <name>[/red]")
+                console.print(f"[red]Usage: git issues {escape(flag)} <name>[/red]")
                 return 1
             label = args[idx + 1]
             break
@@ -1971,13 +1983,13 @@ def list_issues(args):
             proc = _run_gh(*cmd)
             if proc.returncode != 0:
                 console.print("[red]Error: gh issue list --web failed[/red]")
-                console.print(f"[red]{proc.stderr.strip()}[/red]")
+                _print_ext(console, proc.stderr.strip(), "red")
                 return 1
             return 0
         issues, err = _repo_open_issues(mine=mine, label=label)
         if issues is None:
             console.print("[red]Error: could not list this repo's issues[/red]")
-            console.print(f"[red]{err}[/red]")
+            _print_ext(console, err, "red")
             return 1
         if not issues:
             console.print("[green]No open issues[/green]")
@@ -1992,7 +2004,7 @@ def list_issues(args):
         root, repos = _scripts_root_repos()
         if not repos:
             console.print(
-                f"[yellow]No git repositories found in immediate subdirectories of {root}.[/yellow]"
+                f"[yellow]No git repositories found in immediate subdirectories of {escape(root)}.[/yellow]"
             )
             return 0
         rows = []
@@ -2017,7 +2029,7 @@ def list_issues(args):
             return 1
         if rows:
             _print_issues_table(
-                console, rows, f"Open Issues - repos under {root}", repo_column=True
+                console, rows, f"Open Issues - repos under {escape(root)}", repo_column=True
             )
         else:
             console.print("[green]No open issues[/green]")
@@ -2033,7 +2045,7 @@ def list_issues(args):
     login = login_proc.stdout.strip()
     if login_proc.returncode != 0 or not login:
         console.print("[red]Error: could not resolve your GitHub login[/red]")
-        console.print(f"[red]{login_proc.stderr.strip()}[/red]")
+        _print_ext(console, login_proc.stderr.strip(), "red")
         return 1
 
     if web:
@@ -2053,7 +2065,7 @@ def list_issues(args):
     proc = _run_gh(*cmd)
     if proc.returncode != 0:
         console.print("[red]Error: gh search issues failed[/red]")
-        console.print(f"[red]{proc.stderr.strip()}[/red]")
+        _print_ext(console, proc.stderr.strip(), "red")
         return 1
     try:
         issues = json.loads(proc.stdout)
@@ -2068,7 +2080,7 @@ def list_issues(args):
         for issue in issues
     ]
     _print_issues_table(
-        console, rows, f"Open Issues - all repos owned by {login}", repo_column=True
+        console, rows, f"Open Issues - all repos owned by {escape(login)}", repo_column=True
     )
     return 0
 
@@ -2086,7 +2098,9 @@ def _print_aliases_table(aliases):
         if last_category is not None and category != last_category:
             table.add_section()
         # Label the category only on the first row of each group to reduce noise.
-        table.add_row(category if category != last_category else "", name, description)
+        table.add_row(
+            category if category != last_category else "", escape(name), escape(description)
+        )
         last_category = category
 
     console.print(table)
@@ -2107,6 +2121,7 @@ def _build_alias_app(aliases):
         from textual.app import App
         from textual.binding import Binding
         from textual.widgets import DataTable, Footer, Header, Input, Tab, Tabs
+        from rich.text import Text
     except ImportError:
         return None
 
@@ -2191,7 +2206,8 @@ def _build_alias_app(aliases):
                         and needle not in description.lower()
                     ):
                         continue
-                    table.add_row(name, category, description)
+                    # Text, not str: DataTable parses str cells as markup (#239).
+                    table.add_row(name, category, Text(description))
                     shown += 1
             self.sub_title = (
                 f"{shown} shown  -  type: search  up/down: move  enter: insert  "
@@ -2374,12 +2390,12 @@ def _launch_alias_browser(aliases, select_out=None):
             console = Console()
             if _copy_to_clipboard(choice):
                 console.print(
-                    f"[green]Copied to clipboard:[/green] [bold]{choice}[/bold]  "
+                    f"[green]Copied to clipboard:[/green] [bold]{escape(choice)}[/bold]  "
                     f"[dim](paste with Cmd/Ctrl-V; Ctrl-G inserts at the prompt)[/dim]"
                 )
             else:
                 console.print(
-                    f"[cyan]{choice}[/cyan]  "
+                    f"[cyan]{escape(choice)}[/cyan]  "
                     f"[dim](copy it, or use Ctrl-G to insert at the prompt)[/dim]"
                 )
     return True, None
@@ -2393,7 +2409,7 @@ def _note_browser_fallback(reason):
     """
     if reason and sys.stderr.isatty():
         Console(stderr=True).print(
-            f"[dim]git alias: {reason}. Showing the static list "
+            f"[dim]git alias: {escape(reason)}. Showing the static list "
             f"('git alias --plain' to silence this).[/dim]"
         )
 

@@ -594,6 +594,37 @@ class TestIssuesAllLocalFailures:
         assert "Checked" not in out
 
 
+class TestExternalTextIsNotMarkup:
+    """git/gh output, titles, paths and alias bodies are printed verbatim, never
+    parsed as rich markup (#239)."""
+
+    def test_print_ext_survives_a_stray_closing_tag(self, helper, capsys):
+        helper._print_ext(helper.Console(), "a [/] b [red]c", "red")
+        assert "a [/] b [red]c" in capsys.readouterr().out
+
+    def test_gh_stderr_is_printed_verbatim(self, helper, monkeypatch, capsys):
+        monkeypatch.setattr(helper, "_have", lambda cmd: True)
+        monkeypatch.setattr(helper, "run_git", lambda *a, **k: _Result(stdout=".git\n"))
+        monkeypatch.setattr(
+            helper, "_run_gh",
+            lambda *a, cwd=None: _Result(returncode=1, stderr="HTTP 401 [/] [bold]x"),
+        )
+        assert helper.list_issues([]) == 1
+        assert "HTTP 401 [/] [bold]x" in capsys.readouterr().out
+
+    def test_alias_table_keeps_shell_brackets(self, helper, capsys):
+        helper._print_aliases_table([("chk", 'Shell: [ -n "$1" ] && [red]', "Other")])
+        assert '[ -n "$1" ] && [red]' in capsys.readouterr().out
+
+    def test_dirty_triage_escapes_the_branch_line(self, helper, monkeypatch):
+        monkeypatch.setattr(helper, "_head_label", lambda *a: ("feat/[x]", False))
+        monkeypatch.setattr(helper, "run_git", lambda *a, **k: _Result(returncode=1))
+        line = helper._dirty_triage_lines("main")[0]
+        console = helper.Console(record=True, width=200)
+        console.print(line)
+        assert "feat/[x]" in console.export_text()
+
+
 class TestIssuesAllWebFilters:
     """`git issues --all --web` opened the unfiltered search page, dropping
     --label and --mine."""
@@ -927,6 +958,18 @@ class TestFastForwardConflictReport:
         out = capsys.readouterr().out
         assert "Unmerged paths" in out and "src/a.py" in out
 
+    def test_rejected_stderr_and_bracketed_path_are_printed_verbatim(self, helper, monkeypatch, capsys):
+        # rich read "[rejected]" and "[slug]" as markup tags and dropped them (#239).
+        monkeypatch.setattr(helper, "run_git", _fake_git({
+            "rev-parse": _Result(stdout="abc1234\n"),
+            "merge": _Result(returncode=1, stderr=" ! [rejected] main -> main"),
+            "diff": _Result(stdout="app/[slug]/page.tsx\n"),
+        }))
+        assert helper._fast_forward(helper.Console(), "main") is False
+        out = capsys.readouterr().out
+        assert "! [rejected] main -> main" in out
+        assert "app/[slug]/page.tsx" in out
+
 
 class TestStartBranch:
     @staticmethod
@@ -1017,6 +1060,13 @@ class TestStartBranch:
         assert "Warning: fetch failed" in out
         assert _git(repo, "branch", "--show-current") == "fix/7-fix-the-thing"
         assert _git(repo, "rev-parse", "HEAD") == _git(repo, "rev-parse", "main")
+
+    def test_markup_in_issue_title_is_printed_verbatim(self, helper, repo, monkeypatch, capsys):
+        # "[/]" is a closing tag to rich: printing it unescaped raised MarkupError (#239).
+        self._issues(helper, monkeypatch, {"7": ("Fix [/] parsing [bold]x", ["bug"])})
+        assert helper.start_branch("7") == 0
+        assert _git(repo, "branch", "--show-current") == "fix/7-fix-parsing-bold-x"
+        assert "Fix [/] parsing [bold]x" in capsys.readouterr().out
 
     def test_old_style_branch_is_noted_not_reused(self, helper, repo, monkeypatch, capsys):
         _git(repo, "branch", "fix/fix-the-thing")
