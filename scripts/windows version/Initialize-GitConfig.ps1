@@ -15,7 +15,8 @@ USAGE:
     .\Initialize-GitConfig.ps1 [OPTIONS]
 
 OPTIONS:
-    -Force      Overwrite existing .gitconfig without prompting
+    -Force      Overwrite an existing .gitconfig that differs from the
+                template without prompting
     -Help       Display this help message
 
 DESCRIPTION:
@@ -24,7 +25,8 @@ DESCRIPTION:
     while maintaining version control of the template.
 
 EXAMPLE:
-    # Interactive mode (prompts before overwriting)
+    # Interactive mode (prompts before overwriting a .gitconfig that differs;
+    # an up-to-date one is left alone without asking)
     .\Initialize-GitConfig.ps1
 
     # Force mode (overwrites without prompting)
@@ -73,16 +75,6 @@ if (Test-LinkIntoDirectory -Path $outputPath -Directory $repoRoot) {
     Write-Host "[INFO] Replaced the old ~/.gitconfig symlink into the repo with a generated file" -ForegroundColor Yellow
 }
 
-# Check if .gitconfig already exists
-if ((Test-Path $outputPath) -and -not $Force) {
-    Write-Host ".gitconfig already exists at: $outputPath" -ForegroundColor Yellow
-    $response = Read-Host "Overwrite? (y/n)"
-    if ($response -ne "y") {
-        Write-Host "Cancelled." -ForegroundColor Yellow
-        exit 0
-    }
-}
-
 try {
     # Read template
     $templateContent = Get-Content $templatePath -Raw
@@ -98,12 +90,24 @@ try {
 
     # Idempotent: skip backup/write when the installed config already matches the
     # rendered template (newline-insensitive compare). Makes the auto-update
-    # convergent and avoids needless rewrites/.bak churn on every login.
+    # convergent and avoids needless rewrites/.bak churn on every login. Checked
+    # before the overwrite prompt below, so re-running install on an up-to-date
+    # machine doesn't ask to overwrite a file it would leave alone (#256).
     if (Test-Path $outputPath) {
         $normExisting = ((Get-Content $outputPath -Raw) -replace "`r`n", "`n").TrimEnd("`n")
         $normGenerated = ($generatedContent -replace "`r`n", "`n").TrimEnd("`n")
         if ($normExisting -eq $normGenerated) {
             Write-Host "[OK] .gitconfig already up to date (matches template); no changes made" -ForegroundColor Green
+            exit 0
+        }
+    }
+
+    # The existing .gitconfig differs from the template: ask before replacing it.
+    if ((Test-Path $outputPath) -and -not $Force) {
+        Write-Host ".gitconfig already exists at: $outputPath" -ForegroundColor Yellow
+        $response = Read-Host "Overwrite? (y/n)"
+        if ($response -ne "y") {
+            Write-Host "Cancelled." -ForegroundColor Yellow
             exit 0
         }
     }

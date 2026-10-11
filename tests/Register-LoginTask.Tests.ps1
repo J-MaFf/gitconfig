@@ -98,11 +98,18 @@ Describe "Register-LoginTask.ps1" {
             $global:rltCalls.Trigger.Delay | Should -Be "PT1M"
         }
 
-        It "Should cap the run at 10 minutes and need a network" {
+        It "Should cap the run at 10 minutes" {
             Invoke-Register | Out-Null
             $global:rltCalls.Settings.ExecutionTimeLimit | Should -Be (New-TimeSpan -Minutes 10)
-            $global:rltCalls.Settings.RunOnlyIfNetworkAvailable | Should -BeTrue
             $global:rltCalls.Settings.StartWhenAvailable | Should -BeTrue
+        }
+
+        It "Should not make the run wait for a network (#256)" {
+            # Converging ~/.gitconfig from the local template needs no network,
+            # and the updater carries on past a failed pull. The condition
+            # skipped the whole run when the network came up late.
+            Invoke-Register | Out-Null
+            $global:rltCalls.Settings.ContainsKey('RunOnlyIfNetworkAvailable') | Should -BeFalse
         }
 
         It "Should exit 1 when registration fails" {
@@ -127,11 +134,25 @@ Describe "Register-LoginTask.ps1" {
     Context "Existing task" {
         It "Should keep an up-to-date task without -Force" {
             $global:rltExistingTask = [pscustomobject]@{
-                Actions = @([pscustomobject]@{ Execute = "PowerShell.exe"; Arguments = $script:expectedArgs })
+                Actions  = @([pscustomobject]@{ Execute = "PowerShell.exe"; Arguments = $script:expectedArgs })
+                Settings = [pscustomobject]@{ RunOnlyIfNetworkAvailable = $false }
             }
             Invoke-Register | Should -Be 0
             $global:rltCalls.ContainsKey('Register') | Should -BeFalse
             $global:rltCalls.ContainsKey('Unregister') | Should -BeFalse
+        }
+
+        It "Should replace a task that waits for a network even without -Force (#256)" {
+            # What every install before #256 registered: the same action, but
+            # with "Start only if the network is available" set.
+            $global:rltExistingTask = [pscustomobject]@{
+                Actions  = @([pscustomobject]@{ Execute = "PowerShell.exe"; Arguments = $script:expectedArgs })
+                Settings = [pscustomobject]@{ RunOnlyIfNetworkAvailable = $true }
+            }
+            Invoke-Register | Should -Be 0
+            $global:rltCalls.Unregister.TaskName | Should -Be "GitConfig Pull at Login"
+            $global:rltCalls.ContainsKey('Register') | Should -BeTrue
+            $global:rltCalls.Settings.ContainsKey('RunOnlyIfNetworkAvailable') | Should -BeFalse
         }
 
         It "Should replace a task with old arguments even without -Force" {

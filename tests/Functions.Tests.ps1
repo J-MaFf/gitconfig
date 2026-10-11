@@ -210,5 +210,138 @@ Describe "Functions.ps1" -Tag 'Unit' {
             Invoke-PipInstall -Python (New-FakePip -ExitCode 0) -Packages @('rich') | Should -BeTrue
             Invoke-PipInstall -Python (New-FakePip -ExitCode 3) -Packages @('rich') | Should -BeFalse
         }
+
+        It "returns a single `$false when the -Logger writes to the pipeline and pip fails (#256)" {
+            # Update-GitConfig's Write-Log emits its line to the pipeline
+            # (Tee-Object). That line used to be captured into the return value,
+            # giving @('<line>', $false), which is truthy: a failed install was
+            # logged as [OK].
+            Mock Test-ConsoleSpinnerSupport { $false }
+            $script:messages = @()
+
+            $result = Invoke-PipInstall -Python (New-FakePip -ExitCode 1) -Packages @('rich') -Logger {
+                param($m)
+                $script:messages += $m
+                "2026-01-01 00:00:00 - $m"
+            }
+
+            @($result).Count | Should -Be 1
+            $result | Should -BeOfType [bool]
+            $result | Should -BeFalse
+            # The status line still went through the logger.
+            $script:messages.Count | Should -Be 1
+        }
+
+        It "returns a single `$true when the -Logger writes to the pipeline and pip succeeds (#256)" {
+            Mock Test-ConsoleSpinnerSupport { $false }
+
+            $result = Invoke-PipInstall -Python (New-FakePip -ExitCode 0) -Packages @('rich') -Logger { param($m) "logged: $m" }
+
+            @($result).Count | Should -Be 1
+            $result | Should -BeOfType [bool]
+            $result | Should -BeTrue
+        }
+
+        It "does not let pip's stdout leak into the result on the plain path (#256)" {
+            Mock Test-ConsoleSpinnerSupport { $false }
+            if ($script:isWindowsHost) {
+                $noisy = Join-Path $TestDrive "noisy-pip.cmd"
+                @('@echo off', 'echo Collecting rich', 'exit /b 1') | Set-Content -Path $noisy -Encoding ascii
+            }
+            else {
+                $noisy = Join-Path $TestDrive "noisy-pip.sh"
+                @('#!/bin/sh', 'echo Collecting rich', 'exit 1') | Set-Content -Path $noisy -Encoding ascii
+                & chmod +x $noisy
+            }
+
+            $result = Invoke-PipInstall -Python $noisy -Packages @('rich') -Logger { param($m) }
+
+            @($result).Count | Should -Be 1
+            $result | Should -BeFalse
+        }
+    }
+
+    Context "Install-PythonDeps status (#256)" {
+        BeforeAll {
+            . $script:functionsPath
+
+            $script:isWindowsHost = if ($PSVersionTable.PSVersion.Major -ge 6) { $IsWindows } else { $true }
+
+            # A repo root with the deps.py that Install-PythonDeps checks for. Its
+            # content doesn't matter: the fake interpreter answers in its place.
+            $script:depsRoot = Join-Path $TestDrive "deps-repo"
+            New-Item -ItemType Directory -Force -Path (Join-Path $script:depsRoot "scripts/shared") | Out-Null
+            New-Item -ItemType File -Force -Path (Join-Path $script:depsRoot "scripts/shared/deps.py") | Out-Null
+
+            # Fake interpreter: pip is present, deps.py lists rich (required) and
+            # textual (optional), neither imports, and every `pip install` exits
+            # with $PipExit. Never runs a real pip.
+            function New-FakePython {
+                param([Parameter(Mandatory)][int]$PipExit)
+                if ($script:isWindowsHost) {
+                    $path = Join-Path $TestDrive "fake-python-$PipExit.cmd"
+                    @(
+                        '@echo off'
+                        'if "%~1"=="-m" if "%~2"=="pip" if "%~3"=="--version" exit /b 0'
+                        "if `"%~1`"==`"-m`" if `"%~2`"==`"pip`" if `"%~3`"==`"install`" exit /b $PipExit"
+                        'if "%~1"=="-c" exit /b 1'
+                        'if "%~2"=="required" echo rich'
+                        'if "%~2"=="optional" echo textual'
+                        'exit /b 0'
+                    ) | Set-Content -Path $path -Encoding ascii
+                }
+                else {
+                    $path = Join-Path $TestDrive "fake-python-$PipExit.sh"
+                    @(
+                        '#!/bin/sh'
+                        'case "$1 $2 $3" in'
+                        '  "-m pip --version") exit 0 ;;'
+                        "  `"-m pip install`") exit $PipExit ;;"
+                        'esac'
+                        '[ "$1" = "-c" ] && exit 1'
+                        '[ "$2" = "required" ] && echo rich'
+                        '[ "$2" = "optional" ] && echo textual'
+                        'exit 0'
+                    ) | Set-Content -Path $path -Encoding ascii
+                    & chmod +x $path
+                }
+                return $path
+            }
+
+            # Logs like Update-GitConfig's Write-Log: records the line and also
+            # emits it to the pipeline.
+            $script:pipelineLogger = {
+                param($m)
+                $script:depsMessages += $m
+                "2026-01-01 00:00:00 - $m"
+            }
+        }
+
+        BeforeEach {
+            $script:depsMessages = @()
+            Mock Test-ConsoleSpinnerSupport { $false }
+        }
+
+        It "logs [WARN], not [OK], when pip install fails and the logger writes to the pipeline" {
+            $script:fakePython = New-FakePython -PipExit 1
+            Mock Resolve-Python { $script:fakePython }
+
+            Install-PythonDeps -RepoRoot $script:depsRoot -Logger $script:pipelineLogger | Out-Null
+
+            $all = $script:depsMessages -join "`n"
+            $all | Should -Match '\[WARN\] Could not install required Python deps \(rich\)'
+            $all | Should -Not -Match '\[OK\]'
+        }
+
+        It "logs [OK] when pip install succeeds and the logger writes to the pipeline" {
+            $script:fakePython = New-FakePython -PipExit 0
+            Mock Resolve-Python { $script:fakePython }
+
+            Install-PythonDeps -RepoRoot $script:depsRoot -Logger $script:pipelineLogger | Out-Null
+
+            $all = $script:depsMessages -join "`n"
+            $all | Should -Match '\[OK\] Installed Python deps: rich textual'
+            $all | Should -Not -Match '\[WARN\]'
+        }
     }
 }

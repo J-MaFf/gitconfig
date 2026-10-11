@@ -104,8 +104,9 @@ function Test-ConsoleSpinnerSupport {
 # just like the old inline `2>$null` calls did. Without a real console (see
 # Test-ConsoleSpinnerSupport) - or if job startup fails - the install runs
 # synchronously behind a single plain status line (routed via -Logger so the
-# login task's log picks it up), emitting no control characters. Returns $true
-# when pip exited 0. Dependency-free by design: no modules, no Python changes.
+# login task's log picks it up), emitting no control characters. Returns a
+# single [bool], $true when pip exited 0, whatever the -Logger writes to the
+# pipeline. Dependency-free by design: no modules, no Python changes.
 function Invoke-PipInstall {
     param(
         [Parameter(Mandatory)][string]$Python,
@@ -132,9 +133,16 @@ function Invoke-PipInstall {
     }
 
     if (-not $job) {
-        & $Logger "$activity (this can take a minute)..."
-        & $Python -m pip install --quiet @Packages 2>$null
-        return ($LASTEXITCODE -eq 0)
+        # Nothing but the final [bool] may reach this function's output: the
+        # updater's Write-Log logger emits its line to the pipeline (Tee-Object),
+        # and a captured log line made the result @('<line>', $false), which is
+        # truthy, so a failed install was reported as [OK] (#256). Out-Host keeps
+        # the line on screen without returning it; pip's own output is dropped,
+        # as on the job path.
+        & $Logger "$activity (this can take a minute)..." | Out-Host
+        & $Python -m pip install --quiet @Packages *> $null
+        $pipExit = $LASTEXITCODE
+        return [bool]($pipExit -eq 0)
     }
 
     $frames = '|', '/', '-', '\'
@@ -155,7 +163,7 @@ function Invoke-PipInstall {
     # The job's only output is the $LASTEXITCODE it emitted after pip finished.
     $exit = Receive-Job $job -ErrorAction SilentlyContinue | Select-Object -Last 1
     Remove-Job $job -Force -ErrorAction SilentlyContinue
-    return ($exit -eq 0)
+    return [bool]($exit -eq 0)
 }
 
 # Install the Python dependencies declared in pyproject.toml (read via

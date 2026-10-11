@@ -682,6 +682,74 @@ Describe "Update-GitConfig.ps1" {
         }
     }
 
+    Context "Step 2c: Python deps status in the log (#256)" {
+        BeforeEach {
+            $suffix = [guid]::NewGuid().ToString("N")
+            $script:testRepo = Join-Path $TestDrive "test-repo-$suffix"
+            $script:logFile = Join-Path $script:testRepo "docs\update-gitconfig.log"
+            New-TestRepository -Path $script:testRepo
+            # Install-PythonDeps only checks that deps.py exists; the fake
+            # interpreter below answers for it.
+            New-Item -ItemType Directory -Force -Path (Join-Path $script:testRepo "scripts/shared") | Out-Null
+            New-Item -ItemType File -Force -Path (Join-Path $script:testRepo "scripts/shared/deps.py") | Out-Null
+
+            # A fake `py` first on PATH, so Resolve-Python picks it over any real
+            # interpreter. It passes the probe, has pip, lists rich (required)
+            # and textual (optional), imports neither, and fails every
+            # `pip install`. No real pip ever runs.
+            $script:fakeBin = Join-Path $TestDrive "fake-bin-$suffix"
+            New-Item -ItemType Directory -Force -Path $script:fakeBin | Out-Null
+            if ($script:platformIsWindows) {
+                @(
+                    '@echo off'
+                    'if "%~1"=="-c" if "%~2"=="pass" exit /b 0'
+                    'if "%~1"=="-c" exit /b 1'
+                    'if "%~1"=="-m" if "%~2"=="pip" if "%~3"=="--version" exit /b 0'
+                    'if "%~1"=="-m" if "%~2"=="pip" if "%~3"=="install" exit /b 1'
+                    'if "%~2"=="required" echo rich'
+                    'if "%~2"=="optional" echo textual'
+                    'exit /b 0'
+                ) | Set-Content -Path (Join-Path $script:fakeBin "py.cmd") -Encoding ascii
+            }
+            else {
+                $fakePy = Join-Path $script:fakeBin "py"
+                @(
+                    '#!/bin/sh'
+                    'case "$1 $2" in "-c pass") exit 0 ;; esac'
+                    '[ "$1" = "-c" ] && exit 1'
+                    'case "$1 $2 $3" in'
+                    '  "-m pip --version") exit 0 ;;'
+                    '  "-m pip install") exit 1 ;;'
+                    'esac'
+                    '[ "$2" = "required" ] && echo rich'
+                    '[ "$2" = "optional" ] && echo textual'
+                    'exit 0'
+                ) | Set-Content -Path $fakePy -Encoding ascii
+                & chmod +x $fakePy
+            }
+            $script:savedPath = $env:PATH
+            $env:PATH = $script:fakeBin + [System.IO.Path]::PathSeparator + $env:PATH
+        }
+
+        AfterEach {
+            $env:PATH = $script:savedPath
+            foreach ($p in @($script:testRepo, $script:fakeBin)) {
+                if ($p -and (Test-Path $p)) { Remove-Item $p -Recurse -Force }
+            }
+        }
+
+        It "Should log a failed pip install as [WARN], not [OK]" {
+            # Write-Log emits its line to the pipeline; Invoke-PipInstall used
+            # to return that line along with $false, which read as success.
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            $logContent = Get-Content $script:logFile -Raw
+            $logContent | Should -Match "Installing rich"
+            $logContent | Should -Match "\[WARN\] Could not install required Python deps \(rich\)"
+            $logContent | Should -Not -Match "\[OK\] Installed"
+        }
+    }
+
     Context "Integration: Complete Workflow" {
         BeforeEach {
             # Unique repo path per test (see Step 3 note) so a locked leftover from
@@ -890,6 +958,28 @@ Describe "Update-GitConfig.ps1" {
             $backups = @(Get-ChildItem -LiteralPath $script:fakeHome -Force -Filter ".gitconfig.bak.*")
             $backups.Count | Should -BeGreaterThan 0
             ($backups | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n" | Should -Match "STALE-MARKER-DO-NOT-KEEP"
+        }
+
+        It "Should converge ~/.gitconfig and exit 0 with no network (#256)" {
+            # The login task no longer waits for a network, so the updater must
+            # cope without one: the pull and the prune fetch fail and are only
+            # logged, and ~/.gitconfig is still rendered from the local template.
+            # An origin that doesn't exist stands in for being offline.
+            git -C $script:testRepo remote set-url origin (Join-Path $TestDrive "no-such-remote") 2>&1 | Out-Null
+            $cfg = Join-Path $script:fakeHome ".gitconfig"
+            Set-Content -Path $cfg -Value "STALE-OFFLINE-MARKER"
+
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content $cfg -Raw) | Should -Not -Match "STALE-OFFLINE-MARKER"
+            # Rendered from the template (Initialize-GitConfig renders the one
+            # next to the script, so match a section any template has).
+            (Get-Content $cfg -Raw) | Should -Match "\[alias\]"
+            $logContent = Get-Content $script:logFile -Raw
+            $logContent | Should -Match "WARN: pull failed"
+            $logContent | Should -Match "SUCCESS: ~/.gitconfig converged to template"
+            $logContent | Should -Match "Repository synchronization process completed"
         }
 
         It "Should not rewrite ~/.gitconfig when it already matches the template" {
