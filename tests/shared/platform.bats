@@ -3,7 +3,9 @@
 # scripts/shared/platform.sh: the per-OS layer under scripts/unix/ (issue #229).
 #   - detect_os / requested_os / resolve_target_os: which platform to act for,
 #     and the wrong-platform guard (issues #179, #181)
-#   - the cron backend's line format and its marker-based removal
+#   - the cron backend's line format (quoting, per-user log) and its removal,
+#     which claims only this clone's lines (issue #259)
+#   - the launchd plist's XML escaping and plutil -lint check (issue #259)
 #   - detect_signing_key / detect_credential_helper: the same priority order
 #     on both platforms, with only the probe paths and the helper differing
 #
@@ -23,7 +25,7 @@ setup() {
     export GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig"
     export GIT_CONFIG_NOSYSTEM=1
     : > "$GIT_CONFIG_GLOBAL"
-    unset GITCONFIG_PLATFORM GITCONFIG_ALLOW_CROSS_OS GITCONFIG_OP_SSH_SIGN
+    unset GITCONFIG_PLATFORM GITCONFIG_ALLOW_CROSS_OS GITCONFIG_OP_SSH_SIGN XDG_STATE_HOME
 }
 
 teardown() {
@@ -88,26 +90,182 @@ _platform() {
 @test "cron_entry runs the shared updater with the repo path and ends with the marker" {
     run _platform 'cron_entry "/r e/po"'
     [ "$status" -eq 0 ]
-    [ "$output" = '0 9 * * * bash "/r e/po/scripts/shared/update-gitconfig.sh" "/r e/po" >> /tmp/gitconfig-update.log 2>&1 # gitconfig-autoupdate' ]
+    [ "$output" = "0 9 * * * bash \"/r e/po/scripts/shared/update-gitconfig.sh\" \"/r e/po\" >> \"$HOME/.local/state/gitconfig/gitconfig-update.log\" 2>&1 # gitconfig-autoupdate" ]
 }
 
-@test "scheduler_remove keeps every cron line that isn't ours" {
+@test "the cron log is per user, not the shared /tmp file (#259)" {
+    run _platform 'cron_log_path'
+    [ "$output" = "$HOME/.local/state/gitconfig/gitconfig-update.log" ]
+    run env XDG_STATE_HOME="$SANDBOX/state" bash -c "source '$REPO_ROOT/scripts/shared/platform.sh'; cron_log_path"
+    [ "$output" = "$SANDBOX/state/gitconfig/gitconfig-update.log" ]
+    # The XDG spec says to ignore a relative XDG_STATE_HOME.
+    run env XDG_STATE_HOME="rel/state" bash -c "source '$REPO_ROOT/scripts/shared/platform.sh'; cron_log_path"
+    [ "$output" = "$HOME/.local/state/gitconfig/gitconfig-update.log" ]
+    run _platform 'cron_entry /repo'
+    [[ "$output" != *" /tmp/gitconfig-update.log "* ]]
+    [[ "$output" == *" >> \"$HOME/.local/state/gitconfig/gitconfig-update.log\" "* ]]
+}
+
+@test "cron_entry escapes % and quotes the path so cron and sh pass it through intact (#259)" {
+    repo="$SANDBOX/odd 100%"'$HOME"q`x`\b'
+    export repo
+    run _platform 'cron_entry "$repo"'
+    [ "$status" -eq 0 ]
+    line="$output"
+    # cron turns an unescaped % into a newline: every % must be escaped.
+    run ! grep -qE '(^|[^\\])%' <<<"$line"
+    # Do what cron does: drop the schedule, turn \% into %, hand it to sh.
+    cmd="$(printf '%s\n' "${line#0 9 \* \* \* }" | sed 's/\\%/%/g')"
+    # A fake bash that records its arguments, one per line.
+    mkdir -p "$SANDBOX/argbin" "$HOME/.local/state/gitconfig"
+    printf '#!/bin/sh\nfor a in "$@"; do printf "%%s\\n" "$a"; done\n' > "$SANDBOX/argbin/bash"
+    chmod +x "$SANDBOX/argbin/bash"
+    PATH="$SANDBOX/argbin:$PATH" sh -c "$cmd"
+    [ "$(cat "$HOME/.local/state/gitconfig/gitconfig-update.log")" = "$(printf '%s\n%s' "$repo/scripts/shared/update-gitconfig.sh" "$repo")" ]
+}
+
+@test "cron_entry refuses a repo path with a newline" {
+    run _platform 'cron_entry "$(printf "/a\nb")"'
+    [ "$status" -ne 0 ]
+    [ -z "$output" ]
+}
+
+# A crontab stub backed by $SANDBOX/crontab.txt.
+_stub_crontab_file() {
     printf '#!/bin/sh\ncase "$1" in\n    -l) cat "%s" ;;\n    -)  cat > "%s.new" && mv "%s.new" "%s" ;;\nesac\n' \
         "$SANDBOX/crontab.txt" "$SANDBOX/crontab.txt" "$SANDBOX/crontab.txt" "$SANDBOX/crontab.txt" \
         > "$SANDBOX/bin/crontab"
     chmod +x "$SANDBOX/bin/crontab"
+}
+
+@test "scheduler_remove keeps every cron line that isn't ours" {
+    _stub_crontab_file
     {
         echo 'MAILTO=me@example.com'
         echo '0 8 * * * echo keep-me'
         echo '0 9 * * * bash "/a/scripts/shared/update-gitconfig.sh" "/a" >> /tmp/gitconfig-update.log 2>&1 # gitconfig-autoupdate'
-        echo '0 9 * * * bash "/b/scripts/linux version/update-gitconfig.sh" "/b" >> /tmp/gitconfig-update.log 2>&1'
+        echo '0 9 * * * bash "/a/scripts/linux version/update-gitconfig.sh" "/a" >> /tmp/gitconfig-update.log 2>&1'
     } > "$SANDBOX/crontab.txt"
 
-    run _platform 'scheduler_remove linux'
+    run _platform 'scheduler_remove linux /a'
     [ "$status" -eq 0 ]
     [ "$(cat "$SANDBOX/crontab.txt")" = "$(printf 'MAILTO=me@example.com\n0 8 * * * echo keep-me')" ]
-    run _platform 'scheduler_status linux'
+    run _platform 'scheduler_status linux /a'
     [ "$status" -ne 0 ]
+}
+
+@test "scheduler_remove claims only this clone's lines, never another clone's or a comment (#259)" {
+    _stub_crontab_file
+    others="$(cat <<'EOF'
+0 9 * * * bash "/b/scripts/shared/update-gitconfig.sh" "/b" >> /tmp/gitconfig-update.log 2>&1 # gitconfig-autoupdate
+0 9 * * * bash "/b/scripts/linux version/update-gitconfig.sh" "/b" >> /tmp/gitconfig-update.log 2>&1
+0 9 * * * bash "/a2/scripts/shared/update-gitconfig.sh" "/a2" 2>&1 # gitconfig-autoupdate
+# 0 9 * * * bash "/a/scripts/shared/update-gitconfig.sh" "/a" 2>&1 # gitconfig-autoupdate
+   #0 9 * * * bash "/a/scripts/linux version/update-gitconfig.sh" >> /tmp/gitconfig-update.log 2>&1
+0 7 * * * /usr/local/bin/my-update-gitconfig.sh
+EOF
+)"
+    {
+        echo '0 8 * * * echo keep-me'
+        echo '0 9 * * * bash "/a/scripts/shared/update-gitconfig.sh" "/a" >> "/h/.local/state/gitconfig/gitconfig-update.log" 2>&1 # gitconfig-autoupdate'
+        # The oldest Linux installs passed no repo argument.
+        echo '0 9 * * * bash "/a/scripts/linux version/update-gitconfig.sh" >> /tmp/gitconfig-update.log 2>&1'
+        printf '%s\n' "$others"
+    } > "$SANDBOX/crontab.txt"
+
+    run _platform 'scheduler_status linux /a'
+    [ "$status" -eq 0 ]
+    run _platform 'scheduler_remove linux /a'
+    [ "$status" -eq 0 ]
+    [ "$(cat "$SANDBOX/crontab.txt")" = "$(printf '0 8 * * * echo keep-me\n%s' "$others")" ]
+    run _platform 'scheduler_status linux /a'
+    [ "$status" -ne 0 ]
+    # /b's and /a2's jobs are still there for their own clones.
+    run _platform 'scheduler_status linux /b'
+    [ "$status" -eq 0 ]
+    run _platform 'scheduler_status linux /a2'
+    [ "$status" -eq 0 ]
+}
+
+@test "a commented-out line alone doesn't count as an installed cron job (#259)" {
+    _stub_crontab_file
+    echo '# 0 9 * * * bash "/a/scripts/shared/update-gitconfig.sh" "/a" 2>&1 # gitconfig-autoupdate' > "$SANDBOX/crontab.txt"
+    run _platform 'scheduler_status linux /a'
+    [ "$status" -ne 0 ]
+    run _platform 'scheduler_remove linux /a'
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Cron job not found"* ]]
+}
+
+@test "scheduler_install finds and replaces a cron line for a path with special characters (#259)" {
+    _stub_crontab_file
+    : > "$SANDBOX/crontab.txt"
+    repo="$SANDBOX/a&b 50%"'$x"'
+    mkdir -p "$repo/scripts/shared"
+    : > "$repo/scripts/shared/update-gitconfig.sh"
+    export repo
+    for _ in 1 2; do
+        run _platform 'scheduler_install linux "$repo" true'
+        [ "$status" -eq 0 ]
+    done
+    [ "$(wc -l < "$SANDBOX/crontab.txt")" -eq 1 ]
+    # The log directory exists before the job's first run.
+    [ -d "$HOME/.local/state/gitconfig" ]
+    run _platform 'scheduler_status linux "$repo"'
+    [ "$status" -eq 0 ]
+    run _platform 'scheduler_remove linux "$repo"'
+    [ "$status" -eq 0 ]
+    [ ! -s "$SANDBOX/crontab.txt" ]
+}
+
+# A clone at $1 with an updater, for the launchd tests; launchctl is stubbed.
+_launchd_clone() {
+    mkdir -p "$1/scripts/shared"
+    : > "$1/scripts/shared/update-gitconfig.sh"
+    printf '#!/bin/sh\nexit 0\n' > "$SANDBOX/bin/launchctl"
+    chmod +x "$SANDBOX/bin/launchctl"
+}
+
+@test "the launchd plist escapes & < > in the repo path and still parses (#259)" {
+    repo="$SANDBOX/R&D <dev> clone"
+    _launchd_clone "$repo"
+    export repo
+    run _platform 'scheduler_install macos "$repo" true'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] launchd agent registered"* ]]
+    plist="$HOME/Library/LaunchAgents/com.gitconfig.update.plist"
+    run python3 - "$plist" "$repo" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "rb") as f:
+    p = plistlib.load(f)
+repo = sys.argv[2]
+assert p["ProgramArguments"] == ["/bin/bash", repo + "/scripts/shared/update-gitconfig.sh", repo], p["ProgramArguments"]
+assert p["StandardOutPath"] == repo + "/docs/update-gitconfig.log", p["StandardOutPath"]
+PY
+    [ "$status" -eq 0 ]
+}
+
+@test "a plist that fails plutil -lint isn't reported as registered or verified (#259)" {
+    _launchd_clone "$SANDBOX/clone"
+    plist="$HOME/Library/LaunchAgents/com.gitconfig.update.plist"
+    # plutil calls every plist malformed.
+    printf '#!/bin/sh\nexit 1\n' > "$SANDBOX/bin/plutil"
+    chmod +x "$SANDBOX/bin/plutil"
+    run _platform "scheduler_install macos '$SANDBOX/clone' true"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"failed plutil -lint"* ]]
+    [[ "$output" != *"registered"* ]]
+    [ ! -e "$plist" ]
+
+    # A malformed plist already on disk doesn't pass the status check...
+    mkdir -p "$(dirname "$plist")"
+    echo '<plist><string>a & b</string></plist>' > "$plist"
+    run _platform 'scheduler_status macos'
+    [ "$status" -ne 0 ]
+    # ...but one plutil accepts does.
+    printf '#!/bin/sh\n[ "$1" = -lint ] || exit 2\nexit 0\n' > "$SANDBOX/bin/plutil"
+    run _platform 'scheduler_status macos'
+    [ "$status" -eq 0 ]
 }
 
 @test "detect_signing_key: an on-disk key with its .pub wins over op-ssh-sign" {

@@ -147,9 +147,13 @@ Run the main setup script:
 4. **Optional: Manual Cron Setup** - If the automatic cron setup didn't work
 
    ```bash
+   mkdir -p ~/.local/state/gitconfig
    crontab -e
-   # Add: 0 9 * * * bash "/path/to/gitconfig/scripts/shared/update-gitconfig.sh" "/path/to/gitconfig" >> /tmp/gitconfig-update.log 2>&1 # gitconfig-autoupdate
+   # Add (use absolute paths; cron does not expand ~):
+   # 0 9 * * * bash "/path/to/gitconfig/scripts/shared/update-gitconfig.sh" "/path/to/gitconfig" >> "/home/you/.local/state/gitconfig/gitconfig-update.log" 2>&1 # gitconfig-autoupdate
    ```
+
+   In a crontab, an unescaped `%` ends the command, so write any `%` in a path as `\%`.
 
 ### Reverse Setup
 
@@ -183,8 +187,9 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 
 - Cron job set for daily updates at 9 AM, tagged `# gitconfig-autoupdate`
   so cleanup (and a re-install) can find and replace exactly that line;
-  untagged lines from older installs that run `update-gitconfig.sh` are
-  replaced or removed too
+  an untagged line from an older install that runs this clone's
+  `update-gitconfig.sh` is replaced or removed too. Another clone's job and
+  commented-out lines are never touched
 - Can be customized or disabled with `--no-cron`
 
 ## Differences from Windows Version
@@ -222,7 +227,7 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 
 ### Log File Issues
 
-- Ensure log directory exists: `mkdir -p ~/.gitconfig-logs`
+- The cron job logs to `${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log`. The installer creates that directory; if it's gone, `sh` can't open the log and skips the whole job, so re-create it (`mkdir -p ~/.local/state/gitconfig`) or re-run the installer
 - Check write permissions
 
 ## Advanced Usage
@@ -230,12 +235,13 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 ### Custom Cron Schedule
 
 Edit `cron_entry` in `scripts/shared/platform.sh` before running (keep the
-trailing `# gitconfig-autoupdate` marker so cleanup can find the line), or
-change the schedule afterwards with `crontab -e`:
+trailing `# gitconfig-autoupdate` marker and this clone's quoted path, which
+is how install and cleanup find the line), or change the schedule afterwards
+with `crontab -e`:
 
 ```bash
 # Change the schedule in this line:
-printf '0 9 * * * bash "%s" "%s" >> /tmp/gitconfig-update.log 2>&1 %s\n' \
+printf '0 9 * * * bash %s %s >> %s 2>&1 %s\n' \
 ```
 
 Common cron schedules:
@@ -275,7 +281,8 @@ git config --list
 - The setup scripts use no bash 4-only features and run under bash 3.2+; only the optional Ctrl-G alias widget for bash needs bash 4.0+ (`READLINE_LINE`)
 - Scripts preserve existing files by backing them up as `<file>.bak.YYYYMMDD-HHMMSS`; the newest 5 per file are kept (`GITCONFIG_BACKUP_KEEP` changes this, `0` keeps all), and the original is kept for good as `<file>.pre-gitconfig`
 - No root/sudo required unless dealing with system-wide git config
-- Cron job logs to `/tmp/gitconfig-update.log`
+- Cron job logs to `${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log` (per user; older installs used `/tmp/gitconfig-update.log`, and re-running the installer moves the job to the new log)
+- Install and cleanup only touch this clone's cron line, so two clones can each keep their own job
 - Windows-specific paths and settings are excluded
 
 ## Support
@@ -283,6 +290,6 @@ git config --list
 For issues:
 
 1. Run setup with `--help` for available options
-2. Check the logs in `/tmp/gitconfig-update.log`
+2. Check the logs in `~/.local/state/gitconfig/gitconfig-update.log` (or under `$XDG_STATE_HOME` if you set it)
 3. Test manually: `bash update-gitconfig.sh`
 4. Review symlink status: `ls -la ~/.gitconfig*`

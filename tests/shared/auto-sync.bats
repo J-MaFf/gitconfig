@@ -16,6 +16,8 @@ setup() {
     SANDBOX="$(mktemp -d)"
     export HOME="$SANDBOX/home"
     mkdir -p "$HOME" "$SANDBOX/bin"
+    # The cron log lives under XDG_STATE_HOME when it's set; keep it in HOME.
+    unset XDG_STATE_HOME
 
     # Isolate git from the developer's global/system config. Commits made by the
     # tests themselves are unsigned and use a fixed identity.
@@ -172,6 +174,19 @@ EOF
     grep -qF "\"$REPO_ROOT/scripts/shared/update-gitconfig.sh\" \"$REPO_ROOT\"" "$SANDBOX/crontab.txt"
 }
 
+@test "linux install logs the cron job per user and creates the log directory (#259)" {
+    _stub_crontab
+    run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" \
+        bash "$REPO_ROOT/scripts/linux version/install.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Log: $HOME/.local/state/gitconfig/gitconfig-update.log"* ]]
+    # A shared /tmp log that another user owns makes sh skip the whole job.
+    run ! grep -qF '/tmp/gitconfig-update.log' "$SANDBOX/crontab.txt"
+    grep -qF ">> \"$HOME/.local/state/gitconfig/gitconfig-update.log\" 2>&1" "$SANDBOX/crontab.txt"
+    # The >> redirect can't create a directory, so install must.
+    [ -d "$HOME/.local/state/gitconfig" ]
+}
+
 @test "linux install tags its cron line and replaces it instead of adding a second" {
     _stub_crontab
     for _ in 1 2; do
@@ -187,30 +202,42 @@ EOF
     sh -n -c "${line#0 9 \* \* \* }"
 }
 
+# What the pre-#229 Linux installer wrote for this clone: the per-OS wrapper,
+# no marker, the shared /tmp log. Plus another clone's job, which is not ours.
+_old_crontab() {
+    {
+        echo '0 8 * * * echo keep-me'
+        printf '0 9 * * * bash "%s/scripts/linux version/update-gitconfig.sh" "%s" >> /tmp/gitconfig-update.log 2>&1\n' \
+            "$REPO_ROOT" "$REPO_ROOT"
+        echo '0 9 * * * bash "/other/clone/scripts/shared/update-gitconfig.sh" "/other/clone" >> /tmp/gitconfig-update.log 2>&1 # gitconfig-autoupdate'
+    } > "$SANDBOX/crontab.txt"
+}
+
 @test "linux install migrates an untagged cron line from an older install" {
     _stub_crontab
-    # What the pre-#229 Linux installer wrote: the per-OS wrapper, no marker.
-    printf '0 8 * * * echo keep-me\n0 9 * * * bash "/old/clone/scripts/linux version/update-gitconfig.sh" "/old/clone" >> /tmp/gitconfig-update.log 2>&1\n' \
-        > "$SANDBOX/crontab.txt"
+    _old_crontab
     run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" \
         bash "$REPO_ROOT/scripts/linux version/install.sh" --force
     [ "$status" -eq 0 ]
     [[ "$output" == *"[OK] Created cron job"* ]]
-    [ "$(grep -c 'update-gitconfig.sh' "$SANDBOX/crontab.txt")" -eq 1 ]
-    run ! grep -qF '/old/clone' "$SANDBOX/crontab.txt"
+    [ "$(grep -cF "\"$REPO_ROOT/scripts/" "$SANDBOX/crontab.txt")" -eq 1 ]
+    run ! grep -qF "$REPO_ROOT/scripts/linux version/" "$SANDBOX/crontab.txt"
     grep -qF "keep-me" "$SANDBOX/crontab.txt"
+    # Another clone's job is left alone (#259).
+    grep -qF '"/other/clone/scripts/shared/update-gitconfig.sh"' "$SANDBOX/crontab.txt"
 }
 
 @test "linux cleanup removes an untagged cron line from an older install" {
     _stub_crontab
-    printf '0 8 * * * echo keep-me\n0 9 * * * bash "/old/clone/scripts/linux version/update-gitconfig.sh" "/old/clone" >> /tmp/gitconfig-update.log 2>&1\n' \
-        > "$SANDBOX/crontab.txt"
+    _old_crontab
     run env PATH="$SANDBOX/bin:$PATH" bash "$REPO_ROOT/scripts/linux version/cleanup-gitconfig.sh" --force
     [ "$status" -eq 0 ]
     [[ "$output" == *"[OK] Removed cron job"* ]]
     [[ "$output" == *"Cleanup SUCCESSFUL!"* ]]
-    run ! grep -qF "update-gitconfig.sh" "$SANDBOX/crontab.txt"
+    run ! grep -qF "$REPO_ROOT/scripts/" "$SANDBOX/crontab.txt"
     grep -qF "keep-me" "$SANDBOX/crontab.txt"
+    # Another clone's job is left alone (#259).
+    grep -qF '"/other/clone/scripts/shared/update-gitconfig.sh"' "$SANDBOX/crontab.txt"
 }
 
 @test "linux install verifies the cron job and prints the error summary" {
