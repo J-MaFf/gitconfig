@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A cross-platform tool that generates a portable `~/.gitconfig` from a version-controlled template (`.gitconfig.template`), layers machine-specific overrides via `~/.gitconfig.local`, and keeps it converged through an auto-update job (a login scheduled task on Windows, a launchd login agent on macOS, a daily cron job on Linux). Helper logic (`gitconfig_helper.py`) backs the custom git aliases. Windows setup is PowerShell + Pester; macOS/Linux are bash.
+A cross-platform tool that generates a portable `~/.gitconfig` from a version-controlled template (`.gitconfig.template`), layers machine-specific overrides via `~/.gitconfig.local`, and keeps it converged through an auto-update job (a login scheduled task on Windows, a launchd login agent on macOS, a daily systemd user timer or cron job on Linux). Helper logic (`gitconfig_helper.py`) backs the custom git aliases. Windows setup is PowerShell + Pester; macOS/Linux are bash.
 
 ## Current State — 2026-10-11
 
@@ -10,13 +10,14 @@ Healthy; `main` is clean and no PRs are open. A repo-wide bug review filed [#250
 
 - **macOS/Linux exit codes:** `install.sh` exits 1 when a step fails, `cleanup-gitconfig.sh` exits 1 when something is left, and a declined prompt exits 2. A prompt with no input counts as "no" instead of silently aborting the run; `--force` answers yes for unattended runs ([#258](https://github.com/J-MaFf/gitconfig/issues/258)).
 - **Unix auto-sync:** the cron job logs to `${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log` instead of `/tmp`, install and cleanup claim only this clone's cron line, and launchd/cron paths are escaped ([#259](https://github.com/J-MaFf/gitconfig/issues/259)).
+- **Linux auto-sync uses a systemd user timer** where `systemctl --user` works (daily, `Persistent=true`, logs in the journal), and cron otherwise; installing one removes the other, and the installer hints at `loginctl enable-linger` when linger is off ([#246](https://github.com/J-MaFf/gitconfig/issues/246)).
 - **`~/.gitconfig.local`:** `install.sh --force` keeps the settings you added; a symlinked `~/.gitconfig` or `~/.gitconfig.local` is replaced instead of written through ([#257](https://github.com/J-MaFf/gitconfig/issues/257)). `git localconfig` with no arguments opens the file in your editor ([#263](https://github.com/J-MaFf/gitconfig/issues/263)).
 - **Windows:** a failed symlink keeps the existing file and exits 1, cleanup keeps the PowerShell profile's encoding ([#255](https://github.com/J-MaFf/gitconfig/issues/255)); the login task no longer waits for a network and a failed pip install is no longer logged as `[OK]` ([#256](https://github.com/J-MaFf/gitconfig/issues/256)); the Ctrl-G widget inserts the picked alias again ([#254](https://github.com/J-MaFf/gitconfig/issues/254)).
 - **Helper:** unknown flags and `-h` run nothing ([#250](https://github.com/J-MaFf/gitconfig/issues/250)), `git pushf` adds `--force-if-includes` ([#251](https://github.com/J-MaFf/gitconfig/issues/251)), `git start` names branches `<type>/<issue>-<slug>` ([#252](https://github.com/J-MaFf/gitconfig/issues/252)), the original pre-install file is kept as `<file>.pre-gitconfig` ([#253](https://github.com/J-MaFf/gitconfig/issues/253)).
 
 - **macOS:** the bash Ctrl-G widget needs bash 4+ and says so under `/bin/bash` 3.2, launchd uses `launchctl bootstrap`/`bootout`, and a per-user lock keeps to one sync at a time ([#234](https://github.com/J-MaFf/gitconfig/issues/234)).
 
-Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows PowerShell 5.1 ([#269](https://github.com/J-MaFf/gitconfig/pull/269)), `install.ps1` replacing a network-gated login task left by an older version ([#275](https://github.com/J-MaFf/gitconfig/pull/275)), and `launchctl bootstrap`/`bootout` plus the bash 3.2 Ctrl-G note on a real Mac ([#234](https://github.com/J-MaFf/gitconfig/issues/234)).
+Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows PowerShell 5.1 ([#269](https://github.com/J-MaFf/gitconfig/pull/269)), `install.ps1` replacing a network-gated login task left by an older version ([#275](https://github.com/J-MaFf/gitconfig/pull/275)), `launchctl bootstrap`/`bootout` plus the bash 3.2 Ctrl-G note on a real Mac ([#234](https://github.com/J-MaFf/gitconfig/issues/234)), and the Linux systemd timer under a real user manager (enable, a daily run in the journal, `Persistent=` catch-up, cleanup) ([#246](https://github.com/J-MaFf/gitconfig/issues/246)).
 
 ### Components
 
@@ -79,6 +80,7 @@ Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows Po
 | [#240](https://github.com/J-MaFf/gitconfig/issues/240) | Windows `install.ps1` printed `Setup Complete!` and exited 0 after failed steps, the elevated relaunch lost the exit code, `Initialize-Symlinks.ps1` asked about the task even with `-NoTask` and `-Reinstall -NoTask` deleted it, and elevating with another account's password set up the administrator's profile and task; now failures exit 1, `-KeepTask`, and the invoking account is configured | [#288](https://github.com/J-MaFf/gitconfig/pull/288) |
 | [#234](https://github.com/J-MaFf/gitconfig/issues/234) | macOS: the bash Ctrl-G widget bound but did nothing under `/bin/bash` 3.2, the scheduler used the deprecated `launchctl load`/`unload`, and the `RunAtLoad` sync ran the same pip install as the installer's STEP 6; now the widget binds only under bash 4+ (with a note), `bootstrap`/`bootout` are used, and a per-user lock keeps to one sync at a time | [#286](https://github.com/J-MaFf/gitconfig/pull/286) |
 | [#232](https://github.com/J-MaFf/gitconfig/issues/232) | `git skill list` ran one `git log` per skill (now one pass); the two skill-audit runners duplicated script/shell selection (now `_audit_cmd`); the skills-repo dirt warning named a nonexistent `git update` (now `git main --all`) | [#289](https://github.com/J-MaFf/gitconfig/pull/289) |
+| [#246](https://github.com/J-MaFf/gitconfig/issues/246) | Linux auto-sync was cron-only: skipped on hosts with no `crontab`, missed days the machine was off, logged to a file; now a systemd user timer (daily, `Persistent=true`, journal) where `systemctl --user` works, cron otherwise, never both, with a linger hint | [#290](https://github.com/J-MaFf/gitconfig/pull/290) |
 
 ### Open Issues
 
@@ -90,7 +92,6 @@ From an earlier review; none are being worked on.
 | [#231](https://github.com/J-MaFf/gitconfig/issues/231) | Template: dedupe the Python-finder alias loop (quote the repo path) and move machine-specific settings out |
 | [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Replace source-text tests with behavioural tests in a sandboxed HOME |
 | [#235](https://github.com/J-MaFf/gitconfig/issues/235) | Stop hardcoding machine-specific values in .gitconfig.local generation |
-| [#246](https://github.com/J-MaFf/gitconfig/issues/246) | Add a systemd user timer backend to the Unix scheduler |
 
 ## Natural Next Steps
 
@@ -103,6 +104,6 @@ From an earlier review; none are being worked on.
 ## Prerequisites to Run
 
 - **Windows:** Git for Windows, PowerShell 7+, Python 3 (PyManager or python.org); run `scripts/windows version/install.ps1` (elevates for symlinks + scheduled task).
-- **macOS/Linux:** bash, Python 3, and cron on Linux for the auto-update job; run `bash scripts/unix/install.sh` (`--force` for unattended runs; it exits 1 if a step fails).
+- **macOS/Linux:** bash, Python 3, and on Linux a systemd user session or cron for the auto-update job; run `bash scripts/unix/install.sh` (`--force` for unattended runs; it exits 1 if a step fails).
 - **Tests:** Pester 5+; `tests/run-tests.ps1` (add `-IncludeIntegration` only on a throwaway machine/VM). bats-core + pytest for `tests/shared/`. CI (`.github/workflows/test.yml`) runs all of them on Windows (pwsh 7 and 5.1, plus the integration tests), Linux and macOS for every PR.
 - **Beads:** `bd` CLI; `bd bootstrap` on a fresh clone, then `bd dolt pull` / `bd dolt push` to sync.

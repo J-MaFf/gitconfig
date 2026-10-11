@@ -17,11 +17,13 @@ setup() {
     mkdir -p "$HOME" "$SANDBOX/bin"
     export GITCONFIG_ALLOW_CROSS_OS=1
     export GIT_CONFIG_SYSTEM="$SANDBOX/no-system-config"
-    unset GIT_CONFIG_GLOBAL GITCONFIG_BACKUP_KEEP XDG_STATE_HOME
+    unset GIT_CONFIG_GLOBAL GITCONFIG_BACKUP_KEEP XDG_STATE_HOME XDG_CONFIG_HOME
+    # No session bus: even a real systemctl can't reach the user manager.
+    unset XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
 
     # Hide Python (no pip installs from a test) and any login-agent tooling.
     local stub
-    for stub in py python python3 launchctl crontab; do
+    for stub in py python python3 launchctl crontab systemctl loginctl; do
         printf '#!/bin/sh\nexit 1\n' > "$SANDBOX/bin/$stub"
         chmod +x "$SANDBOX/bin/$stub"
     done

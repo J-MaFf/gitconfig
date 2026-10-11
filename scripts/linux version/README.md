@@ -23,10 +23,10 @@ The scripts are designed to work on:
   - Generates .gitconfig from template
   - Creates symlinks (links that already point into the repo are left alone)
   - Generates .gitconfig.local (which also sets the global gitignore)
-  - Sets up cron job (optional)
+  - Sets up the auto-sync job (optional): a systemd user timer, or a cron job where `systemctl --user` doesn't work
   - Verifies complete setup
 
-- **cleanup-gitconfig.sh** - Removes all gitconfig-related files and cron jobs
+- **cleanup-gitconfig.sh** - Removes all gitconfig-related files and the systemd timer / cron job
   - Backs up removed files (timestamped `*.bak.YYYYMMDD-HHMMSS`, plus a
     `<file>.pre-gitconfig` copy of the original); symlinks into the repo are
     just removed
@@ -87,7 +87,7 @@ Run the main setup script:
 ```bash
 ./install.sh                # Interactive mode
 ./install.sh --force        # Overwrite without prompting
-./install.sh --no-cron      # Skip cron job setup (same as --no-scheduler)
+./install.sh --no-cron      # Skip the auto-sync job (same as --no-scheduler)
 ./install.sh --help         # Show help
 ```
 
@@ -144,7 +144,7 @@ Run the main setup script:
    git config --list | head -20
    ```
 
-4. **Optional: Manual Cron Setup** - If the automatic cron setup didn't work
+4. **Optional: Manual Cron Setup** - If the automatic setup didn't work and you want cron (with a working systemd user session, re-run `install.sh` instead: it sets up the timer)
 
    ```bash
    mkdir -p ~/.local/state/gitconfig
@@ -185,12 +185,19 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 
 ### Automation (Optional)
 
-- Cron job set for daily updates at 9 AM, tagged `# gitconfig-autoupdate`
+- When `systemctl --user` reaches a running user manager: a systemd user
+  timer, `~/.config/systemd/user/gitconfig-update.timer`, that starts
+  `gitconfig-update.service` daily (`OnCalendar=daily`) and catches up at the
+  next start after a day the machine was off (`Persistent=true`). It needs no
+  `crontab` and logs to the journal: `journalctl --user -u gitconfig-update`.
+  Installing it removes this clone's cron line
+- Otherwise: a cron job for daily updates at 9 AM, tagged `# gitconfig-autoupdate`
   so cleanup (and a re-install) can find and replace exactly that line;
   an untagged line from an older install that runs this clone's
   `update-gitconfig.sh` is replaced or removed too. Another clone's job and
-  commented-out lines are never touched
-- Can be customized or disabled with `--no-cron`
+  commented-out lines are never touched. Installing it removes the systemd
+  timer, so the sync never runs twice
+- Can be disabled with `--no-scheduler` (or `--no-cron`)
 
 ## Differences from Windows Version
 
@@ -198,7 +205,7 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 |---------|---------|-------|
 | Admin Required | Yes | No |
 | Symlinks | Windows symlinks | Unix symlinks |
-| Scheduled Tasks | Windows Task Scheduler | cron |
+| Scheduled Tasks | Windows Task Scheduler | systemd user timer, else cron |
 | Paths | `C:\Users\...` | `/home/...` |
 | Line Endings | CRLF | LF |
 | SSH Signing | op-ssh-sign.exe | On-disk SSH key, or op-ssh-sign |
@@ -211,6 +218,13 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 - Ensure you're not in a read-only filesystem
 - Try with `--force` flag
 - Check file permissions
+
+### systemd Timer Not Running
+
+- Check it's scheduled: `systemctl --user list-timers gitconfig-update.timer`
+- Read the runs: `journalctl --user -u gitconfig-update`
+- Run it now: `systemctl --user start gitconfig-update.service`
+- A user timer runs only while you are logged in. On a headless machine, turn linger on so it runs with no session: `loginctl enable-linger $USER` (the installer prints this hint when linger is off; it never turns it on itself)
 
 ### Cron Job Not Working
 
@@ -231,6 +245,18 @@ Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks t
 - Check write permissions
 
 ## Advanced Usage
+
+### Custom Timer Schedule
+
+Override the timer's schedule without editing the generated unit (a re-install
+rewrites it):
+
+```bash
+systemctl --user edit gitconfig-update.timer
+# [Timer]
+# OnCalendar=
+# OnCalendar=*-*-* 08:00
+```
 
 ### Custom Cron Schedule
 
@@ -281,8 +307,8 @@ git config --list
 - The setup scripts use no bash 4-only features and run under bash 3.2+; only the optional Ctrl-G alias widget for bash needs bash 4.0+ (`READLINE_LINE`); under an older bash it skips the binding with a one-line note
 - Scripts preserve existing files by backing them up as `<file>.bak.YYYYMMDD-HHMMSS`; the newest 5 per file are kept (`GITCONFIG_BACKUP_KEEP` changes this, `0` keeps all), and the original is kept for good as `<file>.pre-gitconfig`
 - No root/sudo required unless dealing with system-wide git config
-- Cron job logs to `${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log` (per user; older installs used `/tmp/gitconfig-update.log`, and re-running the installer moves the job to the new log)
-- Install and cleanup only touch this clone's cron line, so two clones can each keep their own job
+- The systemd timer logs to the journal (`journalctl --user -u gitconfig-update`); the cron job logs to `${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log` (per user; older installs used `/tmp/gitconfig-update.log`, and re-running the installer moves the job to the new log)
+- Install and cleanup only touch this clone's cron line, so two clones can each keep their own cron job; the systemd timer has one fixed name per user, so the last clone installed owns it
 - Windows-specific paths and settings are excluded
 
 ## Support

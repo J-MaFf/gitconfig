@@ -16,8 +16,15 @@ setup() {
     SANDBOX="$(mktemp -d)"
     export HOME="$SANDBOX/home"
     mkdir -p "$HOME" "$SANDBOX/bin"
-    # The cron log lives under XDG_STATE_HOME when it's set; keep it in HOME.
-    unset XDG_STATE_HOME
+    # The cron log lives under XDG_STATE_HOME when it's set, the systemd units
+    # under XDG_CONFIG_HOME; keep both in HOME.
+    unset XDG_STATE_HOME XDG_CONFIG_HOME
+    # The scheduler must never reach the real systemd user manager: no session
+    # bus, and a systemctl that finds no user manager, so the Linux installer
+    # uses cron. The systemd tests replace it with _stub_systemctl.
+    unset XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
+    printf '#!/bin/sh\nexit 1\n' > "$SANDBOX/bin/systemctl"
+    chmod +x "$SANDBOX/bin/systemctl"
 
     # Isolate git from the developer's global/system config. Commits made by the
     # tests themselves are unsigned and use a fixed identity.
@@ -499,4 +506,167 @@ EOF
     [[ "$output" == *"[SKIP] launchd agent was not loaded"* ]]
     [[ "$output" == *"Cleanup SUCCESSFUL!"* ]]
     [ ! -e "$HOME/Library/LaunchAgents/com.gitconfig.update.plist" ]
+}
+
+# ---------------------------------------------------------------------------
+# systemd user timer (issue #246)
+# ---------------------------------------------------------------------------
+
+# A systemctl stub for a host with a running user manager. Every call is
+# logged to $SANDBOX/systemctl.log. `enable`/`disable` add and remove the
+# timers.target.wants link like the real one. ENABLE_RC makes `enable` fail.
+# Also a loginctl that reports Linger=${LINGER:-no}.
+_stub_systemctl() {
+    cat > "$SANDBOX/bin/systemctl" <<EOF
+#!/bin/sh
+echo "\$*" >> "$SANDBOX/systemctl.log"
+[ "\$1" = --user ] || exit 1
+wants="\$HOME/.config/systemd/user/timers.target.wants"
+case "\$2" in
+    show-environment|daemon-reload|stop) exit 0 ;;
+    enable)  [ "\${ENABLE_RC:-0}" -eq 0 ] || exit "\$ENABLE_RC"
+             mkdir -p "\$wants" && ln -sf ../gitconfig-update.timer "\$wants/gitconfig-update.timer" ;;
+    disable) rm -f "\$wants/gitconfig-update.timer" ;;
+    *)       exit 1 ;;
+esac
+EOF
+    chmod +x "$SANDBOX/bin/systemctl"
+    cat > "$SANDBOX/bin/loginctl" <<EOF
+#!/bin/sh
+[ "\$1" = show-user ] || exit 1
+echo "Linger=\${LINGER:-no}"
+EOF
+    chmod +x "$SANDBOX/bin/loginctl"
+}
+
+_unit_dir() { echo "$HOME/.config/systemd/user"; }
+
+_linux_install() {
+    run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" "$@" \
+        bash "$REPO_ROOT/scripts/linux version/install.sh" --force
+}
+
+_linux_cleanup() {
+    run env PATH="$SANDBOX/bin:$PATH" bash "$REPO_ROOT/scripts/linux version/cleanup-gitconfig.sh" --force
+}
+
+@test "linux install with a user manager writes and enables a daily systemd timer" {
+    _stub_crontab
+    _stub_systemctl
+    _linux_install
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[STEP 5] Setting up systemd timer..."* ]]
+    [[ "$output" == *"[OK] Enabled systemd timer gitconfig-update.timer"* ]]
+    [[ "$output" == *"Logs: journalctl --user -u gitconfig-update"* ]]
+    [[ "$output" == *"[OK] systemd timer verified"* ]]
+
+    service="$(_unit_dir)/gitconfig-update.service"
+    timer="$(_unit_dir)/gitconfig-update.timer"
+    grep -qx 'Type=oneshot' "$service"
+    grep -qF "ExecStart=\"$(command -v bash)\" \"$REPO_ROOT/scripts/shared/update-gitconfig.sh\" \"$REPO_ROOT\"" "$service"
+    grep -qx 'OnCalendar=daily' "$timer"
+    grep -qx 'Persistent=true' "$timer"
+    grep -qx 'WantedBy=timers.target' "$timer"
+    grep -qx -- '--user daemon-reload' "$SANDBOX/systemctl.log"
+    grep -qx -- '--user enable --now gitconfig-update.timer' "$SANDBOX/systemctl.log"
+    # Never both: no cron line was written.
+    [ ! -e "$SANDBOX/crontab.txt" ]
+}
+
+@test "installing the systemd timer removes this clone's cron lines, tagged and untagged" {
+    _stub_crontab
+    _stub_systemctl
+    _old_crontab
+    # Plus a tagged line from a later cron install of this clone.
+    printf '0 9 * * * bash "%s/scripts/shared/update-gitconfig.sh" "%s" # gitconfig-autoupdate\n' \
+        "$REPO_ROOT" "$REPO_ROOT" >> "$SANDBOX/crontab.txt"
+    _linux_install
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] Removed the old cron job (the timer replaces it)"* ]]
+    [ -f "$(_unit_dir)/gitconfig-update.timer" ]
+    run ! grep -qF "\"$REPO_ROOT/scripts/" "$SANDBOX/crontab.txt"
+    grep -qF "keep-me" "$SANDBOX/crontab.txt"
+    # Another clone's job is not ours to remove.
+    grep -qF '"/other/clone/scripts/shared/update-gitconfig.sh"' "$SANDBOX/crontab.txt"
+}
+
+@test "the systemd install hints at enable-linger only when linger is off" {
+    _stub_crontab
+    _stub_systemctl
+    _linux_install LINGER=no
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"loginctl enable-linger"* ]]
+    # It's a hint: the installer never turns linger on itself.
+    _linux_install LINGER=yes
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"enable-linger"* ]]
+}
+
+@test "linux install falls back to cron when the timer can't be enabled" {
+    _stub_crontab
+    _stub_systemctl
+    _linux_install ENABLE_RC=1
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Could not enable the systemd timer; using cron instead"* ]]
+    [[ "$output" == *"[OK] Created cron job"* ]]
+    [[ "$output" == *"[OK] cron job verified"* ]]
+    [ ! -e "$(_unit_dir)/gitconfig-update.service" ]
+    [ ! -e "$(_unit_dir)/gitconfig-update.timer" ]
+    grep -qF 'gitconfig-autoupdate' "$SANDBOX/crontab.txt"
+}
+
+@test "linux install without a user manager uses cron and removes an old timer" {
+    _stub_crontab
+    # The default systemctl stub finds no user manager.
+    mkdir -p "$(_unit_dir)/timers.target.wants"
+    : > "$(_unit_dir)/gitconfig-update.service"
+    : > "$(_unit_dir)/gitconfig-update.timer"
+    ln -s ../gitconfig-update.timer "$(_unit_dir)/timers.target.wants/gitconfig-update.timer"
+    _linux_install
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] Created cron job"* ]]
+    [[ "$output" == *"[OK] Removed the old systemd timer (the cron job replaces it)"* ]]
+    [[ "$output" == *"[OK] cron job verified"* ]]
+    [ ! -e "$(_unit_dir)/gitconfig-update.timer" ]
+    [ ! -e "$(_unit_dir)/gitconfig-update.service" ]
+    [ ! -L "$(_unit_dir)/timers.target.wants/gitconfig-update.timer" ]
+}
+
+@test "linux cleanup disables and removes the systemd timer, and a cron line too" {
+    _stub_crontab
+    _stub_systemctl
+    _linux_install
+    [ "$status" -eq 0 ]
+    [ -L "$(_unit_dir)/timers.target.wants/gitconfig-update.timer" ]
+    # A cron line that shouldn't be there alongside it.
+    printf '0 8 * * * echo keep-me\n0 9 * * * bash "%s/scripts/shared/update-gitconfig.sh" "%s" # gitconfig-autoupdate\n' \
+        "$REPO_ROOT" "$REPO_ROOT" > "$SANDBOX/crontab.txt"
+
+    _linux_cleanup
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[STEP 3] Removing systemd timer..."* ]]
+    [[ "$output" == *"[OK] Removed systemd timer: gitconfig-update.timer"* ]]
+    [[ "$output" == *"[OK] Removed cron job"* ]]
+    [[ "$output" == *"[OK] systemd timer removed"* ]]
+    [[ "$output" == *"Cleanup SUCCESSFUL!"* ]]
+    grep -qx -- '--user disable --now gitconfig-update.timer' "$SANDBOX/systemctl.log"
+    [ ! -e "$(_unit_dir)/gitconfig-update.timer" ]
+    [ ! -e "$(_unit_dir)/gitconfig-update.service" ]
+    [ ! -L "$(_unit_dir)/timers.target.wants/gitconfig-update.timer" ]
+    run ! grep -qF "$REPO_ROOT/scripts/" "$SANDBOX/crontab.txt"
+    grep -qF "keep-me" "$SANDBOX/crontab.txt"
+}
+
+@test "linux cleanup removes the timer units even with no user manager running" {
+    _stub_crontab
+    mkdir -p "$(_unit_dir)/timers.target.wants"
+    : > "$(_unit_dir)/gitconfig-update.service"
+    : > "$(_unit_dir)/gitconfig-update.timer"
+    ln -s ../gitconfig-update.timer "$(_unit_dir)/timers.target.wants/gitconfig-update.timer"
+    _linux_cleanup
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] Removed systemd timer"* ]]
+    [[ "$output" == *"Cleanup SUCCESSFUL!"* ]]
+    [ ! -e "$(_unit_dir)/gitconfig-update.timer" ]
+    [ ! -L "$(_unit_dir)/timers.target.wants/gitconfig-update.timer" ]
 }

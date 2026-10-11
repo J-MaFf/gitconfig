@@ -30,7 +30,7 @@ This repo targets **macOS, Linux, and Windows** — it's a cross-platform dotfil
 | `gitconfig_helper.py` | Cross-platform helper — Python 3 |
 | `scripts/windows version/install.ps1` | Windows setup entrypoint |
 | `scripts/unix/` | macOS + Linux bash entry points (install, cleanup, initialize-local-config); detect the OS |
-| `scripts/shared/` | Shared bash library and scripts (mac + linux); `platform.sh` holds the per-OS layer (launchd/cron scheduler, credential helper, signing detection) |
+| `scripts/shared/` | Shared bash library and scripts (mac + linux); `platform.sh` holds the per-OS layer (launchd/systemd-timer/cron scheduler, credential helper, signing detection) |
 | `scripts/mac version/`, `scripts/linux version/` | Thin `exec` wrappers into `scripts/unix/` (and `scripts/shared/`), kept so existing commands keep working |
 | `tests/` | Pester tests for Windows scripts; `tests/shared/` holds the bats + pytest suites for the bash scripts and the Python helper |
 
@@ -42,7 +42,7 @@ This repo targets **macOS, Linux, and Windows** — it's a cross-platform dotfil
 - macOS/Linux: bats and pytest suites in `tests/shared/` (see `tests/shared/README.md`)
 - CI: `.github/workflows/test.yml` runs, for every PR, Pester on `windows-latest` under pwsh 7 and Windows PowerShell 5.1 (plus an `-IncludeIntegration` run, safe on a throwaway runner), bats + pytest on `ubuntu-latest` and `macos-latest` (system bash 3.2), and PSScriptAnalyzer
 - Integration tests live in `tests/Integration.Tests.ps1` — these require a real machine or VM, not a mock environment
-- The test suites sandbox `HOME`, `GIT_CONFIG_GLOBAL`, `crontab` and `launchctl`. Never run the install/cleanup scripts or `update-gitconfig.sh` against your real home directory to test a change
+- The test suites sandbox `HOME`, `GIT_CONFIG_GLOBAL`, `crontab`, `launchctl` and `systemctl`. Never run the install/cleanup scripts or `update-gitconfig.sh` against your real home directory to test a change
 - The macOS/Linux scripts report through exit codes (1 on failure; 2 when a prompt is declined or has no input), so tests assert `$status`, not just output
 
 

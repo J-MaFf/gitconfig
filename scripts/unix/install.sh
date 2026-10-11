@@ -5,7 +5,8 @@
 # for both platforms; the per-OS pieces (auto-sync scheduler, credential
 # helper, signing helper paths) live in scripts/shared/platform.sh:
 #   - macOS: launchd login agent, osxkeychain, Homebrew safe.directory
-#   - Linux: daily cron job, gh / libsecret credential helper
+#   - Linux: daily systemd user timer (else cron job), gh / libsecret
+#     credential helper
 #
 # The old entry points, scripts/mac version/install.sh and
 # scripts/linux version/install.sh, are thin wrappers that run this script
@@ -49,8 +50,9 @@ OPTIONS:
     -f, --force       Overwrite existing files without prompting
     --reinstall       Tear down the previous install first (runs
                       cleanup-gitconfig.sh --force; files are backed up)
-    --no-scheduler    Skip the auto-sync job (launchd agent on macOS, cron
-                      job on Linux). --no-launchd and --no-cron are synonyms.
+    --no-scheduler    Skip the auto-sync job (launchd agent on macOS; systemd
+                      user timer, else cron job, on Linux). --no-launchd and
+                      --no-cron are synonyms.
     -h, --help        Display this help message
 
 DESCRIPTION:
@@ -59,7 +61,9 @@ DESCRIPTION:
     3. Generates machine-specific .gitconfig.local (signing key / op-ssh-sign
        and credential helper detection)
     4. Registers the auto-sync job (optional): a launchd agent that runs at
-       each login on macOS, a daily 9 AM cron job on Linux
+       each login on macOS; on Linux a daily systemd user timer
+       (~/.config/systemd/user/gitconfig-update.timer) when `systemctl --user`
+       works, else a daily 9 AM cron job. Installing one removes the other.
     5. Verifies the complete setup
 
     Exits 1 if any step failed or the verification found something missing
@@ -79,7 +83,7 @@ REQUIREMENTS:
     - git
     - Python 3 + rich library; textual is optional for the interactive
       'git alias' browser
-    - Linux: cron (optional, for auto-sync)
+    - Linux: a systemd user session or cron (optional, for auto-sync)
     - 1Password (optional, for SSH commit signing via op-ssh-sign)
 HELP
     exit 0
@@ -192,14 +196,15 @@ if acquire_update_lock; then
     trap release_update_lock EXIT
 fi
 
-# STEP 5: Register the auto-sync job (launchd login agent on macOS, daily cron
-# job on Linux). It runs scripts/shared/update-gitconfig.sh with this clone's
-# path, so the updater syncs THIS clone wherever it lives.
+# STEP 5: Register the auto-sync job (launchd login agent on macOS; on Linux a
+# daily systemd user timer when a user manager is running, else a daily cron
+# job). It runs scripts/shared/update-gitconfig.sh with this clone's path, so
+# the updater syncs THIS clone wherever it lives.
 if [ "$NO_SCHEDULER" = false ]; then
     if [ "$TARGET_OS" = macos ]; then
         echo "[STEP 5] Setting up launchd login agent..."
     else
-        echo "[STEP 5] Setting up cron job..."
+        echo "[STEP 5] Setting up $SCHEDULER_NAME..."
     fi
     echo "-----"
     # Never fatal: a skipped or failed job only means syncing by hand.
@@ -233,8 +238,10 @@ echo "-----"
 [ -f "$HOME_DIR/.gitconfig.local" ]    && echo "[OK] .gitconfig.local verified"    || { echo "[FAIL] .gitconfig.local missing";    ERRORS=$((ERRORS+1)); }
 
 # The auto-sync job is optional (no cron, or a declined replace prompt), so a
-# missing one is a warning, not an error.
+# missing one is a warning, not an error. Name the job that was actually
+# installed: on Linux a timer that couldn't be enabled falls back to cron.
 if [ "$NO_SCHEDULER" = false ]; then
+    SCHEDULER_NAME="$(scheduler_name "$TARGET_OS" "$REPO_ROOT")"
     if scheduler_status "$TARGET_OS" "$REPO_ROOT"; then
         echo "[OK] $SCHEDULER_NAME verified"
     else

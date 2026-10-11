@@ -699,16 +699,23 @@ The task runs at every login, whether or not the network is up yet: rendering
 offline is logged as a warning. Re-running `install.ps1` replaces a task registered by
 an older version that still waits for a network.
 
-The macOS (launchd) and Linux (cron) jobs run the same sync; `git selfupdate` runs it
-by hand on any OS (on macOS/Linux, run from a terminal, it also prints its progress and
-exits 1 if the pull failed). The launchd job
-logs to `docs/update-gitconfig.log` in the repo; the cron job logs to
+The macOS (launchd) and Linux (systemd user timer, or cron) jobs run the same sync;
+`git selfupdate` runs it by hand on any OS (on macOS/Linux, run from a terminal, it also
+prints its progress and exits 1 if the pull failed). The launchd job
+logs to `docs/update-gitconfig.log` in the repo; the systemd timer logs to the journal
+(`journalctl --user -u gitconfig-update`); the cron job logs to
 `${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log` (it used the shared
-`/tmp/gitconfig-update.log` before, which another user could block). To re-register
+`/tmp/gitconfig-update.log` before, which another user could block). On Linux the
+installer uses the timer when `systemctl --user` works and cron otherwise, and installing
+either removes the other. Check the timer with `systemctl --user list-timers
+gitconfig-update.timer`. It runs only while you are logged in unless linger is on
+(`loginctl enable-linger $USER`; the installer prints this hint when linger is off). To re-register
 the job, re-run `bash scripts/unix/install.sh` and answer `y` when it asks to replace
 the job. Answering `y` to regenerating `.gitconfig.local` too is safe: the settings you
 added are kept. `--force` says yes to both. Install and cleanup only touch this clone's
-cron line, so after moving a clone, remove the old path's line with `crontab -e`.
+cron line, so after moving a clone, remove the old path's line with `crontab -e`. The
+systemd timer has one fixed name per user, so re-running the installer from the moved
+clone repoints it.
 
 Only one sync runs at a time per user: the updater takes a lock directory,
 `${XDG_STATE_HOME:-~/.local/state}/gitconfig/update.lock`, and exits 0 without doing

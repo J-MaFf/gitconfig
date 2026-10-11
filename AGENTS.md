@@ -57,7 +57,7 @@ bats tests/shared                         # bash scripts (scripts/unix, scripts/
 pwsh tests/run-tests.ps1                  # Windows scripts; skips the Integration tag unless -IncludeIntegration
 ```
 
-The suites sandbox `HOME`, git config, `crontab` and `launchctl`. Don't run the install, cleanup or update scripts against your real home directory, and run `tests/Integration.Tests.ps1` only on a throwaway machine or VM.
+The suites sandbox `HOME`, git config, `crontab`, `launchctl` and `systemctl`. Don't run the install, cleanup or update scripts against your real home directory, and run `tests/Integration.Tests.ps1` only on a throwaway machine or VM.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker

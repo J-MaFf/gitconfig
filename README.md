@@ -37,7 +37,7 @@ Use `$HOME`, not `~`, in the clone command: PowerShell before 7.5 doesn't expand
 
 ### Linux
 
-**Requirements:** bash, Python 3, cron (optional, for auto-update)
+**Requirements:** bash, Python 3, and a systemd user session or cron (optional, for auto-update)
 
 ```bash
 git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
@@ -47,9 +47,9 @@ bash scripts/unix/install.sh --force
 
 macOS and Linux share one set of scripts in `scripts/unix/`; they detect the OS. The older `scripts/mac version/` and `scripts/linux version/` commands still work: they run the same scripts and refuse to run on the other OS. Pass `--no-scheduler` to skip the auto-update job (`--no-launchd` and `--no-cron` still work too).
 
-The setup script handles generating `~/.gitconfig` from the template, creating symlinks, installing the `rich` Python dependency, and registering an auto-update job (launchd on macOS, Task Scheduler on Windows, cron on Linux).
+The setup script handles generating `~/.gitconfig` from the template, creating symlinks, installing the `rich` Python dependency, and registering an auto-update job (launchd on macOS, Task Scheduler on Windows; on Linux a systemd user timer, or cron where `systemctl --user` doesn't work).
 
-The auto-update job is **pull + install + prune**: at each login it pulls the latest commits and, if `.gitconfig.template` changed in that pull, regenerates `~/.gitconfig` so template changes take effect without a manual re-run. It also prunes merged branches in the gitconfig repo — dropping stale remote-tracking refs (`fetch --prune`) and deleting local branches whose remote has been deleted — so old feature branches don't pile up. It also ensures the optional `textual` dependency (which powers the interactive `git alias` browser) is installed — best-effort and only when missing, so existing machines pick it up on their next update without a manual `pip install`. Your existing `~/.gitconfig` is backed up first, and `~/.gitconfig.local` is never modified. Run the same pull-install-prune on demand any time with `git selfupdate`. Run that way it also prints its progress (the log is `docs/update-gitconfig.log`) and exits non-zero if the pull failed; the login/cron job only logs a failed pull as a warning, since being offline at login is routine (macOS/Linux).
+The auto-update job is **pull + install + prune**: at each login it pulls the latest commits and, if `.gitconfig.template` changed in that pull, regenerates `~/.gitconfig` so template changes take effect without a manual re-run. It also prunes merged branches in the gitconfig repo — dropping stale remote-tracking refs (`fetch --prune`) and deleting local branches whose remote has been deleted — so old feature branches don't pile up. It also ensures the optional `textual` dependency (which powers the interactive `git alias` browser) is installed — best-effort and only when missing, so existing machines pick it up on their next update without a manual `pip install`. Your existing `~/.gitconfig` is backed up first, and `~/.gitconfig.local` is never modified. Run the same pull-install-prune on demand any time with `git selfupdate`. Run that way it also prints its progress (the log is `docs/update-gitconfig.log`) and exits non-zero if the pull failed; the scheduled job only logs a failed pull as a warning, since being offline at login is routine (macOS/Linux).
 
 **Put your own git settings in `~/.gitconfig.local`, not `~/.gitconfig`.** `~/.gitconfig` is generated from `.gitconfig.template` and is rewritten whenever the template changes. Before a rewrite, the scripts print the names (never the values) of any settings in `~/.gitconfig` that the template doesn't have, so you can move them. On macOS and Linux, regenerating `~/.gitconfig.local` (`install.sh --force`) keeps the settings you added to it; only the signing, credential-helper and `core.excludesfile` settings are rebuilt. A `~/.gitconfig` or `~/.gitconfig.local` that is a symlink into your own dotfiles is replaced by a regular file instead of being written through.
 
@@ -101,7 +101,9 @@ Pass `-KeepTask` to leave the scheduled task registered.
 bash scripts/unix/cleanup-gitconfig.sh
 ```
 
-Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` symlink, `~/.gitconfig.local`, and this clone's cron job (the line tagged `# gitconfig-autoupdate`, plus an untagged one from an older install, that runs this clone's `update-gitconfig.sh`; other clones' jobs, commented-out lines and other cron entries are kept). The cron job logs to `${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log`.
+Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` symlink, `~/.gitconfig.local`, and the auto-update job: the `gitconfig-update` systemd user timer and this clone's cron job, whichever is present (the cron line tagged `# gitconfig-autoupdate`, plus an untagged one from an older install, that runs this clone's `update-gitconfig.sh`; other clones' jobs, commented-out lines and other cron entries are kept). The timer logs to the journal (`journalctl --user -u gitconfig-update`); the cron job logs to `${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log`.
+
+**Linux auto-update: systemd timer or cron.** When `systemctl --user` reaches a running user manager, the installer writes `~/.config/systemd/user/gitconfig-update.{service,timer}` and runs `systemctl --user enable --now gitconfig-update.timer`: a daily sync that runs at the next start when the machine was off (`Persistent=true`) and needs no `crontab`. Otherwise (containers, WSL without systemd, no user session) it writes the daily 9 AM cron line. Installing one removes the other, so the sync never runs twice. A user timer runs only while you are logged in unless linger is on; the installer says so when it's off, and doesn't change it. On a headless machine, turn it on with `loginctl enable-linger $USER`.
 
 ## Usage
 

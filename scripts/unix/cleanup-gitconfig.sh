@@ -2,7 +2,7 @@
 
 # GitConfig Cleanup Script - macOS and Linux
 # Removes the links, config files, and auto-sync job (launchd agent on macOS,
-# cron job on Linux) created by install.sh. The per-OS scripts in
+# systemd user timer and/or cron job on Linux) created by install.sh. The per-OS scripts in
 # scripts/mac version/ and scripts/linux version/ are wrappers around this one.
 
 set -e
@@ -37,10 +37,11 @@ DESCRIPTION:
     also keeps your original as <file>.pre-gitconfig, which is never pruned.
     Symlinks into this repo are removed without a backup.
     3. Removes the auto-sync job: unloads and deletes the launchd login agent
-       on macOS; deletes this clone's cron line on Linux (the line tagged
-       "# gitconfig-autoupdate", plus an untagged one from an older install,
-       that runs this clone's update-gitconfig.sh; other clones' jobs,
-       commented-out lines and other cron entries are kept)
+       on macOS; on Linux disables and deletes the gitconfig-update systemd
+       user timer and deletes this clone's cron line, whichever is present
+       (the line tagged "# gitconfig-autoupdate", plus an untagged one from an
+       older install, that runs this clone's update-gitconfig.sh; other
+       clones' jobs, commented-out lines and other cron entries are kept)
 
 EXIT STATUS:
     0 everything removed, 1 something is still present, 2 cancelled at the
@@ -59,10 +60,10 @@ source "$REPO_ROOT/scripts/shared/functions.sh"
 source "$REPO_ROOT/scripts/shared/platform.sh"
 
 # No wrong-platform guard here: cleanup only removes what install made, and a
-# leftover launchd plist or cron line should be removable from anywhere. The
-# per-OS wrappers still pick which platform's job to remove.
+# leftover launchd plist, systemd timer or cron line should be removable from
+# anywhere. The per-OS wrappers still pick which platform's job to remove.
 TARGET_OS="$(requested_os)" || exit 1
-SCHEDULER_NAME="$(scheduler_name "$TARGET_OS")"
+SCHEDULER_NAME="$(scheduler_name "$TARGET_OS" "$REPO_ROOT")"
 
 echo "GitConfig Cleanup ($(os_display_name "$TARGET_OS"))"
 echo "====================================="
@@ -102,7 +103,7 @@ echo ""
 if [ "$TARGET_OS" = macos ]; then
     echo "[STEP 3] Removing launchd login agent..."
 else
-    echo "[STEP 3] Removing cron job..."
+    echo "[STEP 3] Removing $SCHEDULER_NAME..."
 fi
 echo "-----"
 scheduler_remove "$TARGET_OS" "$REPO_ROOT" && REMOVED=$((REMOVED+1)) || true

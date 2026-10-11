@@ -5,7 +5,8 @@
 #   - detect_os / resolve_target_os: which platform's behaviour to run, and the
 #     wrong-platform guard (issues #179, #181)
 #   - scheduler_install / scheduler_remove / scheduler_status: the login/daily
-#     auto-sync job (launchd on macOS, cron on Linux)
+#     auto-sync job (launchd on macOS; on Linux a systemd user timer when a
+#     user manager is running, else cron)
 #   - detect_credential_helper: the HTTPS credential helper (osxkeychain on
 #     macOS; gh CLI, then libsecret, on Linux)
 #   - detect_signing_key: the SSH commit-signing setup (on-disk key file,
@@ -19,6 +20,9 @@
 # trailing " # ..." as a comment, so the tag never reaches the updater.
 GITCONFIG_CRON_MARKER="# gitconfig-autoupdate"
 GITCONFIG_LAUNCHD_LABEL="com.gitconfig.update"
+# Base name of the systemd user units: gitconfig-update.service runs the
+# updater, gitconfig-update.timer starts it daily (issue #246).
+GITCONFIG_SYSTEMD_UNIT="gitconfig-update"
 
 # ---------------------------------------------------------------------------
 # OS detection
@@ -84,19 +88,36 @@ resolve_target_os() {
 # ---------------------------------------------------------------------------
 # Auto-sync scheduler
 #
-# Both backends run scripts/shared/update-gitconfig.sh with the repo path as
+# Every backend runs scripts/shared/update-gitconfig.sh with the repo path as
 # its argument. Jobs made by older installs point at the per-OS
 # "scripts/<os> version/update-gitconfig.sh" wrappers, which are kept, so those
 # keep working until the next install replaces them.
+#
+# Linux has two backends. A systemd user timer is used when `systemctl --user`
+# reaches a running user manager: it works without a crontab binary, catches
+# up on a day the machine was off (Persistent=true), and logs to the journal.
+# Otherwise cron. Installing either removes the other, so a machine never
+# syncs twice (issue #246).
 # ---------------------------------------------------------------------------
 
-# Short name of the scheduler job for messages ("launchd agent", "cron job").
-# Usage: scheduler_name OS
+# Short name of the scheduler job for messages ("launchd agent", "systemd
+# timer", "cron job"). On Linux it names the job that is installed: the
+# systemd timer when its units exist, else the cron job when REPO_ROOT (if
+# given) has a cron line; with neither, the one an install would pick.
+# Usage: scheduler_name OS [REPO_ROOT]
 scheduler_name() {
     case "$1" in
-        macos) echo "launchd agent" ;;
-        *)     echo "cron job" ;;
+        macos) echo "launchd agent"; return 0 ;;
     esac
+    if _systemd_units_present; then
+        echo "systemd timer"
+    elif [ -n "${2:-}" ] && command -v crontab >/dev/null 2>&1 && _cron_has_entry "$2"; then
+        echo "cron job"
+    elif _systemd_user_available; then
+        echo "systemd timer"
+    else
+        echo "cron job"
+    fi
 }
 
 _launchd_plist_path() {
@@ -205,35 +226,53 @@ _cron_remove_entries() {
 
 # Register the auto-sync job. Prompts before replacing an existing job unless
 # FORCE is true. Never fails the caller (safe under set -e): returns 0 when the
-# job was written, 1 when it was skipped or could not be written.
+# job was written, 1 when it was skipped or could not be written. On Linux a
+# systemd timer that can't be enabled falls back to cron.
 # Usage: scheduler_install OS REPO_ROOT FORCE
 scheduler_install() {
+    local rc
     case "$1" in
-        macos) _launchd_install "$2" "$3" ;;
-        *)     _cron_install "$2" "$3" ;;
+        macos) _launchd_install "$2" "$3"; return ;;
     esac
+    if _systemd_user_available; then
+        rc=0
+        _systemd_install "$2" "$3" || rc=$?
+        # 2: the units couldn't be enabled (and were removed again); use cron.
+        [ "$rc" -ne 2 ] && return "$rc"
+    fi
+    _cron_install "$2" "$3"
 }
 
 # Remove the auto-sync job. Returns 0 if one was removed, 1 if there was none
-# (or no crontab binary to ask). On Linux only REPO_ROOT's cron lines are
-# removed, so another clone's job survives; the launchd agent has one fixed
-# label per user, so macOS ignores REPO_ROOT.
+# (or no crontab binary to ask). On Linux this removes the systemd timer and
+# REPO_ROOT's cron lines, whichever are present; another clone's cron line
+# survives. The launchd agent and the systemd timer have one fixed name per
+# user, so they are removed whatever REPO_ROOT is.
 # Usage: scheduler_remove OS REPO_ROOT
 scheduler_remove() {
+    local rc=1
     case "$1" in
-        macos) _launchd_remove ;;
-        *)     _cron_remove "$2" ;;
+        macos) _launchd_remove; return ;;
     esac
+    if _systemd_units_present; then
+        _systemd_remove && rc=0
+        if command -v crontab >/dev/null 2>&1 && _cron_has_entry "$2"; then
+            _cron_remove "$2" && rc=0
+        fi
+        return "$rc"
+    fi
+    _cron_remove "$2"
 }
 
 # Succeed if the auto-sync job is registered: on macOS a plist that is valid
-# (checked with plutil -lint where plutil exists), on Linux a cron line for
-# REPO_ROOT.
+# (checked with plutil -lint where plutil exists), on Linux the systemd timer
+# unit or a cron line for REPO_ROOT.
 # Usage: scheduler_status OS REPO_ROOT
 scheduler_status() {
     case "$1" in
         macos) [ -f "$(_launchd_plist_path)" ] && _launchd_plist_valid "$(_launchd_plist_path)" ;;
-        *)     command -v crontab >/dev/null 2>&1 && _cron_has_entry "$2" ;;
+        *)     [ -f "$(_systemd_unit_dir)/$GITCONFIG_SYSTEMD_UNIT.timer" ] ||
+               { command -v crontab >/dev/null 2>&1 && _cron_has_entry "$2"; } ;;
     esac
 }
 
@@ -284,6 +323,16 @@ _cron_install() {
     if (crontab -l 2>/dev/null || true; echo "$entry") | crontab - 2>/dev/null; then
         echo "[OK] Created cron job for daily updates at 9 AM"
         echo "     Log: $log_path"
+        # A timer left by an earlier install (when a user manager was running)
+        # would sync a second time.
+        if _systemd_units_present; then
+            _systemd_remove >/dev/null 2>&1 || true
+            if _systemd_units_present; then
+                echo "[WARN] Could not remove the old systemd timer; remove $(_systemd_unit_dir)/$GITCONFIG_SYSTEMD_UNIT.{service,timer} so the sync doesn't run twice"
+            else
+                echo "[OK] Removed the old systemd timer (the cron job replaces it)"
+            fi
+        fi
         return 0
     fi
     echo "[WARN] Could not create cron job (cron may not be available)"
@@ -307,6 +356,193 @@ _cron_remove() {
     fi
     echo "[WARN] Could not rewrite the crontab"
     return 1
+}
+
+# ---------------------------------------------------------------------------
+# systemd user timer (Linux)
+# ---------------------------------------------------------------------------
+
+# Where systemd looks for the user's own units. Like the XDG spec, a relative
+# XDG_CONFIG_HOME is ignored.
+# Usage: _systemd_unit_dir
+_systemd_unit_dir() {
+    local config="${XDG_CONFIG_HOME:-}"
+    case "$config" in
+        /*) ;;
+        *)  config="$HOME/.config" ;;
+    esac
+    echo "$config/systemd/user"
+}
+
+# Succeed if either of our unit files exists.
+_systemd_units_present() {
+    local dir
+    dir="$(_systemd_unit_dir)"
+    [ -f "$dir/$GITCONFIG_SYSTEMD_UNIT.timer" ] || [ -f "$dir/$GITCONFIG_SYSTEMD_UNIT.service" ]
+}
+
+# Succeed if `systemctl --user` reaches a running user manager. It doesn't
+# without one (containers, WSL without systemd, a cron/ssh context with no
+# session bus), and then cron is used instead.
+_systemd_user_available() {
+    command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1
+}
+
+# Quote a value as one word of a systemd ExecStart= line: a double-quoted
+# string with \ and " escaped, % doubled (specifier) and $ doubled (variable
+# expansion). Fails for a value with a newline, which no unit line can hold.
+# Usage: _systemd_quote VALUE
+_systemd_quote() {
+    case "$1" in
+        *"
+"*) return 1 ;;
+    esac
+    printf '"%s"\n' "$(printf '%s' "$1" | sed -e 's/[\\"]/\\&/g' -e 's/%/%%/g' -e 's/\$/$$/g')"
+}
+
+# Delete the unit files and the enable link `systemctl enable` made, so
+# nothing is left behind even when systemctl can't be asked.
+_systemd_delete_units() {
+    local dir
+    dir="$(_systemd_unit_dir)"
+    rm -f "$dir/$GITCONFIG_SYSTEMD_UNIT.timer" "$dir/$GITCONFIG_SYSTEMD_UNIT.service" \
+        "$dir/timers.target.wants/$GITCONFIG_SYSTEMD_UNIT.timer" 2>/dev/null
+}
+
+# A user timer only runs while the user manager does: from login to logout,
+# unless linger is on. Print a one-line hint when loginctl says it's off;
+# print nothing when that can't be told.
+_systemd_linger_hint() {
+    local user linger
+    command -v loginctl >/dev/null 2>&1 || return 0
+    user="${USER:-$(id -un 2>/dev/null)}"
+    [ -n "$user" ] || return 0
+    linger="$(loginctl show-user "$user" -p Linger 2>/dev/null)" || return 0
+    if [ "$linger" = "Linger=no" ]; then
+        echo "[NOTE] Linger is off, so the timer runs only while you are logged in. To run it with no session (headless machines): loginctl enable-linger $user"
+    fi
+    return 0
+}
+
+# Write and enable the timer. Returns 0 when it is enabled, 1 when skipped or
+# not written, 2 when systemctl couldn't enable it (the units are removed
+# again and the caller falls back to cron).
+# Usage: _systemd_install REPO_ROOT FORCE
+_systemd_install() {
+    local repo_root="$1" force="$2" updater dir bash_bin q_bash q_updater q_repo
+    updater="$repo_root/scripts/shared/update-gitconfig.sh"
+    dir="$(_systemd_unit_dir)"
+
+    if [ ! -f "$updater" ]; then
+        echo "[WARN] update-gitconfig.sh not found"
+        return 1
+    fi
+    # systemd needs an absolute ExecStart path; /bin/bash isn't one on NixOS.
+    bash_bin="$(command -v bash 2>/dev/null || true)"
+    case "$bash_bin" in
+        /*) ;;
+        *)  bash_bin=/bin/bash ;;
+    esac
+    if ! q_bash="$(_systemd_quote "$bash_bin")" ||
+       ! q_updater="$(_systemd_quote "$updater")" ||
+       ! q_repo="$(_systemd_quote "$repo_root")"; then
+        echo "[WARN] Repo path contains a newline; a systemd unit can't hold it. Skipping the systemd timer."
+        return 1
+    fi
+
+    if _systemd_units_present && [ "$force" != true ]; then
+        # No input to read (cron, CI) counts as "no" rather than failing (#258).
+        read -p "systemd timer already exists. Replace? (y/n) " -n 1 -r || REPLY=
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Skipped: systemd timer"
+            return 1
+        fi
+    fi
+
+    if ! mkdir -p "$dir" 2>/dev/null; then
+        echo "[WARN] Could not create $dir; skipping the systemd timer"
+        return 1
+    fi
+    if ! cat > "$dir/$GITCONFIG_SYSTEMD_UNIT.service" 2>/dev/null << UNIT
+# Written by gitconfig's install.sh; removed by cleanup-gitconfig.sh.
+[Unit]
+Description=Sync the gitconfig repo and regenerate ~/.gitconfig
+
+[Service]
+Type=oneshot
+ExecStart=$q_bash $q_updater $q_repo
+UNIT
+    then
+        echo "[WARN] Could not write $dir/$GITCONFIG_SYSTEMD_UNIT.service; skipping the systemd timer"
+        _systemd_delete_units
+        return 1
+    fi
+    if ! cat > "$dir/$GITCONFIG_SYSTEMD_UNIT.timer" 2>/dev/null << UNIT
+# Written by gitconfig's install.sh; removed by cleanup-gitconfig.sh.
+[Unit]
+Description=Daily gitconfig sync
+
+[Timer]
+OnCalendar=daily
+# Run at the next start when the machine was off at the scheduled time.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+    then
+        echo "[WARN] Could not write $dir/$GITCONFIG_SYSTEMD_UNIT.timer; skipping the systemd timer"
+        _systemd_delete_units
+        return 1
+    fi
+
+    if ! systemctl --user daemon-reload >/dev/null 2>&1 ||
+       ! systemctl --user enable --now "$GITCONFIG_SYSTEMD_UNIT.timer" >/dev/null 2>&1; then
+        echo "[WARN] Could not enable the systemd timer; using cron instead"
+        _systemd_delete_units
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+        return 2
+    fi
+
+    echo "[OK] Enabled systemd timer $GITCONFIG_SYSTEMD_UNIT.timer (daily; runs at the next start after a missed day)"
+    echo "     Logs: journalctl --user -u $GITCONFIG_SYSTEMD_UNIT"
+    # A cron line from an earlier install (tagged, or untagged from before the
+    # marker) would sync a second time.
+    if command -v crontab >/dev/null 2>&1 && _cron_has_entry "$repo_root"; then
+        if _cron_remove_entries "$repo_root" && ! _cron_has_entry "$repo_root"; then
+            echo "[OK] Removed the old cron job (the timer replaces it)"
+        else
+            echo "[WARN] Could not remove the old cron job; remove it with 'crontab -e' so the sync doesn't run twice"
+        fi
+    fi
+    _systemd_linger_hint
+    return 0
+}
+
+# Disable the timer and delete its units. Returns 0 when they are gone, 1
+# when there were none or they couldn't be deleted.
+_systemd_remove() {
+    local dir
+    dir="$(_systemd_unit_dir)"
+    if ! _systemd_units_present; then
+        echo "[SKIP] systemd timer not found"
+        return 1
+    fi
+    if _systemd_user_available; then
+        systemctl --user disable --now "$GITCONFIG_SYSTEMD_UNIT.timer" >/dev/null 2>&1 || true
+        systemctl --user stop "$GITCONFIG_SYSTEMD_UNIT.service" >/dev/null 2>&1 || true
+    fi
+    _systemd_delete_units
+    if _systemd_user_available; then
+        systemctl --user daemon-reload >/dev/null 2>&1 || true
+    fi
+    if _systemd_units_present; then
+        echo "[WARN] Could not delete the systemd units in $dir"
+        return 1
+    fi
+    echo "[OK] Removed systemd timer: $GITCONFIG_SYSTEMD_UNIT.timer"
+    return 0
 }
 
 # Escape a value for a plist <string>: & < > would otherwise end the element
