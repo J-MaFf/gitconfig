@@ -426,6 +426,214 @@ class TestRepoDirt:
 
 
 # --------------------------------------------------------------------------
+# skill-audit failures vs drift, and `git skill diff` coverage (#260)
+# --------------------------------------------------------------------------
+
+_COUNTS_DRIFTED = "3 aligned, 1 drifted, 0 untracked, 0 problem(s), 0 duplicate name(s)"
+
+
+def _fake_audit(skills_dir, body):
+    """Install a stand-in scripts/skill-audit.sh (run as `bash <script> ...`)."""
+    scripts = skills_dir / "scripts"
+    scripts.mkdir(exist_ok=True)
+    (scripts / "skill-audit.sh").write_text("#!/usr/bin/env bash\n" + body + "\n")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs the bash audit script")
+class TestSkillAuditFailure:
+    """skill-audit --strict exits 1 for "something to publish" and 2 for its
+    own failure. Any non-zero exit used to read as drift, so a broken audit
+    told the user to publish; a failed full report read as "nothing to diff"."""
+
+    @pytest.fixture
+    def skills(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        monkeypatch.setattr(helper, "SYNC_LOG", str(tmp_path / "no-such.log"))
+        monkeypatch.setattr(helper, "_repo_dirt_paths", lambda: [])
+        return tmp_path
+
+    def test_exit_2_is_an_error_with_stderr_not_drift(self, helper, skills, capsys):
+        _fake_audit(skills, 'echo "Not a git repo: /x" >&2; exit 2')
+        assert helper._render_skill_state(helper.Console(), no_fetch=True) is False
+        out = capsys.readouterr().out
+        assert "skill-audit failed" in out
+        assert "code 2" in out
+        assert "Not a git repo: /x" in out
+        assert "git skill publish" not in out
+        assert "Nothing to publish" not in out
+
+    def test_status_exits_nonzero_when_audit_fails(self, helper, skills, monkeypatch, capsys):
+        _fake_audit(skills, "exit 2")
+        assert helper.skill_status() == 1
+        out = capsys.readouterr().out
+        assert "skill-audit failed" in out
+        assert "git skill publish" not in out
+
+    def test_exit_1_without_counts_line_is_an_error(self, helper, skills, capsys):
+        # A `set -e` abort can exit 1 before the summary is printed.
+        _fake_audit(skills, 'echo "boom" >&2; exit 1')
+        assert helper._render_skill_state(helper.Console(), no_fetch=True) is False
+        out = capsys.readouterr().out
+        assert "boom" in out
+        assert "git skill publish" not in out
+
+    def test_exit_1_with_counts_is_still_drift(self, helper, skills, capsys):
+        _fake_audit(skills, f'echo "{_COUNTS_DRIFTED}"; exit 1')
+        assert helper._render_skill_state(helper.Console(), no_fetch=True) is True
+        out = capsys.readouterr().out
+        assert "git skill publish" in out
+        assert "skill-audit failed" not in out
+
+    def test_exit_0_is_clean(self, helper, skills, capsys):
+        _fake_audit(
+            skills,
+            'echo "4 aligned, 0 drifted, 0 untracked, 0 problem(s), 0 duplicate name(s)"',
+        )
+        assert helper.skill_status() == 0
+        assert "Nothing to publish" in capsys.readouterr().out
+
+    def test_diff_reports_audit_failure_instead_of_no_drift(self, helper, skills, capsys):
+        _fake_audit(skills, 'echo "Not a git repo: /x" >&2; exit 2')
+        assert helper.skill_diff([]) == 1
+        captured = capsys.readouterr()
+        assert "No drifted skills" not in captured.out
+        assert "Not a git repo: /x" in captured.err
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs the bash audit script")
+class TestSkillDiffCoverage:
+    """skill-audit counts a skill as drifted from `git status --porcelain`, so
+    staged edits and new untracked files count. `git skill diff` ran a bare
+    `git diff`, which shows neither, and printed an empty diff."""
+
+    @pytest.fixture
+    def skills(self, helper, git_env, monkeypatch):
+        skills = git_env / "skills"
+        skills.mkdir()
+        _git(skills, "init", "-q")
+        (skills / "my-skill").mkdir()
+        (skills / "my-skill" / "SKILL.md").write_text("---\nname: my-skill\n---\nold line\n")
+        _git(skills, "add", "my-skill")
+        _git(skills, "commit", "-q", "-m", "Add my-skill")
+        _fake_audit(
+            skills,
+            'echo "[!] Drifted (1)"; echo "   - my-skill - uncommitted local edits"; echo',
+        )
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(skills))
+        return skills
+
+    def test_staged_edit_is_shown(self, helper, skills, capsys):
+        (skills / "my-skill" / "SKILL.md").write_text("---\nname: my-skill\n---\nstaged line\n")
+        _git(skills, "add", "my-skill/SKILL.md")
+        assert helper.skill_diff([]) == 0
+        out = capsys.readouterr().out
+        assert "+staged line" in out
+        assert "-old line" in out
+
+    def test_untracked_file_is_listed(self, helper, skills, capsys):
+        (skills / "my-skill" / "notes.md").write_text("new\n")
+        assert helper.skill_diff(["my-skill"]) == 0
+        out = capsys.readouterr().out
+        assert "Untracked (1)" in out
+        assert "my-skill/notes.md" in out
+
+    def test_unstaged_edit_is_still_shown(self, helper, skills, capsys):
+        (skills / "my-skill" / "SKILL.md").write_text("---\nname: my-skill\n---\nwip line\n")
+        assert helper.skill_diff([]) == 0
+        assert "+wip line" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# git issues --all: failures and filters (#260)
+# --------------------------------------------------------------------------
+
+class TestIssuesAllLocalFailures:
+    """`git issues --all --local` printed "No open issues" and exited 0 even
+    when no repo could be listed, so a broken gh looked like an empty backlog."""
+
+    @pytest.fixture
+    def scan(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "_have", lambda cmd: True)
+        monkeypatch.setattr(
+            helper, "_scripts_root_repos", lambda: (str(tmp_path), ["alpha", "beta"])
+        )
+
+        def use(responses):
+            def run_gh(*args, cwd=None):
+                return responses[os.path.basename(cwd)]
+            monkeypatch.setattr(helper, "_run_gh", run_gh)
+        return use
+
+    def test_all_repos_failing_exits_1(self, helper, scan, capsys):
+        fail = _Result(returncode=1, stderr="gh: not logged in")
+        scan({"alpha": fail, "beta": fail})
+        assert helper.list_issues(["--all", "--local"]) == 1
+        out = capsys.readouterr().out
+        assert "No open issues" not in out
+        assert "could not list issues for any of the 2" in out
+        assert "gh: not logged in" in out
+
+    def test_partial_failure_is_reported_and_exits_0(self, helper, scan, capsys):
+        scan({
+            "alpha": _Result(stdout="[]"),
+            "beta": _Result(returncode=1, stderr="no GitHub remote"),
+        })
+        assert helper.list_issues(["--all", "--local"]) == 0
+        out = capsys.readouterr().out
+        assert "No open issues" in out
+        assert "Checked 1 of 2" in out
+        assert "beta" in out
+
+    def test_all_repos_listed_has_no_skip_note(self, helper, scan, capsys):
+        issue = json.dumps([{"number": 7, "title": "Bug", "labels": [], "updatedAt": None}])
+        scan({"alpha": _Result(stdout=issue), "beta": _Result(stdout="[]")})
+        assert helper.list_issues(["--all", "--local"]) == 0
+        out = capsys.readouterr().out
+        assert "#7" in out
+        assert "Checked" not in out
+
+
+class TestIssuesAllWebFilters:
+    """`git issues --all --web` opened the unfiltered search page, dropping
+    --label and --mine."""
+
+    @pytest.fixture
+    def opened(self, helper, monkeypatch):
+        urls = []
+        monkeypatch.setattr(helper, "_have", lambda cmd: True)
+
+        def run_gh(*args, cwd=None):
+            assert args[:2] == ("api", "user"), f"unexpected gh call: {args}"
+            return _Result(stdout="octo\n")
+        monkeypatch.setattr(helper, "_run_gh", run_gh)
+        monkeypatch.setattr(helper.webbrowser, "open", urls.append)
+        return urls
+
+    def test_no_filters_keeps_the_plain_search(self, helper, opened):
+        assert helper.list_issues(["--all", "--web"]) == 0
+        assert opened == ["https://github.com/issues?q=is:open+is:issue+user:octo"]
+
+    def test_mine_adds_assignee(self, helper, opened):
+        assert helper.list_issues(["-a", "-w", "-m"]) == 0
+        assert opened == [
+            "https://github.com/issues?q=is:open+is:issue+user:octo+assignee:octo"
+        ]
+
+    def test_label_is_quoted_and_encoded(self, helper, opened):
+        assert helper.list_issues(["--all", "--web", "--label", "good first issue"]) == 0
+        assert opened == [
+            "https://github.com/issues?q=is:open+is:issue+user:octo"
+            "+label:%22good+first+issue%22"
+        ]
+
+    def test_mine_and_label_together(self, helper, opened):
+        assert helper.list_issues(["--all", "--web", "--mine", "-l", "bug"]) == 0
+        url = opened[0]
+        assert "assignee:octo" in url
+        assert "label:%22bug%22" in url
+
+
+# --------------------------------------------------------------------------
 # Real-git behaviour: cleanup, git main, git start, CLI dispatch
 # --------------------------------------------------------------------------
 

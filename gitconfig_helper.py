@@ -756,12 +756,14 @@ def _last_background_sync():
 
 
 def _audit_summary(no_fetch):
-    """Run skill-audit --summary --strict and return (lines, actionable) or None.
+    """Run skill-audit --summary --strict; return (lines, actionable, error) or None.
 
     skill-audit (in the claude-skills repo) is the single source of truth for
-    local skill state; --strict exits non-zero when something needs publishing.
-    Its summary output is the counts line, sometimes preceded by an
-    ahead/behind line. None means the audit script is missing or won't launch.
+    local skill state; --strict exits 1 when something needs publishing. Its
+    summary output is the counts line, sometimes preceded by an ahead/behind
+    line. error is None unless the audit itself failed (see
+    _classify_audit_exit()). None means the audit script is missing or won't
+    launch.
     """
     scripts_dir = os.path.join(SKILLS_DIR, "scripts")
     if sys.platform == "win32":
@@ -787,7 +789,31 @@ def _audit_summary(no_fetch):
     except OSError:
         return None
     lines = [line for line in proc.stdout.splitlines() if line.strip()]
-    return lines, proc.returncode != 0
+    return (lines, *_classify_audit_exit(proc, lines))
+
+
+def _classify_audit_exit(proc, lines):
+    """Map a `skill-audit --strict --summary` exit to (actionable, error) (#260).
+
+    Only exit 1 means "something to publish"; exit 2 is the audit's own
+    failure (not a git repo, bad option), and any other code is a crash. A
+    `set -e` abort can exit 1 too, so exit 1 counts as drift only when the
+    counts line - printed last, just before the strict exit - is there.
+    error is None, or the message to show: the exit code, then the audit's
+    stderr when it has any.
+    """
+    if proc.returncode == 0:
+        return False, None
+    if proc.returncode == 1 and any(_AUDIT_COUNTS_RE.search(line) for line in lines):
+        return True, None
+    return False, _audit_error(proc)
+
+
+def _audit_error(proc):
+    """A failed skill-audit run as text: its exit code, then its stderr if any."""
+    error = f"skill-audit exited with code {proc.returncode}"
+    stderr = (proc.stderr or "").strip()
+    return f"{error}\n{stderr}" if stderr else error
 
 
 # skill-audit's --summary counts line, e.g.
@@ -803,15 +829,18 @@ _DRIFTED_ITEM_RE = re.compile(r"^\s*-\s*(?P<name>\S+)\s+-\s+uncommitted local ed
 
 
 def _audit_full():
-    """Run skill-audit's full (non-summary) report and return its stdout lines, or None.
+    """Run skill-audit's full (non-summary) report; return (lines, error) or None.
 
     Mirrors `_audit_summary()`'s script-path/shell-selection logic (prefer pwsh,
     fall back to powershell on Windows since skill-audit.ps1 is WinPS-compatible;
     bash elsewhere) but omits -Summary so the sectioned report - including the
     "[!] Drifted (N)" section skill_diff() parses - is included. Always run with
     the no-fetch flag: diffing is a local working-tree-vs-HEAD comparison, so no
-    network call is needed (#see skill_diff). None means the audit script is
-    missing or won't launch.
+    network call is needed (#see skill_diff). Without --strict the audit exits
+    0 whether or not anything drifted, so any other exit is its own failure:
+    error is then the exit code plus its stderr, and lines must not be read
+    as "nothing drifted" (#260). None means the audit script is missing or
+    won't launch.
     """
     scripts_dir = os.path.join(SKILLS_DIR, "scripts")
     if sys.platform == "win32":
@@ -830,20 +859,25 @@ def _audit_full():
         )
     except OSError:
         return None
-    return proc.stdout.splitlines()
+    return proc.stdout.splitlines(), _audit_error(proc) if proc.returncode else None
 
 
 def _drifted_skill_names():
-    """Return the list of currently-drifted skill directory names, or None.
+    """Return (names, error): the currently-drifted skill directory names.
 
     Parses the "[!] Drifted (N)" section out of skill-audit's full report
     (`_audit_full()`) rather than reimplementing the aligned/drifted/untracked
     classification here - skill-audit stays the single source of truth for
-    local skill state. None means skill-audit couldn't be run at all.
+    local skill state. names is None when skill-audit couldn't be run at all
+    or failed; error is then the failure to show (None if the script is
+    missing).
     """
-    lines = _audit_full()
-    if lines is None:
-        return None
+    audit = _audit_full()
+    if audit is None:
+        return None, None
+    lines, error = audit
+    if error:
+        return None, error
     names = []
     in_drifted = False
     for line in lines:
@@ -856,7 +890,7 @@ def _drifted_skill_names():
             m = _DRIFTED_ITEM_RE.match(line)
             if m:
                 names.append(m["name"])
-    return names
+    return names, None
 
 
 def _is_skill_path(path):
@@ -930,20 +964,35 @@ def _render_repo_dirt(console):
     return True
 
 
+def _print_audit_error(console, error):
+    """Show a skill-audit failure as an error, never as drift (#260)."""
+    first, _, rest = error.partition("\n")
+    console.print(f"  [red][X] skill-audit failed ({escape(first)}) - local state unknown[/red]")
+    for line in rest.splitlines():
+        if line.strip():
+            console.print(f"    [red]{escape(line)}[/red]")
+
+
 def _render_skill_state(console, no_fetch):
     """Print the LIVE skill state: colored audit counts + the publish nudge.
 
     Zero counts stay quiet (green aligned only); anything actionable gets its
     own color so the eye lands on it. This is the only place drift is shown -
-    always computed now, never replayed from the log.
+    always computed now, never replayed from the log. Returns False when
+    skill-audit ran but failed (shown as an error, not as drift - #260),
+    else True.
     """
     audit = _audit_summary(no_fetch)
     if audit is None:
         console.print("  [yellow][!] skill-audit not found - can't check local state[/yellow]")
         # Still worth a repo-wide check: it needs git, not the audit script.
         _render_repo_dirt(console)
-        return
-    lines, actionable = audit
+        return True
+    lines, actionable, error = audit
+    if error:
+        _print_audit_error(console, error)
+        _render_repo_dirt(console)
+        return False
     for line in lines:
         m = _AUDIT_COUNTS_RE.search(line)
         if not m:
@@ -971,6 +1020,7 @@ def _render_skill_state(console, no_fetch):
         console.print("  [dim][OK] No skill changes to publish[/dim]")
     else:
         console.print("  [green][OK] Nothing to publish from this machine[/green]")
+    return True
 
 
 def _print_skill_header(console, title):
@@ -992,11 +1042,13 @@ def _print_skill_header(console, title):
 
 
 def skill_status():
-    """`git skill status`: repo header + live state (fetches to compare remote)."""
+    """`git skill status`: repo header + live state (fetches to compare remote).
+
+    Exits 1 when skill-audit itself failed, so the error isn't an all-clear.
+    """
     console = Console()
     _print_skill_header(console, "Claude skills")
-    _render_skill_state(console, no_fetch=False)
-    return 0
+    return 0 if _render_skill_state(console, no_fetch=False) else 1
 
 
 def skill_sync():
@@ -1031,8 +1083,8 @@ def skill_sync():
                 "and the branch was deleted) - switch back with: "
                 "git -C ~/.claude/skills checkout main[/yellow]"
             )
-    _render_skill_state(console, no_fetch=True)
-    return proc.returncode
+    audit_ok = _render_skill_state(console, no_fetch=True)
+    return proc.returncode or (0 if audit_ok else 1)
 
 
 def _skill_sync_or_status(sub):
@@ -1068,7 +1120,10 @@ def skill_diff(args):
         console.print(SKILL_USAGE)
         return 0
 
-    names = _drifted_skill_names()
+    names, error = _drifted_skill_names()
+    if error:
+        _print_audit_error(Console(stderr=True), error)
+        return 1
     if names is None:
         console.print("  [yellow][!] skill-audit not found - can't check local state[/yellow]")
         return 1
@@ -1086,10 +1141,15 @@ def skill_diff(args):
         console.print("  [green][OK] No drifted skills - nothing to diff[/green]")
         return 0
 
+    failed = False
     for name in names:
         console.print(f"[bold]{escape(name)}[/bold]")
+        # skill-audit counts a skill as drifted from `git status --porcelain`,
+        # which includes staged and untracked files. A bare `git diff` shows
+        # only unstaged edits, so diff against HEAD (staged + unstaged) and
+        # list untracked files separately (#260).
         proc = subprocess.run(
-            ["git", "-C", SKILLS_DIR, "diff", "--", name],
+            ["git", "-C", SKILLS_DIR, "diff", "HEAD", "--", name],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         for line in proc.stdout.splitlines():
@@ -1097,8 +1157,23 @@ def skill_diff(args):
         if proc.stderr.strip():
             for line in proc.stderr.splitlines():
                 console.print(f"[red]{escape(line)}[/red]")
+        failed = failed or proc.returncode != 0
+        untracked = subprocess.run(
+            ["git", "-C", SKILLS_DIR, "ls-files", "--others", "--exclude-standard",
+             "--", name],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        paths = [p for p in untracked.stdout.splitlines() if p.strip()]
+        if paths:
+            console.print(f"[yellow]Untracked ({len(paths)}):[/yellow]")
+            for path in paths:
+                console.print(f"  [yellow]{escape(path)}[/yellow]")
+        if untracked.returncode != 0:
+            for line in untracked.stderr.splitlines():
+                console.print(f"[red]{escape(line)}[/red]")
+            failed = True
         console.print("")
-    return 0
+    return 1 if failed else 0
 
 
 def _check_args(args, usage, flags=(), value_flags=(), max_positional=0):
@@ -1774,6 +1849,25 @@ def _repo_open_issues(repo_dir=None, mine=False, label=None):
         return None, "unexpected response from gh issue list"
 
 
+def _issues_search_url(login, mine=False, label=None):
+    """Build the account-wide issues search URL for `git issues --all --web`.
+
+    Carries the same filters as the --all table (#260): --mine adds
+    `assignee:<login>` and --label adds `label:"<name>"` (quoted, so a label
+    with spaces stays one term).
+    """
+    import urllib.parse  # local: only this URL needs it
+
+    terms = ["is:open", "is:issue", f"user:{login}"]
+    if mine:
+        terms.append(f"assignee:{login}")
+    if label:
+        terms.append('label:"{}"'.format(label.replace('"', "")))
+    return "https://github.com/issues?q=" + urllib.parse.quote_plus(
+        " ".join(terms), safe=":"
+    )
+
+
 def list_issues(args):
     """`git issues`: list open GitHub issues via the GitHub CLI.
 
@@ -1790,7 +1884,8 @@ def list_issues(args):
     Filters compose with every mode: --mine/-m (assigned to you) and
     --label <name>/-l <name>. --web/-w opens the browser instead of printing a
     table (repo mode: gh issue list --web; --all: the account-wide issues
-    search page); it cannot be combined with --local.
+    search page, with the same filters); it cannot be combined with --local.
+    --all --local exits 1 when no repo could be listed at all.
     """
     console = Console()
 
@@ -1872,20 +1967,36 @@ def list_issues(args):
             )
             return 0
         rows = []
+        failed = []
         for repo in repos:
             issues, err = _repo_open_issues(
                 repo_dir=os.path.join(root, repo), mine=mine, label=label
             )
             if issues is None:
-                console.print(f"[yellow]Skipping '{repo}': {err}[/yellow]")
+                console.print(f"[yellow]Skipping '{escape(repo)}': {escape(err)}[/yellow]")
+                failed.append(repo)
                 continue
             rows.extend(_issue_row(issue, repo=repo) for issue in issues)
-        if not rows:
+        # A repo that couldn't be listed is not a repo with no issues (#260):
+        # say how many were checked, and fail when none could be.
+        checked = len(repos) - len(failed)
+        if not checked:
+            console.print(
+                f"[red]Error: could not list issues for any of the {len(repos)} "
+                f"repositories under {escape(root)}[/red]"
+            )
+            return 1
+        if rows:
+            _print_issues_table(
+                console, rows, f"Open Issues - repos under {root}", repo_column=True
+            )
+        else:
             console.print("[green]No open issues[/green]")
-            return 0
-        _print_issues_table(
-            console, rows, f"Open Issues - repos under {root}", repo_column=True
-        )
+        if failed:
+            console.print(
+                f"[yellow]Checked {checked} of {len(repos)} repositories; "
+                f"skipped {len(failed)}: {escape(', '.join(failed))}[/yellow]"
+            )
         return 0
 
     # --all: account-wide, via the authenticated user's login.
@@ -1897,8 +2008,8 @@ def list_issues(args):
         return 1
 
     if web:
-        url = f"https://github.com/issues?q=is:open+is:issue+user:{login}"
-        console.print(f"[cyan]Opening[/cyan] {url}")
+        url = _issues_search_url(login, mine=mine, label=label)
+        console.print(f"[cyan]Opening[/cyan] {escape(url)}")
         webbrowser.open(url)
         return 0
 

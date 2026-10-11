@@ -173,7 +173,11 @@ The Python-backed aliases (`git alias`, `start`, `cleanup`, `main`, `skill`, `is
 ```bash
 git pr             # Open the current branch's pull request in the browser
 git prs            # Show the status of your pull requests
+git issues         # Open issues in this repo (--mine/-m, --label/-l <name>, --web/-w)
+git issues --all   # Open issues across every repo you own (alias: -a; --local: repos under the Scripts root)
 ```
+
+`git issues --all --web` opens GitHub's issue search with the same `--mine` and `--label` filters as the table. `git issues --all --local` lists the repos it couldn't check (no GitHub remote, gh not logged in) and exits 1 if it couldn't check any of them.
 
 **Maintenance**
 
@@ -189,8 +193,11 @@ git skill                # Print available subcommands (same as git skill help)
 git skill list           # Table of installed skills: name, description, last updated
 git skill sync           # Sync ~/.claude/skills: status -> pull --ff-only -> status
 git skill status         # Show ~/.claude/skills state: last background sync + unpublished local changes
+git skill diff [<name>]  # Show what changed in drifted skills (staged and unstaged, plus untracked files)
 git skill publish        # Publish new/edited skills via a PR (prompts for a message, auto-merges)
 ```
+
+If `skill-audit` itself fails, `git skill status`, `sync` and `diff` show its error and exit 1. They don't report it as changes to publish, or as nothing to diff.
 
 ### Setup Script Options (Windows)
 
