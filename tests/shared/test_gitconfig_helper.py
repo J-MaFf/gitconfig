@@ -1257,6 +1257,11 @@ class TestScriptsRoot:
     and never silently be $HOME, its parent, or a filesystem root (#241)."""
 
     @staticmethod
+    def _flat(text):
+        # rich wraps output to the terminal width, even mid-word; compare flat.
+        return "".join(text.split())
+
+    @staticmethod
     def _run(git_env, *args):
         # The sandboxed copy's derived root is git_env/root, never the real
         # Scripts folder, so a broken config lookup can't sweep real repos.
@@ -1299,9 +1304,9 @@ class TestScriptsRoot:
             [sys.executable, str(link), "switch_to_main", "--all"],
             capture_output=True, text=True,
         )
-        out = "".join(result.stdout.split())  # rich wraps long paths, even mid-word
+        out = self._flat(result.stdout)
         assert "Nogitrepositoriesfound" in out, result.stdout + result.stderr
-        assert "".join(os.path.realpath(git_env / "root").split()) in out
+        assert self._flat(os.path.realpath(git_env / "root")) in out
         assert "Refusing" not in out
 
     @pytest.mark.parametrize("which", ["home", "parent of home", "filesystem root"])
@@ -1334,8 +1339,9 @@ class TestScriptsRoot:
         _git(repo, "switch", "-q", "-c", "work")
         result = self._run(git_env, "switch_to_main", "--all")
         assert result.returncode == 1, result.stdout + result.stderr
-        assert "Refusing" in result.stdout and "--force" in result.stdout
-        assert "gitconfig.scriptsRoot" in result.stdout
+        out = self._flat(result.stdout)
+        assert "Refusing" in out and "--force" in out
+        assert "gitconfig.scriptsRoot" in out
         assert _git(repo, "branch", "--show-current") == "work"
 
     def test_main_all_refuses_filesystem_root(self, git_env, monkeypatch):
@@ -1343,7 +1349,8 @@ class TestScriptsRoot:
         _git(git_env, "config", "--global", "gitconfig.scriptsRoot", os.path.abspath(os.sep))
         result = self._run(git_env, "switch_to_main", "-a")
         assert result.returncode == 1
-        assert "filesystem root" in result.stdout and "Update Summary" not in result.stdout
+        out = self._flat(result.stdout)
+        assert "filesystemroot" in out and "UpdateSummary" not in out
 
     def test_force_sweeps_a_refused_root(self, repo, git_env, monkeypatch):
         monkeypatch.setenv("HOME", str(git_env))
@@ -1351,7 +1358,7 @@ class TestScriptsRoot:
         _git(repo, "switch", "-q", "-c", "work")
         result = self._run(git_env, "switch_to_main", "--all", "--force")
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "Refusing" not in result.stdout
+        assert "Refusing" not in self._flat(result.stdout)
         assert _git(repo, "branch", "--show-current") == "main"
 
     def test_missing_configured_root_fails(self, git_env, monkeypatch):
@@ -1359,7 +1366,7 @@ class TestScriptsRoot:
         _git(git_env, "config", "--global", "gitconfig.scriptsRoot", str(git_env / "nope"))
         result = self._run(git_env, "switch_to_main", "--all")
         assert result.returncode == 1
-        assert "is not a directory" in result.stdout
+        assert "isnotadirectory" in self._flat(result.stdout)
 
     def test_missing_root_lists_no_repos(self, helper, git_env):
         _git(git_env, "config", "--global", "gitconfig.scriptsRoot", str(git_env / "nope"))
