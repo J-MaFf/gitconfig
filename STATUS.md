@@ -90,7 +90,7 @@ From an earlier review; none are being worked on.
 |-------|-------------|
 | [#230](https://github.com/J-MaFf/gitconfig/issues/230) | Windows: Ctrl-G only installed for one PowerShell edition; PS 5.1 encoding and log quirks |
 | [#231](https://github.com/J-MaFf/gitconfig/issues/231) | Template: dedupe the Python-finder alias loop (quote the repo path) and move machine-specific settings out |
-| [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Replace source-text tests with behavioural tests in a sandboxed HOME. The helper and updater parts landed in [#PRNUM](https://github.com/J-MaFf/gitconfig/pull/PRNUM); `Cleanup-GitConfig.Tests.ps1` is next |
+| [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Replace source-text tests with behavioural tests in a sandboxed HOME. The helper and updater parts landed in [#293](https://github.com/J-MaFf/gitconfig/pull/293); `Cleanup-GitConfig.Tests.ps1` is next |
 | [#235](https://github.com/J-MaFf/gitconfig/issues/235) | Stop hardcoding machine-specific values in .gitconfig.local generation |
 
 ## Natural Next Steps

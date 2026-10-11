@@ -787,14 +787,14 @@ def gh(helper, monkeypatch):
     _Result; every call is recorded in `gh.calls` as (args, cwd)."""
 
     class Gh:
-        calls = []
-        responder = staticmethod(lambda args: _Result(stdout="[]"))
+        def __init__(self):
+            self.calls = []
+            self.responder = lambda args: _Result(stdout="[]")
 
         def respond(self, fn):
             self.responder = fn
 
     stub = Gh()
-    stub.calls = []
     monkeypatch.setenv("COLUMNS", "200")  # keep table cells on one line
     monkeypatch.setattr(helper, "_have", lambda cmd: cmd == "gh")
     monkeypatch.setattr(helper, "run_git", lambda *a, **k: _Result(stdout=".git\n"))
@@ -982,16 +982,16 @@ def audit(helper, tmp_path, monkeypatch):
     ("diff"/"ls-files") to the _Result it returns."""
 
     class Audit:
-        args = []
-        commands = []
-        result = _Result(stdout=_AUDIT_REPORT)
-        git = {}
+        def __init__(self):
+            self.args = []
+            self.commands = []
+            self.result = _Result(stdout=_AUDIT_REPORT)
+            self.git = {}
 
         def report(self, stdout, returncode=0, stderr=""):
             self.result = None if stdout is None else _Result(returncode, stdout, stderr)
 
     stub = Audit()
-    stub.args, stub.commands, stub.git = [], [], {}
     monkeypatch.setenv("COLUMNS", "200")  # keep rich from wrapping messages
     monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
 
@@ -1000,6 +1000,8 @@ def audit(helper, tmp_path, monkeypatch):
         return stub.result
 
     def run(cmd, **kwargs):
+        # Only skill_diff's `git -C <dir> <subcommand> ...` calls get here.
+        assert cmd[:2] == ["git", "-C"], f"unexpected subprocess: {cmd}"
         stub.commands.append(list(cmd))
         return stub.git.get(cmd[3], _Result())
 
