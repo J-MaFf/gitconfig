@@ -284,8 +284,9 @@ Describe "Initialize-GitConfig.ps1" {
             $text | Should -Not -Match '\{\{REPO_PATH\}\}'
             $repoForward = $script:copyRepo -replace '\\', '/'
             $text.Contains("$repoForward/gitconfig_helper.py") | Should -BeTrue
-            # git reads the same path back.
-            $alias = & git config --file $out --get alias.alias
+            # git reads the same path back (the helper aliases dispatch through
+            # alias.h, which holds the path, #231).
+            $alias = & git config --file $out --get alias.h
             ($alias -join "`n").Contains("$repoForward/gitconfig_helper.py") | Should -BeTrue
         }
 
