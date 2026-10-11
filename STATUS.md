@@ -55,6 +55,7 @@ Four follow-up fixes from the #198 adversarial review landed: [#203](https://git
 | [#250](https://github.com/J-MaFf/gitconfig/issues/250) | Helper ignored unknown arguments, so `git cleanup -h` force-deleted gone branches; per-command allow-lists, `-h` prints usage, unknown flags exit 2 | [#266](https://github.com/J-MaFf/gitconfig/pull/266) |
 | [#251](https://github.com/J-MaFf/gitconfig/issues/251) | `git pushf` used a bare `--force-with-lease`, which any background fetch disarms, so it could overwrite a teammate's commit; now adds `--force-if-includes` (git 2.30+) | [#264](https://github.com/J-MaFf/gitconfig/pull/264) |
 | [#253](https://github.com/J-MaFf/gitconfig/issues/253) | Backup pruning (newest 5) deleted the only backup of the user's pre-install `~/.gitconfig` (Unix + Windows); the first backup is now also pinned as `<file>.pre-gitconfig`, never pruned | [#267](https://github.com/J-MaFf/gitconfig/pull/267) |
+| [#252](https://github.com/J-MaFf/gitconfig/issues/252) | `git start` ignored an existing remote branch, let issues with the same title slug share a branch, and silently branched from `HEAD` | [#265](https://github.com/J-MaFf/gitconfig/pull/265) |
 
 ### Open Issues
 

@@ -155,7 +155,7 @@ git wip            # Park all current work as a WIP commit (skips hooks)
 git nb <name>      # Create and switch to a new branch (switch -c)
 git pushf          # Force-push safely (--force-with-lease --force-if-includes; git 2.30+)
 git sync           # Update the current branch with rebase + autostash
-git start <issue#> # Make a conventionally named branch from a GitHub issue's title
+git start <issue#> # Start or resume the branch for a GitHub issue: <type>/<issue#>-<title-slug>
 git branches       # Track all remote branches
 git cleanup        # Delete local branches whose remote is gone (--force: merged local-only too)
 git main           # Switch to the default branch: fetch, fast-forward only, branch cleanup
@@ -165,6 +165,8 @@ git main --all     # Run the above for every git repo in immediate subdirectorie
 `git main` and `git cleanup` work from any worktree. git won't check a branch out in two worktrees, so when the default branch is checked out in another one, your current worktree stays where it is: the default branch is fast-forwarded in its own worktree (only if that one is clean) and branches are cleaned up from there. If your current worktree's own branch is gone upstream, you get a `git worktree remove <path>` hint. Repos with no remote skip the fetch and the fast-forward.
 
 The Python-backed aliases (`git alias`, `start`, `cleanup`, `main`, `skill`, `issues`) run nothing when given `-h`/`--help` (they print a usage line) or an argument they don't recognise (usage on stderr, exit 2). There is no `--dry-run`.
+
+`git start 123` names the branch `<type>/123-<title-slug>`: `fix/`, `docs/` or `feat/` from the issue's labels (`feat/` by default), then the issue number, then the title in kebab case. Existing work is found by the issue number: a local branch for the issue is switched to, and a branch for it on a remote (started on another machine) is checked out tracking that remote branch, so a later `git pushf` can't overwrite it. Otherwise a new branch is created from the fetched default branch, or from the local default branch if the remote one is missing (never from the branch you're on). A failed fetch is reported as a warning. Branches from before the issue number was added (`fix/<title-slug>`) aren't reused, since that name may belong to another issue; `git start` points one out if it exists.
 
 **GitHub**
 
