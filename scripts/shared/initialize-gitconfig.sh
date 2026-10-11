@@ -29,6 +29,10 @@ OPTIONS:
 DESCRIPTION:
     Generates ~/.gitconfig from .gitconfig.template with machine-specific values.
 
+EXIT STATUS:
+    0 written (or already up to date), 1 error, 2 not overwritten because the
+    prompt was declined or had no input (use --force when unattended)
+
 TEMPLATE PLACEHOLDERS:
     {{REPO_PATH}}   - Replaced with repository absolute path
     {{HOME_DIR}}    - Replaced with user home directory path

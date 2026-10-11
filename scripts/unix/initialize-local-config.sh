@@ -55,6 +55,10 @@ DESCRIPTION:
     extra safe directories, ...). Only the settings listed above are rebuilt.
     A ~/.gitconfig.local symlink is replaced by a regular file; the file it
     points to is not changed.
+
+EXIT STATUS:
+    0 written (or already up to date), 1 error, 2 not regenerated because
+    the prompt was declined or had no input (use --force when unattended)
 HELP
     exit 0
 fi
@@ -79,11 +83,11 @@ echo ""
 
 if { [ -f "$LOCAL_CONFIG_PATH" ] || [ -L "$LOCAL_CONFIG_PATH" ]; } && [ "$FORCE" = false ]; then
     echo ".gitconfig.local already exists (settings you added to it are kept)."
-    read -p "Regenerate it? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    # Declining (or no input to answer with) exits 2, so install.sh can tell
+    # "kept the existing file" from success and from failure (#258).
+    if ! ask_yes_no "Regenerate it?"; then
         echo "Cancelled."
-        exit 0
+        exit 2
     fi
 fi
 

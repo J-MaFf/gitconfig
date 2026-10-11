@@ -173,3 +173,28 @@ mac_install() { bash "$MAC_INSTALL" --force --no-launchd "$@"; }
     # And git sees them through the include.
     [ "$(git config --global --includes alias.co)" = "checkout" ]
 }
+
+@test "install without --force and no input keeps the files and finishes (#258)" {
+    # A prompt at end of input used to abort the run under set -e at STEP 3,
+    # after STEP 1 had printed "[OK] Generated .gitconfig" for a file it kept.
+    run bash "$LINUX_INSTALL" --no-cron < /dev/null
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[SKIP] Kept the existing .gitconfig (not regenerated)"* ]]
+    [[ "$output" == *"[SKIP] Kept the existing .gitconfig.local (not regenerated)"* ]]
+    [[ "$output" != *"[OK] Generated .gitconfig"* ]]
+    [[ "$output" == *"[STEP 7] Verifying setup"* ]]
+    grep -qF "Original Gitconfig" "$HOME/.gitconfig"
+    grep -qF "/original/local" "$HOME/.gitconfig.local"
+}
+
+@test "install exits 1 when a step fails (#258)" {
+    # ~/.gitconfig is a directory, so it can't be written. Git reads its global
+    # config from elsewhere so the other steps still run.
+    rm -f "$HOME/.gitconfig"
+    mkdir "$HOME/.gitconfig"
+    run env GIT_CONFIG_GLOBAL="$SANDBOX/global-config" bash "$LINUX_INSTALL" --force --no-cron
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[FAIL] Could not generate .gitconfig"* ]]
+    [[ "$output" != *"[OK] Generated .gitconfig"* ]]
+    [[ "$output" == *"Setup finished with 2 error(s)"* ]]
+}

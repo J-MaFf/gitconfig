@@ -255,7 +255,8 @@ _cron_install() {
 
     if _cron_has_entry "$repo_root"; then
         if [ "$force" != true ]; then
-            read -p "Cron job already exists. Replace? (y/n) " -n 1 -r
+            # No input to read (cron, CI) counts as "no" rather than failing (#258).
+            read -p "Cron job already exists. Replace? (y/n) " -n 1 -r || REPLY=
             echo
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                 echo "Skipped: Cron job"
@@ -331,7 +332,8 @@ _launchd_install() {
 
     if [ -f "$plist_path" ]; then
         if [ "$force" != true ]; then
-            read -p "launchd agent already exists. Replace? (y/n) " -n 1 -r
+            # No input to read (cron, CI) counts as "no" rather than failing (#258).
+            read -p "launchd agent already exists. Replace? (y/n) " -n 1 -r || REPLY=
             echo
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                 echo "Skipped: launchd agent"

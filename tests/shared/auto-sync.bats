@@ -392,3 +392,29 @@ PY
     [[ "$output" == *"Cleanup SUCCESSFUL!"* ]]
     [ ! -e "$HOME/Library/LaunchAgents/com.gitconfig.update.plist" ]
 }
+
+@test "linux cleanup exits 2 when the prompt has no answer (#258)" {
+    _stub_crontab
+    printf '[user]\n\tname = Mine\n' > "$HOME/.gitconfig"
+    # The prompt's read used to fail at end of input and end the run, under
+    # set -e, with exit 1 and no message.
+    run env PATH="$SANDBOX/bin:$PATH" bash "$REPO_ROOT/scripts/linux version/cleanup-gitconfig.sh" < /dev/null
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"Cancelled."* ]]
+    grep -qF "name = Mine" "$HOME/.gitconfig"
+}
+
+@test "linux cleanup exits 1 when something could not be removed (#258)" {
+    # A crontab that lists this clone's job (only that is ours, #259) but
+    # refuses every rewrite.
+    cat > "$SANDBOX/bin/crontab" <<EOF
+#!/bin/sh
+[ "\$1" = -l ] || exit 1
+echo '0 9 * * * bash "$REPO_ROOT/scripts/shared/update-gitconfig.sh" "$REPO_ROOT" # gitconfig-autoupdate'
+EOF
+    chmod +x "$SANDBOX/bin/crontab"
+    run env PATH="$SANDBOX/bin:$PATH" bash "$REPO_ROOT/scripts/linux version/cleanup-gitconfig.sh" --force
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[FAIL] cron job still exists!"* ]]
+    [[ "$output" == *"Cleanup INCOMPLETE"* ]]
+}

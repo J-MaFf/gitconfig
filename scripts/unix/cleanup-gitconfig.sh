@@ -41,6 +41,10 @@ DESCRIPTION:
        "# gitconfig-autoupdate", plus an untagged one from an older install,
        that runs this clone's update-gitconfig.sh; other clones' jobs,
        commented-out lines and other cron entries are kept)
+
+EXIT STATUS:
+    0 everything removed, 1 something is still present, 2 cancelled at the
+    prompt (or no input to answer it; use --force when unattended)
 HELP
     exit 0
 fi
@@ -66,11 +70,9 @@ echo ""
 
 if [ "$FORCE" = false ]; then
     echo "WARNING: This will remove all gitconfig-related files and the $SCHEDULER_NAME."
-    read -p "Continue? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if ! ask_yes_no "Continue?"; then
         echo "Cancelled."
-        exit 0
+        exit 2
     fi
 fi
 
@@ -134,3 +136,6 @@ else
     echo "Cleanup INCOMPLETE - $ERRORS items still present"
 fi
 echo ""
+# Non-zero when something is still there, so callers and scripts can tell
+# (it used to exit 0 either way, #258).
+[ "$ERRORS" -eq 0 ] || exit 1
