@@ -6,6 +6,12 @@
 # `-d` before `-D`, each deleted tip is logged, worktree checkouts are skipped,
 # and the exit code reports failures.
 #
+# Also covers the pull-then-converge step (issue #233): a template change
+# pulled from origin reaches ~/.gitconfig, a dirty tree skips the pull but
+# still converges, a hand-edited or deleted ~/.gitconfig self-heals, and the
+# updater never touches crontab, launchd or systemd. Everything runs in a
+# sandboxed $HOME against a local bare remote.
+#
 # Run with:  bats tests/shared/update-gitconfig.bats
 # Requires:  bats-core (https://github.com/bats-core/bats-core) and git.
 
@@ -24,6 +30,21 @@ setup() {
     export GIT_CONFIG_GLOBAL="$TESTDIR/gitconfig-global"
     export GIT_CONFIG_SYSTEM="$TESTDIR/no-system-config"
     printf '[user]\n\tname = Test\n\temail = test@example.com\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n' > "$GIT_CONFIG_GLOBAL"
+
+    # Keep the updater away from real machine state: no Python (so no pip
+    # install), and crontab/launchctl/systemctl stubs that only record a call.
+    # The updater must never touch the login scheduler; see the test below.
+    SCHED_CALLS="$TESTDIR/scheduler-calls"
+    mkdir -p "$TESTDIR/bin"
+    local stub
+    for stub in py python python3; do
+        printf '#!/bin/sh\nexit 1\n' > "$TESTDIR/bin/$stub"
+    done
+    for stub in crontab launchctl systemctl; do
+        printf '#!/bin/sh\necho "%s $*" >> "%s"\nexit 1\n' "$stub" "$SCHED_CALLS" > "$TESTDIR/bin/$stub"
+    done
+    chmod +x "$TESTDIR"/bin/*
+    export PATH="$TESTDIR/bin:$PATH"
 
     REMOTE="$TESTDIR/remote.git"
     REPO="$TESTDIR/repo"
@@ -58,6 +79,25 @@ pushed_branch() {
 
 branches() {
     git -C "$REPO" for-each-ref --format='%(refname:short)' refs/heads/
+}
+
+# Commit a new .gitconfig.template from a second clone and push it to origin,
+# as if another machine had published a change.
+publish_template() {
+    local other="$TESTDIR/other"
+    [ -d "$other" ] || git clone -q "$REMOTE" "$other" 2>/dev/null
+    git -C "$other" pull -q --ff-only
+    printf '%b' "$1" > "$other/.gitconfig.template"
+    git -C "$other" commit -q -am "Update template"
+    git -C "$other" push -q origin main
+}
+
+# The timestamped backups of ~/.gitconfig.
+gitconfig_backups() {
+    local f
+    for f in "$HOME"/.gitconfig.bak.[0-9]*; do
+        if [ -e "$f" ]; then printf '%s\n' "$f"; fi
+    done
 }
 
 # Run the updater the way `git selfupdate` does from a terminal: stdout on a
@@ -236,4 +276,77 @@ LOCK_REL=".local/state/gitconfig/update.lock"
     run bash "$UPDATER" "$REPO"
     [ "$status" -eq 1 ]
     [ ! -e "$HOME/$LOCK_REL" ]
+}
+
+# ---------------------------------------------------------------------------
+# Pull, then converge ~/.gitconfig (issue #233)
+# ---------------------------------------------------------------------------
+
+@test "a template change pulled from origin reaches ~/.gitconfig, rendered for this machine" {
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    grep -qx $'\teditor = vi' "$HOME/.gitconfig"
+
+    publish_template '[core]\n\teditor = nano\n[include]\n\tpath = {{HOME_DIR}}/.gitconfig.local\n[alias]\n\th = !python3 {{REPO_PATH}}/gitconfig_helper.py\n'
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$REMOTE" rev-parse main)" ]
+    grep -qx $'\teditor = nano' "$HOME/.gitconfig"
+    grep -qxF $'\t'"path = $HOME/.gitconfig.local" "$HOME/.gitconfig"
+    grep -qxF $'\t'"h = !python3 $REPO/gitconfig_helper.py" "$HOME/.gitconfig"
+    run ! grep -qF '{{' "$HOME/.gitconfig"
+    grep -qF "SUCCESS: repo up to date" "$LOG"
+    grep -qF "SUCCESS: ~/.gitconfig converged to template" "$LOG"
+}
+
+@test "a dirty main skips the pull but still converges ~/.gitconfig to the local template" {
+    publish_template '[core]\n\teditor = nano\n'
+    before="$(git -C "$REPO" rev-parse HEAD)"
+    # An uncommitted edit to the template itself: it is what gets rendered.
+    printf '[core]\n\teditor = emacs\n' > "$REPO/.gitconfig.template"
+
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$REPO" rev-parse HEAD)" = "$before" ]
+    grep -qF "WARN: working tree not clean; skipping pull (will still converge ~/.gitconfig)" "$LOG"
+    grep -qx $'\teditor = emacs' "$HOME/.gitconfig"
+}
+
+@test "a hand-edited ~/.gitconfig is reset to the template, keeping the edit in a backup" {
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    [ -z "$(gitconfig_backups)" ]
+
+    printf '[core]\n\teditor = vi\n[hand]\n\tedited = yes\n' > "$HOME/.gitconfig"
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HOME/.gitconfig")" = "$(cat "$REPO/.gitconfig.template")" ]
+    [ "$(gitconfig_backups | wc -l | tr -d ' ')" -eq 1 ]
+    grep -qF "edited = yes" "$(gitconfig_backups)"
+}
+
+@test "a deleted ~/.gitconfig is recreated, and an unchanged one is left alone" {
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    rm "$HOME/.gitconfig"
+
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HOME/.gitconfig")" = "$(cat "$REPO/.gitconfig.template")" ]
+
+    # Nothing changed: no rewrite, so no backup piles up on every login.
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    [ -z "$(gitconfig_backups)" ]
+    grep -qF "[OK] .gitconfig already up to date (matches template)" "$LOG"
+}
+
+@test "never touches crontab, launchd or systemd, headless or from a terminal" {
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    run_on_terminal
+    [ "$status" -eq 0 ]
+    # Python was hidden too: the deps step skipped instead of installing.
+    grep -qF "No Python interpreter found" "$LOG"
+    [ ! -e "$SCHED_CALLS" ]
 }

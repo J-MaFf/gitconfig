@@ -90,7 +90,7 @@ From an earlier review; none are being worked on.
 | Issue | Description |
 |-------|-------------|
 | [#231](https://github.com/J-MaFf/gitconfig/issues/231) | Template: dedupe the Python-finder alias loop (quote the repo path) and move machine-specific settings out |
-| [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Replace source-text tests with behavioural tests in a sandboxed HOME |
+| [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Replace source-text tests with behavioural tests in a sandboxed HOME. The helper and updater parts landed in [#293](https://github.com/J-MaFf/gitconfig/pull/293); `Cleanup-GitConfig.Tests.ps1` is next |
 | [#235](https://github.com/J-MaFf/gitconfig/issues/235) | Stop hardcoding machine-specific values in .gitconfig.local generation |
 
 ## Natural Next Steps
