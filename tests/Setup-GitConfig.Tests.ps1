@@ -33,6 +33,11 @@ BeforeAll {
     # -Skip does not carry into the Run-phase BeforeAll.
     $isWindowsRun = if ($PSVersionTable.PSVersion.Major -ge 6) { $IsWindows } else { $true }
     if ($isWindowsRun) {
+        # Stand in for a Store-installed 1Password: op-ssh-sign.exe is probed for
+        # and gpg.ssh.program is written only when it exists (#235).
+        $windowsApps = Join-Path $script:testHome "AppData\Local\Microsoft\WindowsApps"
+        New-Item -ItemType Directory -Path $windowsApps -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $windowsApps "op-ssh-sign.exe") -Value "stub"
         & $script:initGitScript -Force | Out-Null
         & $script:initLocalScript -Force | Out-Null
     }

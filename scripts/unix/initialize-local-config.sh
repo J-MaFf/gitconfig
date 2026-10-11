@@ -10,6 +10,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The clone these scripts run from, wherever it was cloned: trusted as a safe
+# directory below (#235).
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=../shared/functions.sh
 source "$SCRIPT_DIR/../shared/functions.sh"
 # shellcheck source=../shared/platform.sh
@@ -55,8 +58,10 @@ DESCRIPTION:
       (not over SSH or headless); otherwise left unset
     - HTTPS credential helper: the macOS login keychain (osxkeychain) on
       macOS; the GitHub CLI (gh auth git-credential), else libsecret, on Linux
-    - Safe directory entries (plus Homebrew's repo on a shared Mac where
-      another account owns it)
+    - Safe directory entries: this clone of the repo, wherever it lives, the
+      paths listed in ~/.config/gitconfig/safe-directories (one per line,
+      # starts a comment), and Homebrew's repo on a shared Mac where another
+      account owns it
     Regenerating keeps every setting you added to the file (aliases, includes,
     extra safe directories, ...). Only the settings listed above are rebuilt.
     A ~/.gitconfig.local symlink is replaced by a regular file; the file it
@@ -337,11 +342,19 @@ case "$CREDENTIAL_HELPER_KIND" in
 esac
 
 # --- Safe directories --------------------------------------------------------
+# This clone, wherever it lives, plus the machine's own trusted paths from
+# ~/.config/gitconfig/safe-directories (#235). Nothing machine-specific is
+# hardcoded here: this repo is public and runs on every machine.
+SAFE_DIRS_FILE="$HOME_DIR/.config/gitconfig/safe-directories"
+if [ -f "$SAFE_DIRS_FILE" ]; then
+    echo "[INFO] Adding the safe directories listed in $SAFE_DIRS_FILE"
+fi
 CONFIG_CONTENT+="
 [safe]
-	# Add trusted local or network directories here:
-	# directory = /path/to/trusted/repo
-	directory = $HOME_DIR/Documents/Scripts/gitconfig
+	# This clone of the gitconfig repo. To trust more paths on this machine,
+	# list them in ~/.config/gitconfig/safe-directories (one per line, # starts
+	# a comment) and regenerate, or add directory = /path lines here.
+$(safe_directory_lines "$REPO_ROOT" "$SAFE_DIRS_FILE")
 "
 
 # On a shared Mac, /opt/homebrew can be owned by a different account. git then
@@ -400,5 +413,6 @@ if [ "$SIGNING_ENABLED" = true ]; then
     echo ""
 fi
 
-echo "To add safe directories, edit: $LOCAL_CONFIG_PATH"
+echo "To add safe directories, list them in $SAFE_DIRS_FILE"
+echo "(one path per line) and re-run with --force, or edit: $LOCAL_CONFIG_PATH"
 echo ""

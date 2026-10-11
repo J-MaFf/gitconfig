@@ -113,6 +113,13 @@ Describe "GitConfig Integration" -Tag 'Integration' {
             if (& git config --file $localConfigPath --get user.signingkey 2>$null) {
                 $content | Should -Match '\[user\]'
             }
+            # gpg.ssh.program is written only when 1Password's op-ssh-sign.exe
+            # is installed (#235), so it's asserted only then.
+            if (& git config --file $localConfigPath --get gpg.ssh.program 2>$null) {
+                $content | Should -Match 'program\s*=.*op-ssh-sign\.exe'
+            }
+            # Nothing machine-specific from another machine is hardcoded (#235).
+            $content | Should -Not -Match '10\.210\.3\.10|KFWS9BDC01'
         }
 
         It ".gitconfig.local should have valid INI format" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
@@ -141,9 +148,14 @@ Describe "GitConfig Integration" -Tag 'Integration' {
         It "Should configure correct op-ssh-sign.exe path" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $platformIsWindows)) {
             $program = & git config --get gpg.ssh.program 2>$null
 
-            $program | Should -Not -BeNullOrEmpty
-            $program | Should -Match "op-ssh-sign\.exe"
-            $program | Should -Match "WindowsApps"
+            # op-ssh-sign.exe is probed for at 1Password's two install locations
+            # and gpg.ssh.program is omitted when neither exists (#235).
+            if (-not $program) {
+                Set-ItResult -Skipped -Because "1Password's op-ssh-sign.exe isn't installed on this machine (or a key file signs), so gpg.ssh.program is omitted (#235)"
+                return
+            }
+            $program | Should -Match "op-ssh-sign\.exe$"
+            $program | Should -Match "/WindowsApps/|/1Password/app/8/"
         }
 
         It "Should set SSH signing key" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $platformIsWindows)) {
@@ -162,10 +174,10 @@ Describe "GitConfig Integration" -Tag 'Integration' {
             $program = & git config --get gpg.ssh.program 2>$null
 
             if ($program) {
-                Test-Path $program | Should -Be $true
+                Test-Path -LiteralPath $program | Should -Be $true
             }
             else {
-                Set-ItResult -Skipped -Because "Setup has not been run (gpg.ssh.program not configured)"
+                Set-ItResult -Skipped -Because "gpg.ssh.program isn't configured: op-ssh-sign.exe isn't installed on this machine (#235)"
             }
         }
     }

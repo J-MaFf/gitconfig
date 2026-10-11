@@ -1,5 +1,6 @@
 # Initialize Machine-Specific Git Configuration
-# This script creates ~/.gitconfig.local with machine-specific paths and safe directories
+# This script creates ~/.gitconfig.local with machine-specific paths and safe directories.
+# Nothing machine-specific is hardcoded: this repo is public and runs everywhere (#235).
 # Usage: .\Initialize-LocalConfig.ps1
 
 param(
@@ -41,11 +42,12 @@ EXAMPLE:
     .\Initialize-LocalConfig.ps1 -Force
 
 SAFE DIRECTORIES:
-    Add network locations and local paths that git should trust.
-    Common examples:
-    - Network shares (e.g., \\server\share\repo)
-    - Local development directories
-    - Work-specific repositories
+    The generated file trusts this clone of the repo, wherever it lives. List
+    any other paths git should trust on this machine (network shares, other
+    accounts' repos) in ~/.config/gitconfig/safe-directories, one per line
+    (# starts a comment line); a UNC path (\\server\share\repo) is written
+    in git's %(prefix)///server/share/repo form. -Force keeps the entries the
+    previous file had.
 "@
     exit 0
 }
@@ -121,6 +123,10 @@ function Update-AllowedSigners {
 
 $homeDir = $env:USERPROFILE
 $localConfigPath = Join-Path $homeDir ".gitconfig.local"
+# The clone these scripts run from, wherever it was cloned (#235).
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+# Optional per-machine list of extra safe.directory entries (#235).
+$safeDirsFile = [System.IO.Path]::Combine($homeDir, '.config', 'gitconfig', 'safe-directories')
 
 # Shared helpers: timestamped backups (Backup-UserFile).
 . (Join-Path $PSScriptRoot "Functions.ps1")
@@ -149,13 +155,17 @@ function Resolve-GitPathValue {
 # ~/.gitconfig's), so regenerating keeps the machine's key.
 #   - A key file path (the standard: an on-disk key, signed by ssh-keygen with
 #     no agent): no gpg.ssh.program, and gpgsign only if the file exists.
-#   - A literal public key (1Password agent signing): op-ssh-sign signs with it.
+#   - A literal public key (1Password agent signing): op-ssh-sign signs with
+#     it when it's installed (#235: probed at both of 1Password's install
+#     locations); otherwise gpgsign only if the SSH agent holds the key.
 #   - No key: signing is left off rather than turned on with nothing to sign
 #     with, which would make every commit fail.
+# gpg.ssh.program is written only when op-ssh-sign.exe exists (#235).
 function Get-LocalSigningSection {
     $homeFwd = $homeDir -replace '\\', '/'
     $key = (& git config --get user.signingkey 2>$null)
     if ($LASTEXITCODE -ne 0) { $key = $null }
+    $opSshSign = Get-OpSshSignPath -HomeDir $homeDir
     $lines = [System.Collections.Generic.List[string]]::new()
     $isLiteral = $key -and ($key -match '^(key::|ssh-|sk-ssh-|ecdsa-|sk-ecdsa-)')
     $enable = $false
@@ -163,7 +173,18 @@ function Get-LocalSigningSection {
         $lines.Add('[user]')
         $lines.Add("`tsigningkey = $key")
         if ($isLiteral) {
-            $enable = $true
+            if ($opSshSign) {
+                $enable = $true
+            }
+            elseif (Test-KeyInSshAgent $key) {
+                Write-Host "[INFO] 1Password's op-ssh-sign.exe wasn't found; the SSH agent holds the signing key, so ssh-keygen signs with it." -ForegroundColor Yellow
+                $enable = $true
+            }
+            else {
+                Write-Host "[WARN] The signing key is a public key, but 1Password's op-ssh-sign.exe isn't installed and the SSH agent" -ForegroundColor Yellow
+                Write-Host "       doesn't hold the key, so commit signing is left off. Install 1Password (or load the key)" -ForegroundColor Yellow
+                Write-Host "       and re-run with -Force." -ForegroundColor Yellow
+            }
         }
         elseif (Test-Path -LiteralPath (Resolve-GitPathValue $key) -PathType Leaf) {
             $enable = $true
@@ -183,9 +204,9 @@ function Get-LocalSigningSection {
     $lines.Add("`tformat = ssh")
     $lines.Add('')
     $lines.Add('[gpg "ssh"]')
-    if (-not $key -or $isLiteral) {
-        $lines.Add("`t# Machine-specific SSH signing program path")
-        $lines.Add("`tprogram = $homeFwd/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe")
+    if ((-not $key -or $isLiteral) -and $opSshSign) {
+        $lines.Add("`t# 1Password's SSH signing program, found on this machine")
+        $lines.Add("`tprogram = $(ConvertTo-GitConfigValue $opSshSign)")
     }
     $lines.Add("`t# Lets git verify SSH commit signatures locally (git log --show-signature, verify-commit)")
     $lines.Add("`tallowedSignersFile = $homeFwd/.ssh/allowed_signers")
@@ -197,6 +218,57 @@ function Get-LocalSigningSection {
     else {
         $lines.Add("`t# Off until a signing key is set up (see above).")
         $lines.Add("`t# gpgsign = true")
+    }
+    return ($lines -join "`n")
+}
+
+# Whether the SSH agent lists Key, a literal public key ("ssh-ed25519 AAAA...",
+# optionally key::-prefixed), comparing type and key data and ignoring any
+# comment. False when ssh-add isn't available or the agent can't be reached.
+function Test-KeyInSshAgent {
+    param([Parameter(Mandatory)][string]$Key)
+    if (-not (Get-Command ssh-add -ErrorAction SilentlyContinue)) { return $false }
+    $want = (($Key -replace '^key::', '').Trim() -split '\s+' | Select-Object -First 2) -join ' '
+    $listed = & ssh-add -L 2>$null
+    if ($LASTEXITCODE -ne 0) { return $false }
+    foreach ($entry in @($listed)) {
+        if (((("$entry").Trim() -split '\s+' | Select-Object -First 2) -join ' ') -eq $want) { return $true }
+    }
+    return $false
+}
+
+# The [safe] section (#235): this clone of the repo, wherever it lives; the
+# machine's own trusted paths from ~/.config/gitconfig/safe-directories; and,
+# when regenerating, the entries the previous file had, so -Force doesn't drop
+# trusted paths set up by hand or by an older version of this script.
+function Get-LocalSafeSection {
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $lines.Add('[safe]')
+    $lines.Add("`t# This clone of the gitconfig repo. To trust more paths on this machine,")
+    $lines.Add("`t# list them in ~/.config/gitconfig/safe-directories (one per line, # starts")
+    $lines.Add("`t# a comment) and re-run with -Force, or add directory = <path> lines here.")
+    $repoEntry = ConvertTo-GitSafeDirectory $repoRoot
+    [void]$seen.Add($repoEntry)
+    $lines.Add("`tdirectory = $(ConvertTo-GitConfigValue $repoEntry)")
+
+    $extras = @(Read-SafeDirectoryList $safeDirsFile)
+    if ($extras.Count -gt 0) {
+        Write-Host "[INFO] Adding the safe directories listed in $safeDirsFile" -ForegroundColor Yellow
+    }
+    foreach ($entry in $extras) {
+        $value = ConvertTo-GitSafeDirectory $entry
+        if ($seen.Add($value)) { $lines.Add("`tdirectory = $(ConvertTo-GitConfigValue $value)") }
+    }
+
+    if (Test-Path -LiteralPath $localConfigPath) {
+        $previous = @(& git config --file $localConfigPath --get-all safe.directory 2>$null)
+        $kept = @($previous | Where-Object { $_ -and $seen.Add($_) })
+        if ($kept.Count -gt 0) {
+            $lines.Add("`t# Kept from the previous .gitconfig.local")
+            foreach ($value in $kept) { $lines.Add("`tdirectory = $(ConvertTo-GitConfigValue $value)") }
+            Write-Host "[INFO] Keeping $($kept.Count) safe director$(if ($kept.Count -eq 1) { 'y' } else { 'ies' }) from the previous .gitconfig.local" -ForegroundColor Yellow
+        }
     }
     return ($lines -join "`n")
 }
@@ -233,6 +305,7 @@ try {
     else {
         $signingSection = Get-LocalSigningSection
         $editorLine = Get-LocalEditorSection
+        $safeSection = Get-LocalSafeSection
         $configContent = @"
 # Machine-Specific Git Configuration
 # This file is automatically included by .gitconfig and should NOT be committed
@@ -256,15 +329,7 @@ $editorLine
 	# per-user Windows Credential Manager, so the scheduled task never prompts.
 	helper = manager
 
-[safe]
-	# Network locations (make sure these paths exist on this machine)
-	directory = %(prefix)///10.210.3.10/dept/IT/PC Setup/winget-app-setup
-	directory = %(prefix)///10.210.3.10/dept/IT/Programs/Office/OfficeConfigs
-	directory = %(prefix)///KFWS9BDC01/DEPT/IT/Programs/Office/OfficeConfigs
-
-	# Local development directories
-	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-app-setup
-	directory = $($homeDir -replace '\\', '/')/Documents/Scripts/winget-install
+$safeSection
 "@
 
         # -Force regenerate: keep the user's current file as a timestamped backup
@@ -303,13 +368,12 @@ $editorLine
         Write-Host "  - Editor (core.editor) when VS Code is available" -ForegroundColor Gray
         Write-Host "  - Allowed signers file for local signature verification" -ForegroundColor Gray
         Write-Host "  - Long path support (core.longpaths) for deeply nested repos" -ForegroundColor Gray
-        Write-Host "  - Network safe directories (10.210.3.10, KFWS9BDC01)" -ForegroundColor Gray
-        Write-Host "  - Local development directories" -ForegroundColor Gray
+        Write-Host "  - Safe directories: this repo, plus any listed in ~/.config/gitconfig/safe-directories" -ForegroundColor Gray
         Write-Host ""
-        Write-Host "To customize safe directories:" -ForegroundColor Cyan
-        Write-Host "  1. Edit $localConfigPath" -ForegroundColor Gray
-        Write-Host "  2. Add or modify entries in the [safe] section" -ForegroundColor Gray
-        Write-Host "  3. Save and reload git" -ForegroundColor Gray
+        Write-Host "To trust more directories on this machine:" -ForegroundColor Cyan
+        Write-Host "  1. List them in $safeDirsFile (one path per line)" -ForegroundColor Gray
+        Write-Host "  2. Re-run with -Force (entries already in the file are kept)" -ForegroundColor Gray
+        Write-Host "  Or add directory = <path> lines to the [safe] section of $localConfigPath" -ForegroundColor Gray
         Write-Host ""
     }
 

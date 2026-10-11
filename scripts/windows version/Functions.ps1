@@ -558,6 +558,67 @@ function Move-TemplateSettingsToLocal {
 # UTF-8). A relative Path resolves against the current PowerShell location, as
 # the cmdlets do, not the process's working directory.
 
+# Quote Value for a git config file when it needs it (#235): a backslash or
+# double quote is escaped, and a value holding one of those, # or ; (which
+# would start a comment), or leading/trailing whitespace is wrapped in double
+# quotes. Anything else is returned as is. Mirrors gitconfig_quote_value in
+# scripts/shared/functions.sh.
+function ConvertTo-GitConfigValue {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+    if ($Value -match '[\\";#]|^\s|\s$') {
+        return '"' + (($Value -replace '\\', '\\') -replace '"', '\"') + '"'
+    }
+    return $Value
+}
+
+# A Windows path in the form git's safe.directory expects (#235): forward
+# slashes, and a UNC path (\\server\share\repo) as %(prefix)///server/share/repo.
+# A value already in git's form passes through unchanged.
+function ConvertTo-GitSafeDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    if ($Path -match '^\\\\') {
+        return '%(prefix)///' + ($Path.Substring(2) -replace '\\', '/')
+    }
+    return ($Path -replace '\\', '/')
+}
+
+# The safe.directory entries listed in Path (#235): the optional
+# ~/.config/gitconfig/safe-directories holds the trusted paths that belong to
+# one machine (network shares, other people's repos), so they stay out of this
+# public repo. One path per line; blank lines and lines whose first non-blank
+# character is # are skipped, and surrounding whitespace is trimmed. A missing
+# file returns nothing. Mirrors read_safe_directories in functions.sh.
+function Read-SafeDirectoryList {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
+    $entries = foreach ($line in ((Read-Utf8File $Path) -split '\r?\n')) {
+        $trimmed = $line.Trim()
+        if ($trimmed -and -not $trimmed.StartsWith('#')) { $trimmed }
+    }
+    return @($entries)
+}
+
+# Where 1Password's op-ssh-sign.exe is installed for the user whose profile is
+# HomeDir, in git's forward-slash form, or $null when it isn't (#235). The
+# Microsoft Store build puts it under WindowsApps; the standard installer
+# under AppData\Local\1Password\app\8. GITCONFIG_OP_SSH_SIGN overrides the
+# probe (tests): set to a path to use it, set but empty for "not installed".
+function Get-OpSshSignPath {
+    param([Parameter(Mandatory)][string]$HomeDir)
+    if (Test-Path Env:GITCONFIG_OP_SSH_SIGN) {
+        if ($env:GITCONFIG_OP_SSH_SIGN) { return ($env:GITCONFIG_OP_SSH_SIGN -replace '\\', '/') }
+        return $null
+    }
+    $candidates = @(
+        [System.IO.Path]::Combine($HomeDir, 'AppData', 'Local', 'Microsoft', 'WindowsApps', 'op-ssh-sign.exe'),
+        [System.IO.Path]::Combine($HomeDir, 'AppData', 'Local', '1Password', 'app', '8', 'op-ssh-sign.exe')
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) { return ($candidate -replace '\\', '/') }
+    }
+    return $null
+}
+
 function Resolve-FullPath {
     param([Parameter(Mandatory)][string]$Path)
     $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
