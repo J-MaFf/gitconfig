@@ -34,6 +34,7 @@ Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows Po
 
 | Issue | Description | PR |
 |-------|-------------|----|
+| [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Source-text tests replaced with behavioural tests in a sandboxed HOME (helper, updater, `Cleanup-GitConfig.ps1`); remaining helper source checks moved to [#294](https://github.com/J-MaFf/gitconfig/issues/294) | [#293](https://github.com/J-MaFf/gitconfig/pull/293), [#PRNUM](https://github.com/J-MaFf/gitconfig/pull/PRNUM) |
 | [#183](https://github.com/J-MaFf/gitconfig/issues/183) | Mac credential block lacked the empty helper reset line (multi-valued accumulation) | [#184](https://github.com/J-MaFf/gitconfig/pull/184) |
 | [#160](https://github.com/J-MaFf/gitconfig/issues/160) | Login task "No Python interpreter found" (WindowsApps alias stub) | [#161](https://github.com/J-MaFf/gitconfig/pull/161) |
 | [#163](https://github.com/J-MaFf/gitconfig/issues/163) | Non-ASCII em-dashes failing Encoding tests | [#164](https://github.com/J-MaFf/gitconfig/pull/164) |
@@ -90,8 +91,8 @@ From an earlier review; none are being worked on.
 | Issue | Description |
 |-------|-------------|
 | [#231](https://github.com/J-MaFf/gitconfig/issues/231) | Template: dedupe the Python-finder alias loop (quote the repo path) and move machine-specific settings out |
-| [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Replace source-text tests with behavioural tests in a sandboxed HOME. The helper and updater parts landed in [#293](https://github.com/J-MaFf/gitconfig/pull/293); `Cleanup-GitConfig.Tests.ps1` is next |
 | [#235](https://github.com/J-MaFf/gitconfig/issues/235) | Stop hardcoding machine-specific values in .gitconfig.local generation |
+| [#294](https://github.com/J-MaFf/gitconfig/issues/294) | Replace the remaining source-regex checks in `gitconfig_helper.Tests.ps1` (browser, TTY, Ctrl-G, categorization, `start`) with behavioural tests |
 
 ## Natural Next Steps
 
