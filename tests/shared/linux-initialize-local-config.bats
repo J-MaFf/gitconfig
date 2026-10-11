@@ -312,7 +312,7 @@ exit 0
     [ "$status" -eq 0 ]
     local f="$SANDBOX/.gitconfig.local"
     git config --file "$f" --get-all safe.directory | grep -qxF /original/local
-    git config --file "$f" --get-all safe.directory | grep -qxF "$SANDBOX/Documents/Scripts/gitconfig"
+    git config --file "$f" --get-all safe.directory | grep -qxF "$REPO_ROOT"
     [ "$(git config --file "$f" alias.co)" = "checkout" ]
     [ "$(git config --file "$f" include.path)" = "~/work.inc" ]
     # A generated setting is rebuilt, not carried over: the old signer is gone.
@@ -358,4 +358,28 @@ exit 0
     [[ "$output" == *"No answer"* ]]
     [[ "$output" == *"Cancelled."* ]]
     [ "$(cat "$SANDBOX/.gitconfig.local")" = "$(printf '[alias]\n\tco = checkout')" ]
+}
+
+@test "trusts this clone of the repo, wherever it lives, and nothing hardcoded (#235)" {
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get-all safe.directory)" = "$REPO_ROOT" ]
+    run ! grep -qF "Documents/Scripts/gitconfig" "$SANDBOX/.gitconfig.local"
+}
+
+@test "adds the paths listed in ~/.config/gitconfig/safe-directories (#235)" {
+    mkdir -p "$SANDBOX/.config/gitconfig"
+    printf '# shared repos\n  /srv/shared repo  \r\n\n/odd;path #1\n%s\n/srv/shared repo\n/last' "$REPO_ROOT" \
+        > "$SANDBOX/.config/gitconfig/safe-directories"
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"safe-directories"* ]]
+    run git config --file "$SANDBOX/.gitconfig.local" --get-all safe.directory
+    [ "$status" -eq 0 ]
+    [ "$output" = "$REPO_ROOT"$'\n''/srv/shared repo'$'\n''/odd;path #1'$'\n''/last' ]
+
+    # A second run converges: the listed paths aren't duplicated by the carry-over.
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get-all safe.directory | wc -l | tr -d ' ')" -eq 4 ]
 }

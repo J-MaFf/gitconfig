@@ -454,6 +454,57 @@ credential.helper
 credential.https://github.com.helper
 credential.https://gist.github.com.helper"
 
+# Quote VALUE for a git config file when it needs it: a backslash or double
+# quote is escaped, and a value holding one of those, # or ; (which would
+# start a comment), or leading/trailing whitespace is wrapped in double quotes.
+# Anything else is printed as is.
+# Usage: gitconfig_quote_value VALUE
+gitconfig_quote_value() {
+    local v="$1"
+    case "$v" in
+        *[\\\"\#\;]*|[[:space:]]*|*[[:space:]])
+            v="${v//\\/\\\\}"
+            v="${v//\"/\\\"}"
+            printf '"%s"' "$v"
+            ;;
+        *) printf '%s' "$v" ;;
+    esac
+}
+
+# Print the safe.directory entries listed in FILE (#235), one per line: the
+# optional ~/.config/gitconfig/safe-directories holds the trusted paths that
+# belong to one machine (network shares, other people's repos), so they stay
+# out of this public repo. One path per line; blank lines and lines whose
+# first non-blank character is # are skipped, surrounding whitespace and a
+# Windows line ending are trimmed. A missing FILE prints nothing.
+# Usage: read_safe_directories FILE
+read_safe_directories() {
+    local file="$1" line
+    [ -f "$file" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        case "$line" in ""|\#*) continue ;; esac
+        printf '%s\n' "$line"
+    done < "$file"
+}
+
+# Print the [safe] directory lines for a generated ~/.gitconfig.local (#235):
+# REPO_ROOT, the clone these scripts run from (wherever it was cloned), then
+# each entry in EXTRAS_FILE (see read_safe_directories), without duplicates.
+# Usage: safe_directory_lines REPO_ROOT EXTRAS_FILE
+safe_directory_lines() {
+    local repo_root="$1" extras_file="$2" entry seen nl=$'\n'
+    seen="$nl$repo_root$nl"
+    printf '\tdirectory = %s\n' "$(gitconfig_quote_value "$repo_root")"
+    while IFS= read -r entry; do
+        case "$seen" in *"$nl$entry$nl"*) continue ;; esac
+        seen="$seen$entry$nl"
+        printf '\tdirectory = %s\n' "$(gitconfig_quote_value "$entry")"
+    done < <(read_safe_directories "$extras_file")
+}
+
 # Comment written above the settings carried over into a regenerated
 # ~/.gitconfig.local (used by initialize-local-config.sh).
 # shellcheck disable=SC2034

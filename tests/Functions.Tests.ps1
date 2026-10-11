@@ -578,3 +578,111 @@ Describe "Set-MarkedBlock (Functions.ps1, #230)" -Tag 'Unit' {
         [System.IO.File]::ReadAllBytes($script:file) | Should -Be $bytes
     }
 }
+
+Describe "Machine-specific value helpers (Functions.ps1, #235)" -Tag 'Unit' {
+    BeforeAll {
+        . $script:functionsPath
+    }
+
+    Context "ConvertTo-GitConfigValue" {
+        It "leaves a plain value alone, spaces inside included" {
+            ConvertTo-GitConfigValue 'C:/Users/me/My Repos/x' | Should -BeExactly 'C:/Users/me/My Repos/x'
+        }
+
+        It "quotes and escapes a value git would otherwise misread: <In>" -ForEach @(
+            @{ In = 'a;b'; Out = '"a;b"' }
+            @{ In = 'a#b'; Out = '"a#b"' }
+            @{ In = 'a\b'; Out = '"a\\b"' }
+            @{ In = 'say "hi"'; Out = '"say \"hi\""' }
+            @{ In = ' lead'; Out = '" lead"' }
+        ) {
+            ConvertTo-GitConfigValue $In | Should -BeExactly $Out
+        }
+
+        It "round-trips through git" {
+            $file = Join-Path $TestDrive "quote.cfg"
+            $value = 'C:\odd;path #1 "x"'
+            [IO.File]::WriteAllText($file, "[safe]`n`tdirectory = $(ConvertTo-GitConfigValue $value)`n")
+            (& git config --file $file --get safe.directory) | Should -BeExactly $value
+        }
+    }
+
+    Context "ConvertTo-GitSafeDirectory" {
+        It "writes a UNC path in git's %(prefix)/// form" {
+            ConvertTo-GitSafeDirectory '\\fileserver\dept\IT\repo' | Should -BeExactly '%(prefix)///fileserver/dept/IT/repo'
+        }
+
+        It "uses forward slashes for a drive path" {
+            ConvertTo-GitSafeDirectory 'C:\Users\me\Documents\Scripts\gitconfig' | Should -BeExactly 'C:/Users/me/Documents/Scripts/gitconfig'
+        }
+
+        It "passes a value already in git's form through" {
+            ConvertTo-GitSafeDirectory '%(prefix)///server/share' | Should -BeExactly '%(prefix)///server/share'
+            ConvertTo-GitSafeDirectory '*' | Should -BeExactly '*'
+        }
+    }
+
+    Context "Read-SafeDirectoryList" {
+        It "returns nothing for a missing file" {
+            @(Read-SafeDirectoryList (Join-Path $TestDrive "missing")).Count | Should -Be 0
+        }
+
+        It "skips blank and comment lines, trims, and handles CRLF and no final newline" {
+            $file = Join-Path $TestDrive "safe-directories"
+            [IO.File]::WriteAllText($file, "# work shares`r`n\\server\share\repo  `r`n`r`n   # indented comment`r`n  C:\Repos\other`r`nD:\last")
+            @(Read-SafeDirectoryList $file) | Should -Be @('\\server\share\repo', 'C:\Repos\other', 'D:\last')
+        }
+    }
+
+    Context "Get-OpSshSignPath" {
+        BeforeAll {
+            function New-Stub([string[]]$Parts) {
+                $path = [System.IO.Path]::Combine([string[]](@($script:probeHome) + $Parts))
+                New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+                Set-Content -LiteralPath $path -Value "stub"
+                return ($path -replace '\\', '/')
+            }
+        }
+        BeforeEach {
+            $script:savedOp = $env:GITCONFIG_OP_SSH_SIGN
+            Remove-Item Env:GITCONFIG_OP_SSH_SIGN -ErrorAction SilentlyContinue
+            $script:probeHome = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $script:probeHome | Out-Null
+        }
+        AfterEach {
+            $env:GITCONFIG_OP_SSH_SIGN = $script:savedOp
+        }
+
+        It "returns null when 1Password isn't installed" {
+            Get-OpSshSignPath -HomeDir $script:probeHome | Should -BeNullOrEmpty
+        }
+
+        It "finds the Microsoft Store install under WindowsApps" {
+            $stub = New-Stub @('AppData', 'Local', 'Microsoft', 'WindowsApps', 'op-ssh-sign.exe')
+            Get-OpSshSignPath -HomeDir $script:probeHome | Should -BeExactly $stub
+        }
+
+        It "finds the standard install under AppData\Local\1Password\app\8" {
+            $stub = New-Stub @('AppData', 'Local', '1Password', 'app', '8', 'op-ssh-sign.exe')
+            Get-OpSshSignPath -HomeDir $script:probeHome | Should -BeExactly $stub
+        }
+
+        It "GITCONFIG_OP_SSH_SIGN overrides the probe" {
+            $null = New-Stub @('AppData', 'Local', 'Microsoft', 'WindowsApps', 'op-ssh-sign.exe')
+            $env:GITCONFIG_OP_SSH_SIGN = 'C:\custom\op-ssh-sign.exe'
+            Get-OpSshSignPath -HomeDir $script:probeHome | Should -BeExactly 'C:/custom/op-ssh-sign.exe'
+        }
+
+        It "GITCONFIG_OP_SSH_SIGN set but empty means not installed" {
+            $null = New-Stub @('AppData', 'Local', 'Microsoft', 'WindowsApps', 'op-ssh-sign.exe')
+            $env:GITCONFIG_OP_SSH_SIGN = ''
+            # Windows PowerShell 5.1 deletes an environment variable assigned an
+            # empty string, so "set but empty" can't be expressed there.
+            if (-not (Test-Path Env:GITCONFIG_OP_SSH_SIGN)) {
+                Set-ItResult -Skipped -Because "this PowerShell can't hold an empty environment variable"
+                return
+            }
+            Get-OpSshSignPath -HomeDir $script:probeHome | Should -BeNullOrEmpty
+        }
+    }
+}

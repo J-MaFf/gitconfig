@@ -804,3 +804,34 @@ _other_acquire() {
     run _other_acquire
     [ "$output" = 1 ]
 }
+
+# ---------------------------------------------------------------------------
+# safe.directory helpers (#235)
+# ---------------------------------------------------------------------------
+
+@test "gitconfig_quote_value leaves a plain value alone and quotes one git would misread" {
+    [ "$(gitconfig_quote_value '/srv/my repo')" = '/srv/my repo' ]
+    [ "$(gitconfig_quote_value 'a;b')" = '"a;b"' ]
+    [ "$(gitconfig_quote_value 'a#b')" = '"a#b"' ]
+    [ "$(gitconfig_quote_value 'a\b')" = '"a\\b"' ]
+    [ "$(gitconfig_quote_value 'say "hi"')" = '"say \"hi\""' ]
+    [ "$(gitconfig_quote_value ' lead')" = '" lead"' ]
+}
+
+@test "read_safe_directories skips comments and blanks, trims, and needs no final newline" {
+    printf '# shared\r\n  /a b  \r\n\n   # indented\n/c\n/last' > "$TESTDIR/list"
+    run read_safe_directories "$TESTDIR/list"
+    [ "$status" -eq 0 ]
+    [ "$output" = $'/a b\n/c\n/last' ]
+    run read_safe_directories "$TESTDIR/missing"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "safe_directory_lines puts the repo first, dedupes, and git reads the values back" {
+    printf '/x;y\n/repo\n/x;y\nC:\\odd "q"\n' > "$TESTDIR/list"
+    { echo '[safe]'; safe_directory_lines /repo "$TESTDIR/list"; } > "$TESTDIR/cfg"
+    run git config --file "$TESTDIR/cfg" --get-all safe.directory
+    [ "$status" -eq 0 ]
+    [ "$output" = $'/repo\n/x;y\nC:\\odd "q"' ]
+}

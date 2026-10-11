@@ -211,6 +211,12 @@ Describe "Initialize-LocalConfig.ps1 signing and editor (#231)" -Tag 'Unit' {
     BeforeEach {
         Set-Sandbox
         $script:savedCode = $env:GITCONFIG_CODE_BIN
+        $script:savedOp = $env:GITCONFIG_OP_SSH_SIGN
+        $script:savedSock = $env:SSH_AUTH_SOCK
+        # No op-ssh-sign and no reachable SSH agent unless a test says otherwise
+        # (#235), so the real machine's 1Password or agent can't leak in.
+        $env:GITCONFIG_OP_SSH_SIGN = ""
+        $env:SSH_AUTH_SOCK = Join-Path $TestDrive "no-agent.sock"
         $script:savedSsh = @{ C = $env:SSH_CONNECTION; L = $env:SSH_CLIENT; T = $env:SSH_TTY }
         $env:SSH_CONNECTION = $null; $env:SSH_CLIENT = $null; $env:SSH_TTY = $null
         $env:GITCONFIG_CODE_BIN = ""
@@ -218,6 +224,8 @@ Describe "Initialize-LocalConfig.ps1 signing and editor (#231)" -Tag 'Unit' {
     }
     AfterEach {
         $env:GITCONFIG_CODE_BIN = $script:savedCode
+        $env:GITCONFIG_OP_SSH_SIGN = $script:savedOp
+        $env:SSH_AUTH_SOCK = $script:savedSock
         $env:SSH_CONNECTION = $script:savedSsh.C; $env:SSH_CLIENT = $script:savedSsh.L; $env:SSH_TTY = $script:savedSsh.T
         Reset-Sandbox
     }
@@ -247,6 +255,7 @@ Describe "Initialize-LocalConfig.ps1 signing and editor (#231)" -Tag 'Unit' {
     }
 
     It "a literal key (1Password agent): signingkey, gpgsign and op-ssh-sign" {
+        $env:GITCONFIG_OP_SSH_SIGN = "C:\Users\me\AppData\Local\1Password\app\8\op-ssh-sign.exe"
         & git config --global user.signingkey $script:oldKey
         & $script:initLocal -Force *> $null
         (& git config --file $script:local --get user.signingkey) | Should -Be $script:oldKey

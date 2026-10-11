@@ -279,12 +279,22 @@ Common cron schedules:
 
 ### Custom Local Config
 
-Edit `~/.gitconfig.local` to add safe directories:
+`~/.gitconfig.local` trusts this clone of the repo as a safe directory. To trust
+other paths on this machine, list them in `~/.config/gitconfig/safe-directories`
+(one path per line; blank lines and `#` comments are skipped) and re-run
+`initialize-local-config.sh --force`:
+
+```text
+# ~/.config/gitconfig/safe-directories
+/path/to/trusted/repo1
+/srv/shared/repo2
+```
+
+Or edit `~/.gitconfig.local` directly; `--force` keeps the entries you add there:
 
 ```ini
 [safe]
     directory = /path/to/trusted/repo1
-    directory = /path/to/trusted/repo2
 ```
 
 ### Testing
