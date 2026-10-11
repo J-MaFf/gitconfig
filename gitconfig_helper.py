@@ -103,7 +103,7 @@ def _local_branches():
     return branches
 
 
-def _delete_branch(branch, gone):
+def _delete_branch(branch, gone, cwd=None):
     """Delete a branch with `git branch -d`, falling back to -D only if gone.
 
     `-d` succeeds when the branch is merged into HEAD. When it refuses, `-D` is
@@ -113,40 +113,103 @@ def _delete_branch(branch, gone):
 
     Returns (outcome, detail): outcome is "deleted" (-d), "forced" (-D),
     "kept" (unmerged local-only branch, left alone; detail is git's refusal)
-    or "failed" (git refused even -D; detail is its stderr).
+    or "failed" (git refused even -D; detail is its stderr). cwd runs git in
+    another worktree, whose HEAD is the branch -d checks merged-ness against.
     """
-    first = run_git("branch", "-d", branch)
+    first = _git_in(cwd, "branch", "-d", branch)
     if first.returncode == 0:
         return "deleted", ""
     if not gone:
         return "kept", first.stderr.strip()
-    forced = run_git("branch", "-D", branch)
+    forced = _git_in(cwd, "branch", "-D", branch)
     if forced.returncode == 0:
         return "forced", ""
     return "failed", forced.stderr.strip()
 
 
-def _fast_forward(console, label):
+def _git_in(cwd, *args):
+    """run_git in another worktree (`git -C <cwd>`), or here when cwd is None."""
+    return run_git(*(("-C", cwd) if cwd else ()), *args)
+
+
+def _worktree_holding(branch):
+    """Return the path of *another* worktree that has `branch` checked out, else None.
+
+    git refuses to check out a branch that is checked out elsewhere, so callers
+    work on the default branch in place there instead of switching to it.
+    """
+    result = run_git(
+        "for-each-ref", "--format=%(HEAD)%1f%(worktreepath)", f"refs/heads/{branch}"
+    )
+    if result.returncode != 0:
+        return None
+    head, _, path = result.stdout.strip("\n").partition("\x1f")
+    if head == "*" or not path:
+        return None
+    return path
+
+
+def _fetch_args(branch):
+    """Return the `git fetch` arguments that update `branch`, or None if there's no remote.
+
+    A bare `git fetch` fetches the *current* branch's remote, so on a branch
+    tracking another remote (a fork's upstream) the default branch's remote was
+    never fetched and it was "fast-forwarded" to a stale ref. Fetch the
+    branch's configured remote, else origin, else (other remotes only) let git
+    choose.
+    """
+    remotes = run_git("remote")
+    if remotes.returncode != 0 or not remotes.stdout.split():
+        return None
+    configured = run_git("config", "--get", f"branch.{branch}.remote").stdout.strip()
+    if configured and configured != ".":
+        return ["fetch", "--prune", configured]
+    if "origin" in remotes.stdout.split():
+        return ["fetch", "--prune", "origin"]
+    return ["fetch", "--prune"]
+
+
+def _head_ref():
+    """Return (branch, sha) for HEAD; branch is None when HEAD is detached."""
+    branch = run_git("symbolic-ref", "--quiet", "--short", "HEAD")
+    sha = run_git("rev-parse", "--verify", "--quiet", "HEAD", check=True)
+    name = branch.stdout.strip() if branch.returncode == 0 else None
+    return name, sha.stdout.strip()
+
+
+def _is_linked_worktree():
+    """True when the current directory is a linked (`git worktree add`) worktree."""
+    result = run_git("rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
+    dirs = result.stdout.splitlines()
+    return result.returncode == 0 and len(dirs) == 2 and dirs[0] != dirs[1]
+
+
+def _fast_forward(console, label, cwd=None):
     """Fast-forward the current branch to its upstream: the pull half of `pull --ff-only`.
 
-    Callers have just run `git fetch --prune`, so merging @{upstream} with
-    --ff-only completes a single pull without a second network round trip, and
-    never creates a merge commit. Returns True on success.
+    Callers have just fetched, so merging @{upstream} with --ff-only completes
+    a single pull without a second network round trip, and never creates a
+    merge commit. cwd runs it in another worktree. A branch with no upstream
+    (e.g. a repo with no remote) is skipped with a note. Returns True on
+    success or skip.
     """
-    result = run_git("merge", "--ff-only", "@{upstream}")
+    if _git_in(cwd, "rev-parse", "--verify", "--quiet", "@{upstream}").returncode != 0:
+        console.print(f"[dim]{escape(label)} has no upstream; skipping fast-forward[/dim]")
+        return True
+    result = _git_in(cwd, "merge", "--ff-only", "@{upstream}")
     if result.returncode == 0:
         return True
-    console.print(f"[red]Error: Could not fast-forward {label}[/red]")
+    console.print(f"[red]Error: Could not fast-forward {escape(label)}[/red]")
     console.print(f"[red]{escape(result.stderr.strip())}[/red]")
     # --ff-only never starts a merge, so this should be empty; checked anyway
     # so an unexpected conflict is reported precisely (not by substring-matching
     # `git status` output, which also matched file names like UU_notes.md).
-    conflicts = run_git("diff", "--name-only", "--diff-filter=U")
+    conflicts = _git_in(cwd, "diff", "--name-only", "--diff-filter=U")
     if conflicts.returncode == 0 and conflicts.stdout.strip():
         console.print("[red]Unmerged paths:[/red]")
         console.print(escape(conflicts.stdout.rstrip()))
         return False
-    ahead = run_git("rev-list", "--count", "@{upstream}..HEAD")
+    ahead = _git_in(cwd, "rev-list", "--count", "@{upstream}..HEAD")
     if ahead.returncode == 0 and ahead.stdout.strip() not in ("", "0"):
         console.print(
             f"[yellow]Local {label} has {ahead.stdout.strip()} commit(s) that are not on its "
@@ -163,6 +226,11 @@ def cleanup_branches(force=False, update=True):
     falls back to `-D` (squash-merged PR branches are never "merged" as far as
     -d can tell); its tip SHA is printed so it can be restored. Branches checked
     out in another worktree are skipped and listed.
+
+    When the default branch is checked out in another worktree, git won't
+    check it out here too, so this worktree stays put and the deletions run in
+    that worktree (`git -C <path> branch -d`), where -d checks merged-ness
+    against the default branch.
 
     Args:
         force: Also delete local-only branches (no upstream at all), but only
@@ -182,42 +250,61 @@ def cleanup_branches(force=False, update=True):
             console.print("[red]Error: Not in a git repository[/red]")
             return 1
 
-        # Get current branch
-        result_current = run_git("rev-parse", "--abbrev-ref", "HEAD", check=True)
-        current_branch = result_current.stdout.strip()
+        # Current branch, or None plus the commit when HEAD is detached (so a
+        # detached HEAD is restored, not "switched back" to main).
+        current_branch, current_sha = _head_ref()
+        here = current_branch or f"detached HEAD ({current_sha[:7]})"
         switched_branch = False
         default_branch = _default_branch()
+        holder = None  # another worktree that has the default branch checked out
 
         # Switch to the default branch if not already on it, so that -d checks
         # merged-ness against it and the branch we were on can be deleted too.
         if current_branch != default_branch:
-            console.print(
-                f"[cyan]Switching from '{current_branch}' to '{default_branch}'...[/cyan]"
-            )
-            result = run_git("checkout", default_branch)
-            if result.returncode != 0:
-                console.print(f"[red]Error: Failed to switch to {default_branch}[/red]")
-                console.print(f"[red]{escape(result.stderr.strip())}[/red]")
-                return 1
-            switched_branch = True
+            holder = _worktree_holding(default_branch)
+            if holder:
+                if not os.path.isdir(holder):
+                    console.print(
+                        f"[red]Error: {escape(default_branch)} is checked out in a worktree whose "
+                        f"directory is missing ({escape(holder)}). Run 'git worktree prune', then retry.[/red]"
+                    )
+                    return 1
+                if update:  # switch_to_main has already said so
+                    console.print(
+                        f"[cyan]'{escape(default_branch)}' is checked out in another worktree "
+                        f"({escape(holder)}); staying on '{escape(here)}' and cleaning up from there...[/cyan]"
+                    )
+            else:
+                console.print(
+                    f"[cyan]Switching from '{escape(here)}' to '{escape(default_branch)}'...[/cyan]"
+                )
+                result = run_git("checkout", default_branch)
+                if result.returncode != 0:
+                    console.print(f"[red]Error: Failed to switch to {escape(default_branch)}[/red]")
+                    console.print(f"[red]{escape(result.stderr.strip())}[/red]")
+                    return 1
+                switched_branch = True
 
         if update:
             console.print("[cyan]Running git cleanup...[/cyan]")
-            fetch_result = run_git("fetch", "--prune")
-            if fetch_result.returncode != 0:
+            fetch_args = _fetch_args(default_branch)
+            fetch_result = run_git(*fetch_args) if fetch_args else None
+            if fetch_result is not None and fetch_result.returncode != 0:
                 # Carry on from the last known remote state, but report failure.
                 console.print(
                     f"[yellow]Warning: git fetch --prune failed: {escape(fetch_result.stderr.strip())}[/yellow]"
                 )
                 exit_code = 1
-            elif run_git("rev-parse", "--verify", "--quiet", "@{upstream}").returncode != 0:
-                # Nothing to fast-forward from (e.g. a repo with no remote).
-                console.print(f"[dim]{default_branch} has no upstream; skipping fast-forward[/dim]")
+            elif holder and _git_in(holder, "status", "--porcelain").stdout.strip():
+                console.print(
+                    f"[yellow]Warning: {escape(holder)} has uncommitted changes; "
+                    f"not fast-forwarding {escape(default_branch)} there[/yellow]"
+                )
             else:
                 # Keep the default branch current; a failure here is only a
                 # warning because it doesn't affect which branches are pruned.
-                console.print(f"[cyan]Fast-forwarding {default_branch}...[/cyan]")
-                if not _fast_forward(console, default_branch):
+                console.print(f"[cyan]Fast-forwarding {escape(default_branch)}...[/cyan]")
+                if not _fast_forward(console, default_branch, cwd=holder):
                     console.print("[yellow]Warning: continuing with branch cleanup[/yellow]")
 
         branches = _local_branches()
@@ -228,9 +315,12 @@ def cleanup_branches(force=False, update=True):
         deleted = []  # (name, tip, how) with how in {"merged", "forced"}
         kept = []  # local-only branches -d refused (unmerged)
         worktree_branches = []
+        current_gone = False  # only possible when we didn't switch (see holder)
         for branch in branches:
             name = branch["name"]
             if branch["current"] or name == default_branch:
+                if branch["current"] and branch["gone"]:
+                    current_gone = True
                 continue
             local_only = not branch["upstream"]
             if not branch["gone"] and not (force and local_only):
@@ -242,7 +332,7 @@ def cleanup_branches(force=False, update=True):
                     worktree_branches.append(name)
                 continue
 
-            outcome, detail = _delete_branch(name, gone=branch["gone"])
+            outcome, detail = _delete_branch(name, gone=branch["gone"], cwd=holder)
             if outcome == "deleted":
                 deleted.append((name, branch["tip"], "merged"))
             elif outcome == "forced":
@@ -271,6 +361,18 @@ def cleanup_branches(force=False, update=True):
             for branch in sorted(worktree_branches):
                 console.print(f"[yellow]  {escape(branch)}[/yellow]")
 
+        if current_gone:
+            # The branch checked out here can't be deleted from here.
+            if _is_linked_worktree():
+                top = run_git("rev-parse", "--show-toplevel").stdout.strip()
+                hint = f"When you're done with this worktree: git worktree remove {top}"
+            else:
+                hint = "Switch to another branch and re-run git cleanup to delete it."
+            console.print(
+                f"[yellow]This worktree's branch '{escape(current_branch)}' is gone upstream. "
+                f"{escape(hint)}[/yellow]"
+            )
+
         deleted_names = {name for name, _, _ in deleted}
 
         # Switch back to original branch if we switched
@@ -278,16 +380,19 @@ def cleanup_branches(force=False, update=True):
             # Check if the original branch was deleted during cleanup
             if current_branch in deleted_names:
                 console.print(
-                    f"[yellow]Note: Your original branch '{current_branch}' was deleted during cleanup.[/yellow]"
+                    f"[yellow]Note: Your original branch '{escape(current_branch)}' was deleted during cleanup.[/yellow]"
                 )
                 console.print(f"[cyan]Staying on '{default_branch}'.[/cyan]\n")
             else:
-                console.print(f"[cyan]Switching back to '{current_branch}'...[/cyan]")
-                result = run_git("checkout", current_branch)
+                console.print(f"[cyan]Switching back to '{escape(here)}'...[/cyan]")
+                if current_branch is None:
+                    result = run_git("checkout", "--detach", current_sha)
+                else:
+                    result = run_git("checkout", current_branch)
                 if result.returncode != 0:
                     exit_code = 1
                     console.print(
-                        f"[yellow]Warning: Failed to switch back to '{current_branch}'[/yellow]"
+                        f"[yellow]Warning: Failed to switch back to '{escape(here)}'[/yellow]"
                     )
                     console.print(f"[yellow]{escape(result.stderr.strip())}[/yellow]\n")
 
@@ -1141,11 +1246,15 @@ def switch_to_main():
 
     Steps:
     1. Verify we're in a git repository
-    2. Fetch updates from remote
+    2. Fetch the default branch's remote (skipped when there is no remote)
     3. Check for uncommitted changes
     4. Switch to the default branch (origin/HEAD; see _default_branch)
     5. Fast-forward it to the fetched upstream (--ff-only, never a merge)
     6. Clean up branches with deleted remotes (no second fetch or pull)
+
+    If the default branch is checked out in another worktree, git can't check
+    it out here, so steps 3-6 run against that worktree instead and this one
+    stays where it is (see _update_default_in_worktree).
 
     Returns 0 on success, 1 on any failure (including a failed cleanup).
     """
@@ -1158,43 +1267,52 @@ def switch_to_main():
             console.print("[red]Error: Not in a git repository[/red]")
             return 1
 
-        # Get current branch
-        result_current = run_git("rev-parse", "--abbrev-ref", "HEAD", check=True)
-        current_branch = result_current.stdout.strip()
+        current_branch, current_sha = _head_ref()
+        here = current_branch or f"detached HEAD ({current_sha[:7]})"
+
+        # Step 2: Fetch the default branch's remote, not the current branch's
+        fetch_args = _fetch_args(_default_branch())
+        if fetch_args is None:
+            console.print("[dim]No remote configured; skipping fetch[/dim]")
+        else:
+            console.print("[cyan]Fetching updates from remote...[/cyan]")
+            result = run_git(*fetch_args)
+            if result.returncode != 0:
+                console.print("[red]Error: Failed to fetch from remote[/red]")
+                console.print(f"[red]{escape(result.stderr.strip())}[/red]")
+                return 1
+            console.print("[green]OK Fetch complete[/green]")
+        # Resolved after the fetch, which can create origin/HEAD (git 2.48+).
         default_branch = _default_branch()
 
-        # Step 2: Fetch updates
-        console.print("[cyan]Fetching updates from remote...[/cyan]")
-        result = run_git("fetch", "--prune")
-        if result.returncode != 0:
-            console.print("[red]Error: Failed to fetch from remote[/red]")
-            console.print(f"[red]{result.stderr.strip()}[/red]")
-            return 1
-        console.print("[green]OK Fetch complete[/green]")
+        if current_branch != default_branch:
+            holder = _worktree_holding(default_branch)
+            if holder:
+                return _update_default_in_worktree(console, default_branch, holder, here)
 
         # Step 3: Check for uncommitted changes
         result_status = run_git("status", "--porcelain", check=True)
         if result_status.stdout.strip():
             console.print("[red]Error: Uncommitted changes detected[/red]")
             console.print(
-                f"[yellow]Please commit or stash your changes before switching to {default_branch}:[/yellow]"
+                f"[yellow]Please commit or stash your changes before switching to {escape(default_branch)}:[/yellow]"
             )
-            console.print(result_status.stdout)
+            console.print(escape(result_status.stdout.rstrip()))
             return 1
 
         # Step 4: Switch to default branch (if not already there)
         if current_branch != default_branch:
             console.print(
-                f"[cyan]Switching from '{current_branch}' to '{default_branch}'...[/cyan]"
+                f"[cyan]Switching from '{escape(here)}' to '{escape(default_branch)}'...[/cyan]"
             )
             result = run_git("checkout", default_branch)
             if result.returncode != 0:
-                console.print(f"[red]Error: Failed to checkout {default_branch} branch[/red]")
-                console.print(f"[red]{result.stderr.strip()}[/red]")
+                console.print(f"[red]Error: Failed to checkout {escape(default_branch)} branch[/red]")
+                console.print(f"[red]{escape(result.stderr.strip())}[/red]")
                 return 1
-            console.print(f"[green]OK Switched to {default_branch}[/green]")
+            console.print(f"[green]OK Switched to {escape(default_branch)}[/green]")
         else:
-            console.print(f"[cyan]Already on {default_branch} branch[/cyan]")
+            console.print(f"[cyan]Already on {escape(default_branch)} branch[/cyan]")
 
         # Step 5: Fast-forward from the fetch above (one pull, --ff-only): a
         # local default branch that has diverged is reported, never merged.
@@ -1209,12 +1327,58 @@ def switch_to_main():
             console.print("[red]Error: Branch cleanup reported a failure (see above)[/red]")
             return 1
 
-        console.print(f"[green]OK Successfully switched to {default_branch} and updated![/green]")
+        console.print(f"[green]OK Successfully switched to {escape(default_branch)} and updated![/green]")
         return 0
 
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error: {escape(str(e))}[/red]")
         return 1
+
+
+def _update_default_in_worktree(console, default_branch, holder, here):
+    """Steps 3-6 of switch_to_main when the default branch is in another worktree.
+
+    git won't check a branch out in two worktrees, so this worktree stays on
+    `here`. The default branch is fast-forwarded in its own worktree (only if
+    that worktree is clean, the same rule as a normal switch), then branch
+    cleanup runs, deleting from that worktree. Returns 0 or 1.
+    """
+    console.print(
+        f"[cyan]'{escape(default_branch)}' is checked out in another worktree: {escape(holder)}[/cyan]"
+    )
+    if not os.path.isdir(holder):
+        console.print(
+            "[red]Error: that worktree's directory is missing. "
+            "Run 'git worktree prune', then re-run git main.[/red]"
+        )
+        return 1
+    console.print(
+        f"[cyan]Staying on '{escape(here)}' here and updating {escape(default_branch)} there...[/cyan]"
+    )
+
+    status = _git_in(holder, "status", "--porcelain")
+    if status.returncode != 0 or status.stdout.strip():
+        console.print(
+            f"[red]Error: Uncommitted changes in {escape(holder)}; "
+            f"not fast-forwarding {escape(default_branch)}[/red]"
+        )
+        console.print(escape((status.stdout or status.stderr).rstrip()))
+        return 1
+
+    console.print("[cyan]Fast-forwarding to the fetched upstream...[/cyan]")
+    if not _fast_forward(console, default_branch, cwd=holder):
+        return 1
+
+    console.print("[cyan]Cleaning up branches with deleted remotes...[/cyan]")
+    if cleanup_branches(force=False, update=False) != 0:
+        console.print("[red]Error: Branch cleanup reported a failure (see above)[/red]")
+        return 1
+
+    console.print(
+        f"[green]OK Updated {escape(default_branch)} in {escape(holder)}; "
+        f"this worktree is still on '{escape(here)}'[/green]"
+    )
+    return 0
 
 
 def _dirty_triage_lines(default_branch):
@@ -1330,7 +1494,9 @@ def update_all_main():
             if status_result.returncode == 0 and status_result.stdout.strip():
                 console.print("[yellow]SKIPPED: uncommitted changes[/yellow]")
                 # Fetch so the ahead/behind report reflects the current remote.
-                run_git("fetch", "-p")
+                fetch_args = _fetch_args(_default_branch())
+                if fetch_args:
+                    run_git(*fetch_args)
                 for line in _dirty_triage_lines(_default_branch()):
                     console.print(line)
                 outcome = "skipped"
