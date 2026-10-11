@@ -220,6 +220,11 @@ if ($Reinstall) {
     Write-Host ""
 }
 
+# Whether ~/.gitconfig.local existed before this run. STEP 1 can create it:
+# moving settings older templates carried (signing key, gpgsign, editor) out
+# of an existing ~/.gitconfig (#231). STEP 3 then fills in the rest.
+$localExisted = Test-Path (Join-Path $homeDir ".gitconfig.local")
+
 # STEP 1: Generate .gitconfig from template
 Write-Host "[STEP 1] Generating .gitconfig from template..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
@@ -258,12 +263,18 @@ Write-Host ""
 # STEP 3: Generate machine-specific config (create-if-missing). .gitconfig.local
 # is user-owned state, so an existing one is preserved (never overwritten on
 # re-install, even with -Force); regenerate deliberately with
-# Initialize-LocalConfig.ps1 -Force.
+# Initialize-LocalConfig.ps1 -Force. The exception is a file STEP 1 just
+# created with only the settings it moved: that one is generated in full
+# (-Force), which keeps its signing key and editor.
 Write-Host "[STEP 3] Generating machine-specific configuration..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 try {
-    $localExisted = Test-Path (Join-Path $homeDir ".gitconfig.local")
-    $code = Invoke-Step -Path $initLocalScript -Quiet
+    # A ~/.gitconfig.local that STEP 1 created holds only the moved settings;
+    # regenerate it (-Force keeps them) instead of preserving it as-is (#231).
+    $createdByStep1 = (-not $localExisted) -and (Test-Path (Join-Path $homeDir ".gitconfig.local"))
+    $localArgs = @{}
+    if ($createdByStep1) { $localArgs.Force = $true }
+    $code = Invoke-Step -Path $initLocalScript -Arguments $localArgs -Quiet
     if ($code -ne 0) {
         Write-Host "[FAIL] Could not set up .gitconfig.local (exit code $code)" -ForegroundColor Red
         $failures.Add("STEP 3: set up .gitconfig.local")

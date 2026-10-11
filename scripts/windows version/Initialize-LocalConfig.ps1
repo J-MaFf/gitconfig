@@ -21,8 +21,12 @@ OPTIONS:
     -Help       Display this help message
 
 DESCRIPTION:
-    Creates ~/.gitconfig.local with machine-specific safe directories and paths.
-    This file is included by the main .gitconfig and should NOT be version controlled.
+    Creates ~/.gitconfig.local with machine-specific safe directories, paths,
+    commit signing (user.signingkey and commit.gpgsign, when a key is
+    configured) and the editor (core.editor: code --wait when VS Code is
+    installed and this isn't an SSH session; an existing value is kept). This
+    file is included last by the main .gitconfig, so its values win, and it
+    should NOT be version controlled.
 
     Create-if-missing: because this file holds user-owned machine state (hand-tuned
     safe.directory entries, etc.), an existing one is preserved by default; pass
@@ -68,7 +72,8 @@ function Update-AllowedSigners {
     }
     else {
         $candidate = if ($signingKey -match '\.pub$') { $signingKey } else { "$signingKey.pub" }
-        if (Test-Path $candidate) {
+        $candidate = Resolve-GitPathValue $candidate
+        if (Test-Path -LiteralPath $candidate) {
             $pubKey = (Get-Content $candidate -Raw).Trim()
         }
     }
@@ -115,7 +120,7 @@ function Update-AllowedSigners {
 }
 
 $homeDir = $env:USERPROFILE
-$localConfigPath = "$homeDir\.gitconfig.local"
+$localConfigPath = Join-Path $homeDir ".gitconfig.local"
 
 # Shared helpers: timestamped backups (Backup-UserFile).
 . (Join-Path $PSScriptRoot "Functions.ps1")
@@ -131,15 +136,108 @@ Write-Host ""
 $localConfigExists = Test-Path $localConfigPath
 $preserved = $localConfigExists -and -not $Force
 
+# Expand a leading ~/ in a git path value the way git does (to the home dir).
+function Resolve-GitPathValue {
+    param([Parameter(Mandatory)][string]$Value)
+    if ($Value -match '^~[/\\]') { return (Join-Path $homeDir $Value.Substring(2)) }
+    return $Value
+}
+
+# Signing settings for the generated file (#231): .gitconfig.template no longer
+# sets user.signingkey or commit.gpgsign, so this file carries them. The key is
+# the one git already uses (an existing .gitconfig.local's, or an older
+# ~/.gitconfig's), so regenerating keeps the machine's key.
+#   - A key file path (the standard: an on-disk key, signed by ssh-keygen with
+#     no agent): no gpg.ssh.program, and gpgsign only if the file exists.
+#   - A literal public key (1Password agent signing): op-ssh-sign signs with it.
+#   - No key: signing is left off rather than turned on with nothing to sign
+#     with, which would make every commit fail.
+function Get-LocalSigningSection {
+    $homeFwd = $homeDir -replace '\\', '/'
+    $key = (& git config --get user.signingkey 2>$null)
+    if ($LASTEXITCODE -ne 0) { $key = $null }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $isLiteral = $key -and ($key -match '^(key::|ssh-|sk-ssh-|ecdsa-|sk-ecdsa-)')
+    $enable = $false
+    if ($key) {
+        $lines.Add('[user]')
+        $lines.Add("`tsigningkey = $key")
+        if ($isLiteral) {
+            $enable = $true
+        }
+        elseif (Test-Path -LiteralPath (Resolve-GitPathValue $key) -PathType Leaf) {
+            $enable = $true
+        }
+        else {
+            Write-Host "[WARN] The signing key file $key doesn't exist, so commit signing is left off." -ForegroundColor Yellow
+            Write-Host "       Once it does: git config --file ~/.gitconfig.local commit.gpgsign true" -ForegroundColor Yellow
+        }
+        $lines.Add('')
+    }
+    else {
+        Write-Host "[WARN] No user.signingkey is configured, so commit signing is left off." -ForegroundColor Yellow
+        Write-Host "       To sign commits: git config --file ~/.gitconfig.local user.signingkey <key file>" -ForegroundColor Yellow
+        Write-Host "       then:            git config --file ~/.gitconfig.local commit.gpgsign true" -ForegroundColor Yellow
+    }
+    $lines.Add('[gpg]')
+    $lines.Add("`tformat = ssh")
+    $lines.Add('')
+    $lines.Add('[gpg "ssh"]')
+    if (-not $key -or $isLiteral) {
+        $lines.Add("`t# Machine-specific SSH signing program path")
+        $lines.Add("`tprogram = $homeFwd/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe")
+    }
+    $lines.Add("`t# Lets git verify SSH commit signatures locally (git log --show-signature, verify-commit)")
+    $lines.Add("`tallowedSignersFile = $homeFwd/.ssh/allowed_signers")
+    $lines.Add('')
+    $lines.Add('[commit]')
+    if ($enable) {
+        $lines.Add("`tgpgsign = true")
+    }
+    else {
+        $lines.Add("`t# Off until a signing key is set up (see above).")
+        $lines.Add("`t# gpgsign = true")
+    }
+    return ($lines -join "`n")
+}
+
+# The editor for the generated file (#231): an existing .gitconfig.local's
+# core.editor is kept; otherwise VS Code when it's installed and this isn't an
+# SSH session (where a GUI editor can't open). Left unset otherwise, so git
+# falls back to GIT_EDITOR, VISUAL, EDITOR, then its default.
+function Get-LocalEditorSection {
+    if (Test-Path -LiteralPath $localConfigPath) {
+        $kept = (& git config --file $localConfigPath --get core.editor 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $kept) { return "`teditor = $kept" }
+    }
+    # GITCONFIG_CODE_BIN overrides the PATH lookup (tests); set but empty
+    # means VS Code isn't installed.
+    if (Test-Path Env:GITCONFIG_CODE_BIN) {
+        $code = $env:GITCONFIG_CODE_BIN
+    }
+    else {
+        $code = (Get-Command code -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+    }
+    $why = $null
+    if (-not $code) { $why = "VS Code (code) isn't on PATH" }
+    elseif ($env:SSH_CONNECTION -or $env:SSH_CLIENT -or $env:SSH_TTY) { $why = "this is an SSH session" }
+    if (-not $why) { return "`teditor = code --wait" }
+    return "`t# No editor set: $why. git uses GIT_EDITOR, VISUAL or EDITOR, then its default.`n`t# editor = code --wait"
+}
+
 try {
     if ($preserved) {
         Write-Host "[SKIP] .gitconfig.local already exists; preserving machine-specific config" -ForegroundColor Yellow
         Write-Host "       (regenerate from template with: Initialize-LocalConfig.ps1 -Force)" -ForegroundColor DarkGray
     }
     else {
+        $signingSection = Get-LocalSigningSection
+        $editorLine = Get-LocalEditorSection
         $configContent = @"
 # Machine-Specific Git Configuration
 # This file is automatically included by .gitconfig and should NOT be committed
+
+$signingSection
 
 [core]
 	# Use global gitignore file
@@ -150,12 +248,7 @@ try {
 	# than in .gitconfig.template because it is Windows-specific and this file
 	# is never clobbered by template regeneration (see issue #186).
 	longpaths = true
-
-[gpg "ssh"]
-	# Machine-specific SSH signing program path
-	program = $($homeDir -replace '\\', '/')/AppData/Local/Microsoft/WindowsApps/op-ssh-sign.exe
-	# Lets git verify SSH commit signatures locally (git log --show-signature, verify-commit)
-	allowedSignersFile = $($homeDir -replace '\\', '/')/.ssh/allowed_signers
+$editorLine
 
 [credential]
 	# HTTPS auth for unattended pulls of private repos (e.g. the claude-skills
@@ -206,7 +299,8 @@ try {
     if (-not $preserved) {
         Write-Host ""
         Write-Host "Local configuration includes:" -ForegroundColor Cyan
-        Write-Host "  - SSH signing program path (op-ssh-sign.exe)" -ForegroundColor Gray
+        Write-Host "  - Commit signing (signing key and gpgsign, when a key is configured)" -ForegroundColor Gray
+        Write-Host "  - Editor (core.editor) when VS Code is available" -ForegroundColor Gray
         Write-Host "  - Allowed signers file for local signature verification" -ForegroundColor Gray
         Write-Host "  - Long path support (core.longpaths) for deeply nested repos" -ForegroundColor Gray
         Write-Host "  - Network safe directories (10.210.3.10, KFWS9BDC01)" -ForegroundColor Gray

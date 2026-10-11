@@ -66,6 +66,31 @@ if (-not (Test-Path $templatePath)) {
     exit 1
 }
 
+$localConfigPath = Join-Path $homeDir ".gitconfig.local"
+
+# Snapshot what ~/.gitconfig holds now, before the symlink handling below can
+# remove it: the settings the template no longer carries are moved from this
+# copy into ~/.gitconfig.local before the rewrite (#231).
+$previousPath = $null
+if (Test-Path -LiteralPath $outputPath -PathType Leaf) {
+    # Without a snapshot the move can't happen, so stop rather than rewrite;
+    # an unreadable ~/.gitconfig is the exception, as git applied nothing from it.
+    try {
+        $previousPath = [IO.Path]::GetTempFileName()
+    }
+    catch {
+        Write-Host "[ERROR] Could not create a temporary file; ~/.gitconfig left unchanged" -ForegroundColor Red
+        exit 1
+    }
+    try {
+        Copy-Item -LiteralPath $outputPath -Destination $previousPath -Force -ErrorAction Stop
+    }
+    catch {
+        Remove-Item -LiteralPath $previousPath -Force -ErrorAction SilentlyContinue
+        $previousPath = $null
+    }
+}
+
 # A ~/.gitconfig that is a symlink into this repo is a leftover from an old
 # install that linked it instead of generating it. Writing through it would
 # clobber a file inside the repo, and backing it up would only save a link, so
@@ -113,11 +138,22 @@ try {
             exit 0
         }
     }
-    
+
+    # Settings the old template carried (signing key, gpgsign, editor) must
+    # survive the rewrite, or a machine whose ~/.gitconfig.local lacks them
+    # would silently stop signing after the next scheduled update. If they
+    # can't be moved, leave ~/.gitconfig alone so the next run tries again.
+    if ($previousPath) {
+        if (-not (Move-TemplateSettingsToLocal -PreviousPath $previousPath -NewContent $generatedContent -LocalPath $localConfigPath)) {
+            Write-Host "[ERROR] Could not move settings into ~/.gitconfig.local; ~/.gitconfig left unchanged" -ForegroundColor Red
+            exit 1
+        }
+    }
+
     # Warn about settings the rewrite drops, then back up the existing file to a
     # timestamped copy (older backups are kept, see Backup-UserFile).
     if (Test-Path $outputPath) {
-        $dropped = @(Get-DroppedGitConfigKeys -ExistingPath $outputPath -NewContent $generatedContent)
+        $dropped = @(Get-DroppedGitConfigKeys -ExistingPath $outputPath -NewContent $generatedContent -LocalPath $localConfigPath)
         if ($dropped.Count -gt 0) {
             Write-Host "[WARN] ~/.gitconfig has settings the template doesn't; regenerating drops them:" -ForegroundColor Yellow
             foreach ($key in $dropped) { Write-Host "         $key" -ForegroundColor Yellow }
@@ -165,4 +201,7 @@ catch {
     Write-Host "[FAIL] Error generating .gitconfig" -ForegroundColor Red
     Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
+}
+finally {
+    if ($previousPath) { Remove-Item -LiteralPath $previousPath -Force -ErrorAction SilentlyContinue }
 }

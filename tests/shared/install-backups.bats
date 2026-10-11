@@ -200,3 +200,23 @@ mac_install() { bash "$MAC_INSTALL" --force --no-launchd "$@"; }
     [[ "$output" != *"[OK] Generated .gitconfig"* ]]
     [[ "$output" == *"Setup finished with 2 error(s)"* ]]
 }
+
+@test "install fills in a ~/.gitconfig.local that STEP 1 created (#231)" {
+    # An install from before #231 with its ~/.gitconfig.local gone: STEP 1
+    # moves the template's old signing and editor settings into a new
+    # ~/.gitconfig.local, and STEP 3 must then generate the rest of it
+    # instead of offering to keep a file holding only those.
+    mkdir -p "$HOME/.ssh"
+    echo "fake private key" > "$HOME/.ssh/my_key"
+    rm -f "$HOME/.gitconfig.local"
+    printf '[user]\n\tname = Old\n\tsigningkey = %s/.ssh/my_key\n[commit]\n\tgpgsign = true\n[core]\n\teditor = nano\n' "$HOME" > "$HOME/.gitconfig"
+
+    # One "y" for STEP 1's overwrite prompt; STEP 3 must not need another.
+    run bash -c 'printf "y\n" | bash "$1" --no-cron' _ "$LINUX_INSTALL"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Moved user.signingkey"* ]]
+    [ "$(git config --file "$HOME/.gitconfig.local" --get core.excludesfile)" = "$HOME/.gitignore_global" ]
+    [ "$(git config --file "$HOME/.gitconfig.local" --get user.signingkey)" = "$HOME/.ssh/my_key" ]
+    [ "$(git config --file "$HOME/.gitconfig.local" --get commit.gpgsign)" = true ]
+    [ "$(git config --file "$HOME/.gitconfig.local" --get-all core.editor)" = nano ]
+}

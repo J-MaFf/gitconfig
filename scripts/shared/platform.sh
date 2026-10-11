@@ -759,7 +759,8 @@ op_ssh_sign_candidates() {
 #   SIGNING_KEY_FILE      the on-disk private key (file mode)
 #   SIGNING_PROGRAM       gpg.ssh.program: the no-agent wrapper (file mode,
 #                         when present) or op-ssh-sign (op mode)
-#   EXISTING_SIGNING_KEY  user.signingkey git already resolves (existing mode)
+#   EXISTING_SIGNING_KEY  user.signingkey git already resolves (any mode
+#                         but file; op mode signs with it)
 # Order, the same on both platforms:
 #   1. an on-disk key (~/.ssh/claude_desktop, then ~/.ssh/id_ed25519_signing)
 #      with its .pub (the .pub feeds allowed_signers). Signs straight from the
@@ -767,8 +768,8 @@ op_ssh_sign_candidates() {
 #      ~/.ssh/git-sign-no-agent, if executable, becomes gpg.ssh.program so the
 #      1Password agent can't intercept the key.
 #   2. 1Password's op-ssh-sign at a known install path.
-#   3. a user.signingkey git already has (the template ships a literal key with
-#      commit.gpgsign = true): signing is on, so allowedSignersFile is still
+#   3. a user.signingkey git already has (set by hand, or moved into
+#      ~/.gitconfig.local from an older template, #231): allowedSignersFile is
 #      needed or verification shows "No signature" (issue #116, finding 28).
 # GITCONFIG_OP_SSH_SIGN is a test seam: set to a path to force op-ssh-sign,
 # set to the empty string to simulate "not installed".
@@ -801,16 +802,72 @@ detect_signing_key() {
             candidate=""
         done < <(op_ssh_sign_candidates "$os")
     fi
+    # The key git already has: op-ssh-sign needs one to sign with (it used to
+    # come from the template, which no longer sets one, #231), and on its own
+    # it is the last resort. `|| true`: git config --get exits non-zero when
+    # the key is unset.
+    EXISTING_SIGNING_KEY="$(git config --get user.signingkey 2>/dev/null || true)"
+
     if [ -n "$candidate" ]; then
         SIGNING_MODE=op
         SIGNING_PROGRAM="$candidate"
         return 0
     fi
 
-    # `|| true`: git config --get exits non-zero when the key is unset.
-    EXISTING_SIGNING_KEY="$(git config --get user.signingkey 2>/dev/null || true)"
     if [ -n "$EXISTING_SIGNING_KEY" ]; then
         SIGNING_MODE=existing
+    fi
+    return 0
+}
+
+# Succeed if KEY, a user.signingkey value, can actually sign on this machine:
+# a key file (git's ~/ form included) that exists, or a literal public key
+# ("ssh-ed25519 AAAA...", optionally "key::"-prefixed) that the SSH agent
+# lists. Used before enabling commit.gpgsign for a key found in git config, so
+# signing is never switched on for a key the machine doesn't hold (#231).
+# Usage: signing_key_available KEY HOME_DIR
+signing_key_available() {
+    local key="$1" home_dir="$2" want listed
+    case "$key" in
+        "") return 1 ;;
+        key::*|ssh-*|sk-ssh-*|ecdsa-*|sk-ecdsa-*)
+            key="${key#key::}"
+            # Compare "type base64", ignoring any comment.
+            want="$(printf '%s\n' "$key" | awk '{ print $1, $2 }')"
+            listed="$(ssh-add -L 2>/dev/null)" || return 1
+            printf '%s\n' "$listed" | awk '{ print $1, $2 }' | grep -qxF "$want"
+            ;;
+        \~/*) [ -f "$home_dir/${key#\~/}" ] ;;
+        *) [ -f "$key" ] ;;
+    esac
+}
+
+# The default core.editor for a new ~/.gitconfig.local (#231): `code --wait`
+# when VS Code's CLI is on PATH and the session can open a window (not over
+# SSH, and on Linux a DISPLAY or WAYLAND_DISPLAY is set); otherwise empty, and
+# git falls back to $GIT_EDITOR / $VISUAL / $EDITOR, then vi. Sets
+# DEFAULT_EDITOR, and DEFAULT_EDITOR_WHY to the reason when it is empty.
+# GITCONFIG_CODE_BIN is a test seam: set to a path to pretend `code` is
+# installed, set to the empty string to simulate "not installed".
+# Usage: detect_default_editor OS
+# shellcheck disable=SC2034  # sets globals the caller reads
+detect_default_editor() {
+    local os="$1" code_path
+    DEFAULT_EDITOR=""
+    DEFAULT_EDITOR_WHY=""
+    if [ -n "${GITCONFIG_CODE_BIN+set}" ]; then
+        code_path="$GITCONFIG_CODE_BIN"
+    else
+        code_path="$(command -v code 2>/dev/null || true)"
+    fi
+    if [ -z "$code_path" ]; then
+        DEFAULT_EDITOR_WHY="VS Code's \`code\` command is not on PATH"
+    elif [ -n "${SSH_CONNECTION:-}${SSH_CLIENT:-}${SSH_TTY:-}" ]; then
+        DEFAULT_EDITOR_WHY="this is an SSH session, where \`code --wait\` can't open a window"
+    elif [ "$os" != macos ] && [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        DEFAULT_EDITOR_WHY="there is no graphical display (DISPLAY/WAYLAND_DISPLAY unset)"
+    else
+        DEFAULT_EDITOR="code --wait"
     fi
     return 0
 }

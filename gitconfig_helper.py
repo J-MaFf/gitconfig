@@ -495,6 +495,7 @@ ALIAS_METADATA = {
     # Maintenance
     "localconfig": ("Maintenance", "Edit machine-specific git config (~/.gitconfig.local)"),
     "selfupdate": ("Maintenance", "Pull this repo and reinstall ~/.gitconfig from the template"),
+    "h": ("Maintenance", "Run this repo's Python helper with the first working Python (git h <subcommand>); the helper aliases dispatch through it"),
     # Claude Skills
     "skill": ("Claude Skills", "Manage ~/.claude/skills via subcommands: list, sync, status, publish (git skill <subcommand>)"),
 }

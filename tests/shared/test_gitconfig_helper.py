@@ -2212,6 +2212,58 @@ class TestLocalconfigAlias:
 
 
 # --------------------------------------------------------------------------
+# `git h` dispatcher and the helper aliases (#231)
+# --------------------------------------------------------------------------
+
+class TestHelperDispatch:
+    """Renders the real template with a repo path containing a space, with a
+    stub gitconfig_helper.py that prints its arguments, and runs the helper
+    aliases through git. The path used to be unquoted in six copies of the
+    find-a-Python loop, so a spaced path split into two arguments."""
+
+    HELPER_ALIASES = {
+        "alias": "print_aliases",
+        "cleanup": "cleanup",
+        "main": "switch_to_main",
+        "skill": "skill",
+        "start": "start",
+        "issues": "issues",
+    }
+
+    @pytest.fixture
+    def rendered(self, tmp_path, monkeypatch):
+        repo = tmp_path / "My Repos" / "git config"
+        repo.mkdir(parents=True)
+        (repo / "gitconfig_helper.py").write_text(
+            "import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8")
+        template = open(os.path.join(REPO_ROOT, ".gitconfig.template"), encoding="utf-8").read()
+        home = tmp_path / "home"
+        home.mkdir()
+        cfg = home / ".gitconfig"
+        cfg.write_text(template.replace("{{REPO_PATH}}", repo.as_posix())
+                       .replace("{{HOME_DIR}}", home.as_posix()), encoding="utf-8")
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        return home
+
+    @staticmethod
+    def _run(cwd, *args):
+        result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    def test_h_runs_the_helper_from_a_spaced_path(self, rendered):
+        assert self._run(rendered, "h", "issues", "--label", "two words") == \
+            ["issues", "--label", "two words"]
+
+    @pytest.mark.parametrize("alias", sorted(HELPER_ALIASES))
+    def test_helper_aliases_dispatch_through_h(self, rendered, alias):
+        assert self._run(rendered, alias, "--x", "a b") == \
+            [self.HELPER_ALIASES[alias], "--x", "a b"]
+
+
+# --------------------------------------------------------------------------
 # print_aliases: selection mode (`git alias --out`, the Ctrl-G widgets)
 # --------------------------------------------------------------------------
 

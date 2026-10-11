@@ -53,6 +53,8 @@ The auto-update job is **pull + install + prune**: at each login it pulls the la
 
 **Put your own git settings in `~/.gitconfig.local`, not `~/.gitconfig`.** `~/.gitconfig` is generated from `.gitconfig.template` and is rewritten whenever the template changes. Before a rewrite, the scripts print the names (never the values) of any settings in `~/.gitconfig` that the template doesn't have, so you can move them. On macOS and Linux, regenerating `~/.gitconfig.local` (`install.sh --force`) keeps the settings you added to it; only the signing, credential-helper and `core.excludesfile` settings are rebuilt. A `~/.gitconfig` or `~/.gitconfig.local` that is a symlink into your own dotfiles is replaced by a regular file instead of being written through.
 
+**Commit signing and the editor are machine settings, so they live in `~/.gitconfig.local`.** The template doesn't set `user.signingkey`, `commit.gpgsign` or `core.editor` ([#231](https://github.com/J-MaFf/gitconfig/issues/231)). Install writes them into `~/.gitconfig.local`: the signing key the machine already uses, `commit.gpgsign = true` only when there is a key to sign with (on macOS/Linux, a key file that exists or a key the SSH agent holds; on Windows, a key file that exists or a literal key for 1Password), and `core.editor = code --wait` only when VS Code is installed and you're not in an SSH session (or, on Linux, a session with no display). Otherwise git falls back to `GIT_EDITOR`, `VISUAL`, `EDITOR`, then its default. An install from before this change keeps working: the next auto-update copies whichever of the three settings `~/.gitconfig.local` doesn't already set from the old `~/.gitconfig` into it before rewriting `~/.gitconfig`, and leaves `~/.gitconfig` alone if it can't.
+
 ### Backups
 
 Whenever a script replaces or removes one of your files, it first saves a timestamped copy next to it, for example `~/.gitconfig.bak.20261003-142501`. The newest 5 backups of each file are kept and older ones are deleted. Set `GITCONFIG_BACKUP_KEEP` to change the limit, or set it to `0` to keep every backup. Your original file is also kept for good: the first time a file is backed up, a copy is saved as `<file>.pre-gitconfig` (for example `~/.gitconfig.pre-gitconfig`). That copy is never pruned or overwritten, so you can always get back the file you had before installing. On an install from before this copy existed, the oldest backup still on disk is used instead. Older `*.bak` files from previous versions (`~/.gitconfig.bak`, `~/Existing.*.bak`) are never touched. Symlinks that already point into this repo aren't backed up, so running the installer again doesn't create new backups.
@@ -169,7 +171,7 @@ git find <string>  # Commits that added or removed <string> (log -S)
 git amend          # Fold staged changes into the last commit, keep its message
 git reword         # Edit the last commit's message
 git undo           # Undo the last commit but keep its changes staged
-git unstage <path> # Unstage files while keeping working-tree changes
+git unstage <path> # Unstage files while keeping working-tree changes (git restore --staged)
 git wip            # Park all current work as a WIP commit (skips hooks)
 ```
 
@@ -211,6 +213,7 @@ git issues --all   # Open issues across every repo you own (alias: -a; --local: 
 git localconfig          # Edit machine-specific git config (~/.gitconfig.local) in your editor
 git localconfig <args>   # Run git config on that file, e.g. git localconfig user.email you@example.com
 git selfupdate           # Pull this repo and reinstall ~/.gitconfig from the template
+git h <subcommand>       # Run this repo's Python helper with the first working Python (the helper aliases go through it)
 ```
 
 **Claude Skills**

@@ -60,6 +60,23 @@ generate_gitconfig() {
         return 0
     fi
 
+    # Snapshot what ~/.gitconfig holds now, before the symlink handling below
+    # can remove it: the settings the template no longer carries are moved
+    # from this copy into ~/.gitconfig.local before the rewrite (#231).
+    # Without a snapshot the move can't happen, so stop rather than rewrite;
+    # an unreadable ~/.gitconfig is the exception, as git applied nothing from it.
+    local previous=""
+    if [ -f "$output_path" ]; then
+        if ! previous="$(mktemp "${TMPDIR:-/tmp}/gitconfig-prev.XXXXXX")"; then
+            echo "[ERROR] Could not create a temporary file; ~/.gitconfig left unchanged"
+            return 1
+        fi
+        if ! cat "$output_path" > "$previous" 2>/dev/null; then
+            rm -f "$previous"
+            previous=""
+        fi
+    fi
+
     # A ~/.gitconfig that is a symlink into this repo is a leftover from an old
     # install that linked it instead of generating it. Writing through it would
     # clobber a file inside the repo, and backing it up would only save a link,
@@ -73,12 +90,26 @@ generate_gitconfig() {
         echo ".gitconfig already exists at: $output_path"
         if ! ask_yes_no "Overwrite?"; then
             echo "Cancelled."
+            [ -z "$previous" ] || rm -f "$previous"
             return 2
         fi
     fi
 
+    # Settings the old template carried (signing key, gpgsign, editor) must
+    # survive the rewrite, or a machine whose ~/.gitconfig.local lacks them
+    # would silently stop signing after the next auto-update. If they can't be
+    # moved, leave ~/.gitconfig alone so the next run tries again.
+    if [ -n "$previous" ]; then
+        if ! migrate_template_settings_to_local "$previous" "$generated_content" "$home_dir/.gitconfig.local"; then
+            rm -f "$previous"
+            echo "[ERROR] Could not move settings into ~/.gitconfig.local; ~/.gitconfig left unchanged"
+            return 1
+        fi
+        rm -f "$previous"
+    fi
+
     if [ -f "$output_path" ]; then
-        warn_dropped_gitconfig_keys "$output_path" "$generated_content"
+        warn_dropped_gitconfig_keys "$output_path" "$generated_content" "$home_dir/.gitconfig.local"
     fi
     # Any symlink still here points outside the repo (a dotfiles checkout,
     # say). Writing through it would rewrite that file, daily via the
@@ -124,7 +155,7 @@ generate_gitconfig() {
 # the backup taken right after keeps the values.
 # Usage: warn_dropped_gitconfig_keys EXISTING_PATH NEW_CONTENT
 warn_dropped_gitconfig_keys() {
-    local existing="$1" new_content="$2" tmp dropped
+    local existing="$1" new_content="$2" local_cfg="${3:-}" tmp dropped k still=""
     command -v git >/dev/null 2>&1 || return 0
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/gitconfig-keys.XXXXXX")" || return 0
     printf '%s\n' "$new_content" > "$tmp/new.cfg"
@@ -149,11 +180,86 @@ warn_dropped_gitconfig_keys() {
             }
         }' "$tmp/new.list" "$tmp/old.list" | LC_ALL=C sort -u)"
     rm -rf "$tmp"
+    # A key ~/.gitconfig.local sets still takes effect after the rewrite, so
+    # it isn't reported as dropped.
+    if [ -n "$dropped" ] && [ -n "$local_cfg" ] && [ -f "$local_cfg" ]; then
+        while IFS= read -r k; do
+            git config --file "$local_cfg" --includes --get-all "$k" >/dev/null 2>&1 && continue
+            still="$still$k"$'\n'
+        done <<< "$dropped"
+        dropped="${still%$'\n'}"
+    fi
     [ -n "$dropped" ] || return 0
     echo "[WARN] ~/.gitconfig has settings the template doesn't; regenerating drops them:"
     printf '%s\n' "$dropped" | sed 's/^/         /'
     echo "       They are kept in the backup below. To keep a setting, put it in"
     echo "       ~/.gitconfig.local (git config --file ~/.gitconfig.local <key> <value>)."
+}
+
+# Settings older templates carried that now live in ~/.gitconfig.local (#231).
+# Order matters: user.signingkey is moved before commit.gpgsign, which is
+# carried only once a signing key is in ~/.gitconfig.local.
+# shellcheck disable=SC2034
+TEMPLATE_MOVED_KEYS="user.signingkey
+core.editor
+commit.gpgsign"
+
+# Move the settings in TEMPLATE_MOVED_KEYS from the current ~/.gitconfig
+# (PREVIOUS, a copy of it) into ~/.gitconfig.local (LOCAL) when the rendered
+# template (NEW_CONTENT) no longer sets them and LOCAL doesn't either. This
+# keeps an installed machine signing, with the same key and editor, after an
+# auto-update regenerates ~/.gitconfig from a template without them; the
+# auto-update never regenerates ~/.gitconfig.local itself. Each value is copied
+# exactly as it took effect before, so the result doesn't depend on the
+# session the update runs in (cron has no `code` on PATH). A key LOCAL already
+# sets is left alone: it already won over the template's value. gpgsign is
+# carried only when LOCAL ends up with a signing key, so signing is never
+# switched on without one. Nothing happens once the old ~/.gitconfig is gone,
+# so this runs once per machine. LOCAL is created if missing.
+# Returns 1 (after reporting why) if LOCAL can't be read or written.
+# Usage: migrate_template_settings_to_local PREVIOUS NEW_CONTENT LOCAL
+migrate_template_settings_to_local() {
+    local previous="$1" new_content="$2" local_cfg="$3"
+    local tmp key value rc
+    command -v git >/dev/null 2>&1 || return 0
+    # An unreadable old ~/.gitconfig has nothing git could have applied.
+    git config --file "$previous" --list >/dev/null 2>&1 || return 0
+    if [ -e "$local_cfg" ] && ! git config --file "$local_cfg" --includes --list >/dev/null 2>&1; then
+        echo "[ERROR] git can't read $local_cfg, so the settings ~/.gitconfig"
+        echo "        no longer carries can't be moved into it. Fix or remove it and re-run."
+        return 1
+    fi
+    tmp="$(mktemp "${TMPDIR:-/tmp}/gitconfig-new.XXXXXX")" || return 1
+    printf '%s\n' "$new_content" > "$tmp"
+
+    while IFS= read -r key; do
+        value="$(git config --file "$previous" --get "$key" 2>/dev/null)" || continue
+        [ -n "$value" ] || continue
+        # Still in the template: the regenerated ~/.gitconfig keeps it.
+        git config --file "$tmp" --get "$key" >/dev/null 2>&1 && continue
+        # Already set locally: that value already won over the template's.
+        git config --file "$local_cfg" --includes --get "$key" >/dev/null 2>&1 && continue
+        if [ "$key" = commit.gpgsign ]; then
+            value="$(git config --file "$previous" --type=bool --get "$key" 2>/dev/null)" || continue
+            # Off is git's default, so there's nothing to carry.
+            [ "$value" = true ] || continue
+            if ! git config --file "$local_cfg" --includes --get user.signingkey >/dev/null 2>&1 \
+                && ! git config --file "$tmp" --get user.signingkey >/dev/null 2>&1; then
+                echo "[WARN] commit.gpgsign was on but no signing key is configured; not carrying it over"
+                continue
+            fi
+        fi
+        rc=0
+        git config --file "$local_cfg" "$key" "$value" 2>/dev/null || rc=$?
+        if [ "$rc" -ne 0 ]; then
+            rm -f "$tmp"
+            echo "[ERROR] Could not write $key to $local_cfg"
+            return 1
+        fi
+        echo "[INFO] Moved $key from ~/.gitconfig to ~/.gitconfig.local (the template no longer sets it)"
+    done <<< "$TEMPLATE_MOVED_KEYS"
+    rm -f "$tmp"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
