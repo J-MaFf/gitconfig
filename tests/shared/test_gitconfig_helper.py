@@ -9,7 +9,8 @@
 # The same sandbox runs the template's `git pushf` alias against two clones.
 #
 # Run with:  pytest tests/shared/test_gitconfig_helper.py
-# Requires:  pytest and the helper's own dependency, `rich`.
+# Requires:  pytest and the helper's own dependency, `rich`; the alias-browser
+#            tests also need `textual` (skipped without it).
 
 import importlib.util
 import json
@@ -1272,6 +1273,163 @@ class TestPushfAlias:
         # The teammate's change survives in the rewritten history.
         assert (me / "b.txt").exists()
         assert _git(me, "show", "-s", "--format=%B", remote_tip) == "teammate work, reworded"
+
+
+# --------------------------------------------------------------------------
+# Minor helper bugs (#261): alias-browser category keys, clipboard hang,
+# detached-HEAD labels, SKILL.md with a UTF-8 BOM
+# --------------------------------------------------------------------------
+
+class TestAliasBrowserCategoryKeys:
+    """ctrl+left/right switch category even while the search Input has focus.
+
+    The Input binds those keys to word-jumps; without priority bindings it
+    swallowed them and the tabs never moved.
+    """
+
+    ALIASES = [
+        ("st", "status -sb", "Inspect"),
+        ("cm", "commit", "Commit"),
+        ("nb", "switch -c", "Branch & Sync"),
+    ]  # tabs: All, Inspect, Commit, Branch & Sync
+
+    def _drive(self, helper, *keys):
+        pytest.importorskip("textual")
+        import asyncio
+        from textual.widgets import Input, Tabs
+
+        app = helper._build_alias_app(self.ALIASES)
+        seen = {}
+
+        async def run():
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                seen["focused"] = app.focused.id
+                for key in keys:
+                    await pilot.press(key)
+                await pilot.pause()
+                seen["active"] = app.query_one(Tabs).active
+                seen["search"] = app.query_one("#search", Input).value
+
+        asyncio.run(run())
+        return seen
+
+    def test_ctrl_right_moves_to_next_category_from_search(self, helper):
+        seen = self._drive(helper, "ctrl+right")
+        assert seen["focused"] == "search"
+        assert seen["active"] == "cat-1"
+
+    def test_ctrl_left_wraps_to_last_category(self, helper):
+        assert self._drive(helper, "ctrl+left")["active"] == "cat-3"
+
+    def test_typing_still_reaches_search_box(self, helper):
+        seen = self._drive(helper, "s", "t", "ctrl+right")
+        assert seen["search"] == "st"
+        assert seen["active"] == "cat-1"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake clipboard tool is a POSIX script")
+class TestCopyToClipboard:
+    """_copy_to_clipboard against a fake tool on an isolated PATH (never the
+    real clipboard)."""
+
+    def _fake_tool(self, tmp_path, monkeypatch, body):
+        name = "pbcopy" if sys.platform == "darwin" else "wl-copy"
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        tool = bindir / name
+        tool.write_text("#!/bin/sh\nPATH=/usr/bin:/bin\n" + body)
+        tool.chmod(0o755)
+        monkeypatch.setenv("PATH", str(bindir))
+        out = tmp_path / "clipboard"
+        monkeypatch.setenv("FAKE_CLIPBOARD", str(out))
+        return out
+
+    def test_forking_tool_does_not_hang(self, helper, tmp_path, monkeypatch):
+        # Like xclip/wl-copy: take stdin, leave a child holding stdout/stderr,
+        # exit 0. Reading captured pipes to EOF would wait for the child.
+        import time
+
+        out = self._fake_tool(
+            tmp_path, monkeypatch, 'cat > "$FAKE_CLIPBOARD"\nsleep 4 &\nexit 0\n'
+        )
+        start = time.monotonic()
+        assert helper._copy_to_clipboard("git st") is True
+        assert time.monotonic() - start < 2.5
+        assert out.read_text() == "git st"
+
+    def test_failing_tool_reports_failure_quietly(self, helper, tmp_path, monkeypatch, capfd):
+        self._fake_tool(tmp_path, monkeypatch, "cat >/dev/null\necho boom >&2\nexit 1\n")
+        assert helper._copy_to_clipboard("git st") is False
+        captured = capfd.readouterr()
+        assert "boom" not in captured.out + captured.err
+
+    def test_no_tool_available(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setenv("PATH", str(tmp_path))
+        assert helper._copy_to_clipboard("git st") is False
+
+
+class TestDetachedHeadLabels:
+    """A detached HEAD shows its short SHA, not a branch called 'HEAD'."""
+
+    def _header(self, helper, monkeypatch, skills_dir):
+        import io
+
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(skills_dir))
+        monkeypatch.setattr(helper, "_last_background_sync", lambda: None)
+        console = helper.Console(file=io.StringIO(), width=300, record=True)
+        helper._print_skill_header(console, "Claude skills")
+        return console.export_text()
+
+    def test_triage_detached_shows_short_sha(self, helper, repo):
+        _git(repo, "checkout", "-q", "--detach")
+        sha = _git(repo, "rev-parse", "--short", "HEAD")
+        line = helper._dirty_triage_lines("main")[0]
+        assert f"(detached HEAD at {sha})" in line
+        assert "[/cyan] HEAD " not in line
+
+    def test_triage_on_branch_shows_branch(self, helper, repo):
+        assert "[/cyan] main  (" in helper._dirty_triage_lines("main")[0]
+
+    def test_skill_header_detached_shows_short_sha(self, helper, repo, monkeypatch):
+        _git(repo, "checkout", "-q", "--detach")
+        sha = _git(repo, "rev-parse", "--short", "HEAD")
+        text = self._header(helper, monkeypatch, repo)
+        assert f"(detached HEAD at {sha})" in text
+        assert f"Detached HEAD at {sha}, not main" in text
+        assert "branch: HEAD" not in text
+        assert "On branch 'HEAD'" not in text
+
+    def test_skill_header_on_main_has_no_warning(self, helper, repo, monkeypatch):
+        text = self._header(helper, monkeypatch, repo)
+        assert "(branch: main)" in text
+        assert "[!]" not in text
+
+    def test_skill_header_on_feature_branch_warns(self, helper, repo, monkeypatch):
+        _git(repo, "switch", "-q", "-c", "feat/x")
+        text = self._header(helper, monkeypatch, repo)
+        assert "(branch: feat/x)" in text
+        assert "On branch 'feat/x', not main" in text
+
+    def test_skill_header_outside_a_repo(self, helper, tmp_path, monkeypatch, git_env):
+        monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+        text = self._header(helper, monkeypatch, tmp_path / "missing")
+        assert "(branch: ?)" in text
+        assert "[!]" not in text
+
+
+class TestReadSkillDescription:
+    def test_plain_frontmatter(self, helper, tmp_path):
+        path = tmp_path / "SKILL.md"
+        path.write_text("---\nname: x\ndescription: Does a thing\n---\nbody\n", encoding="utf-8")
+        assert helper._read_skill_description(str(path)) == "Does a thing"
+
+    def test_utf8_bom_is_ignored(self, helper, tmp_path):
+        path = tmp_path / "SKILL.md"
+        path.write_text(
+            "﻿---\nname: x\ndescription: Does a thing\n---\nbody\n", encoding="utf-8"
+        )
+        assert helper._read_skill_description(str(path)) == "Does a thing"
 
 
 # --------------------------------------------------------------------------

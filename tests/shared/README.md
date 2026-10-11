@@ -18,7 +18,8 @@ one implementation in `scripts/unix/`, run directly or through the
 | `auto-sync.bats` | bats-core | The login/daily auto-sync ([#225](https://github.com/J-MaFf/gitconfig/issues/225)): `scripts/shared/update-gitconfig.sh` defaults to its own repo, fails loudly on a missing path, keeps a feature branch checked out while fast-forwarding main, and runs git with `GIT_TERMINAL_PROMPT=0`; the Linux installer puts the shared updater and repo path in the cron entry, tags it `# gitconfig-autoupdate`, replaces rather than duplicates it (migrating an untagged line from an older install), verifies it and finishes without `crontab`, and Linux cleanup removes only that entry, old untagged ones included (and also finishes without `crontab`); `--no-scheduler`/`--no-cron`/`--no-launchd` all skip the job; `scripts/unix/install.sh` picks cron or launchd from the host; the mac installer writes a launchd plist with a Homebrew `PATH`; mac cleanup survives its counters under `set -e`. Uses stub `crontab`/`launchctl` and a fake `HOME` |
 | `test_gitconfig_helper.py` | [pytest](https://docs.pytest.org/) | `gitconfig_helper.py` — `_slugify`, `LABEL_PREFIX` selection, `_have`, `_default_branch`, `get_git_aliases` |
 | `update-gitconfig.bats` | bats-core | `scripts/shared/update-gitconfig.sh` — branch prune via `git for-each-ref` (a `: gone]` commit subject can't trigger a delete), `-d` before `-D`, tip SHAs logged, worktree skip, exit codes ([#228](https://github.com/J-MaFf/gitconfig/issues/228)) |
-| `test_gitconfig_helper.py` | [pytest](https://docs.pytest.org/) | `gitconfig_helper.py` — `_slugify`, `LABEL_PREFIX` selection, `_have`, `_default_branch`, `get_git_aliases`, branch cleanup, `git main`, `git start` (branch naming by issue number, `--no-track`, tracking an existing remote branch, base fallback), CLI exit codes, per-command argument allow-lists (`-h` and unknown flags run nothing, [#250](https://github.com/J-MaFf/gitconfig/issues/250)); the template's `git pushf` alias refuses to overwrite a teammate's commit after a background fetch ([#251](https://github.com/J-MaFf/gitconfig/issues/251)) |
+| `test_gitconfig_helper.py` | [pytest](https://docs.pytest.org/) | `gitconfig_helper.py` — `_slugify`, `LABEL_PREFIX` selection, `_have`, `_default_branch`, `get_git_aliases`, branch cleanup, `git main`, `git start` (branch naming by issue number, `--no-track`, tracking an existing remote branch, base fallback), CLI exit codes, per-command argument allow-lists (`-h` and unknown flags run nothing, [#250](https://github.com/J-MaFf/gitconfig/issues/250)); the template's `git pushf` alias refuses to overwrite a teammate's commit after a background fetch ([#251](https://github.com/J-MaFf/gitconfig/issues/251)); the alias browser's ctrl+left/right category keys work with the search box focused (driven headlessly with Textual's `App.run_test()`), the clipboard copy doesn't wait on a forking tool (a fake one on an isolated `PATH`), a detached HEAD is labelled by its short SHA, and a `SKILL.md` with a UTF-8 BOM keeps its description ([#261](https://github.com/J-MaFf/gitconfig/issues/261)) |
+| `test_deps.py` | pytest | `scripts/shared/deps.py` — the Python < 3.11 regex fallback (forced by blocking `tomllib`) reads extras, environment markers, comments and single-line arrays, and matches `tomllib` on the same manifests ([#261](https://github.com/J-MaFf/gitconfig/issues/261)) |
 
 ## Running
 
@@ -42,8 +43,8 @@ The suite redirects `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` and works inside a
 ### Python (pytest)
 
 ```sh
-python -m pip install pytest rich   # rich is gitconfig_helper.py's own dependency
-pytest tests/shared/test_gitconfig_helper.py
+python -m pip install pytest rich textual   # the helper's deps; without textual the alias-browser tests skip
+pytest tests/shared/            # test_gitconfig_helper.py and test_deps.py
 ```
 
 The pytest suite imports `gitconfig_helper.py` by path. Most tests monkeypatch

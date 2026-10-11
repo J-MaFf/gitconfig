@@ -59,6 +59,7 @@ Four follow-up fixes from the #198 adversarial review landed: [#203](https://git
 | [#254](https://github.com/J-MaFf/gitconfig/issues/254) | PowerShell Ctrl-G widget never inserted anything: PSReadLine redirects a key handler's native stdout, so `git alias --out` saw no TTY and silently did nothing; now launched via `Start-Process -NoNewWindow`, and `--out` fails loudly without a TTY | [#269](https://github.com/J-MaFf/gitconfig/pull/269) |
 | [#268](https://github.com/J-MaFf/gitconfig/issues/268) | More than 5 backups of one file in the same second reused a pruned `<stamp>` name, which sorted as oldest and was pruned at once (Unix + Windows); the next name is now one past the highest taken | [#270](https://github.com/J-MaFf/gitconfig/pull/270) |
 | [#260](https://github.com/J-MaFf/gitconfig/issues/260) | `git skill diff` missed staged/untracked drift; a skill-audit failure read as drift (or as "nothing to diff"); `git issues --all --local` printed "No open issues" and exited 0 when every repo failed; `git issues --all --web` dropped `--mine`/`--label` | [#271](https://github.com/J-MaFf/gitconfig/pull/271) |
+| [#261](https://github.com/J-MaFf/gitconfig/issues/261) | Helper minor bugs: alias-browser ctrl+left/right swallowed by the search box, clipboard copy could hang on a forking `xclip`/`wl-copy`, detached HEAD labelled `HEAD`, a UTF-8 BOM hid a `SKILL.md` description, and `deps.py`'s Python < 3.11 fallback broke on extras/markers | [#272](https://github.com/J-MaFf/gitconfig/pull/272) |
 
 ### Open Issues
 
