@@ -111,7 +111,7 @@ Run the main setup script:
 
 ```bash
 ./initialize-local-config.sh        # Interactive mode
-./initialize-local-config.sh --force # Overwrite without prompting
+./initialize-local-config.sh --force # Regenerate without prompting (keeps settings you added)
 ./initialize-local-config.sh --help  # Show help
 ```
 

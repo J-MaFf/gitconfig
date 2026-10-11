@@ -220,3 +220,47 @@ exit 0
     [ "$status" -eq 0 ]
     run ! grep -qF "$SANDBOX/homebrew" "$SANDBOX/.gitconfig.local"
 }
+
+@test "--force keeps the settings the user added to ~/.gitconfig.local (#257)" {
+    printf '[safe]\n\tdirectory = /original/local\n[alias]\n\tco = checkout\n[include]\n\tpath = ~/work.inc\n[gpg "ssh"]\n\tprogram = /gone/op-ssh-sign\n' > "$SANDBOX/.gitconfig.local"
+
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    local f="$SANDBOX/.gitconfig.local"
+    git config --file "$f" --get-all safe.directory | grep -qxF /original/local
+    git config --file "$f" --get-all safe.directory | grep -qxF "$SANDBOX/Documents/Scripts/gitconfig"
+    [ "$(git config --file "$f" alias.co)" = "checkout" ]
+    [ "$(git config --file "$f" include.path)" = "~/work.inc" ]
+    # A generated setting is rebuilt, not carried over: the old signer is gone.
+    run ! git config --file "$f" gpg.ssh.program
+    [ "$(git config --file "$f" core.excludesfile)" = "$SANDBOX/.gitignore_global" ]
+
+    # A second run converges: same file, no new backup.
+    cp "$f" "$SANDBOX/first"
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    cmp -s "$SANDBOX/first" "$f"
+    [ "$(ls "$f".bak.* | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "a ~/.gitconfig.local symlink is replaced, never written through (#257)" {
+    mkdir -p "$SANDBOX/dotfiles"
+    printf '[alias]\n\tco = checkout\n' > "$SANDBOX/dotfiles/gitconfig.local"
+    ln -s "$SANDBOX/dotfiles/gitconfig.local" "$SANDBOX/.gitconfig.local"
+
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [ ! -L "$SANDBOX/.gitconfig.local" ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" alias.co)" = "checkout" ]
+    [ "$(cat "$SANDBOX/dotfiles/gitconfig.local")" = "$(printf '[alias]\n\tco = checkout')" ]
+}
+
+@test "an unreadable ~/.gitconfig.local is backed up and regenerated, with a warning (#257)" {
+    printf '[user\n\tname = broken\n' > "$SANDBOX/.gitconfig.local"
+
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Could not read the existing .gitconfig.local"* ]]
+    git config --file "$SANDBOX/.gitconfig.local" --list >/dev/null
+    grep -qF "name = broken" "$SANDBOX"/.gitconfig.local.bak.*
+}

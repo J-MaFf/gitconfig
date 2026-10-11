@@ -51,7 +51,7 @@ generate_gitconfig() {
         echo "[INFO] Replaced the old ~/.gitconfig symlink into the repo with a generated file"
     fi
 
-    if [ -f "$output_path" ] && [ "$force" = "false" ]; then
+    if { [ -f "$output_path" ] || [ -L "$output_path" ]; } && [ "$force" = "false" ]; then
         echo ".gitconfig already exists at: $output_path"
         read -p "Overwrite? (y/n) " -n 1 -r
         echo
@@ -63,6 +63,13 @@ generate_gitconfig() {
 
     if [ -f "$output_path" ]; then
         warn_dropped_gitconfig_keys "$output_path" "$generated_content"
+    fi
+    # Any symlink still here points outside the repo (a dotfiles checkout,
+    # say). Writing through it would rewrite that file, daily via the
+    # auto-sync (#257), so back it up and replace the link instead.
+    if [ -L "$output_path" ]; then
+        detach_symlink "$output_path"
+    elif [ -f "$output_path" ]; then
         backup_copy "$output_path"
     fi
 
@@ -276,6 +283,113 @@ backup_file() {
     return 0
 }
 
+# Replace a symlink at TARGET with nothing, keeping a backup, so the caller
+# writes a regular file there instead of writing through the link into the
+# file it points at (a dotfiles repo, say; #257). The content goes to a
+# timestamped backup and the link itself is pinned (see _pin_original); a
+# dangling link is moved to the backup as it is. The file the link points at
+# is never modified. Does nothing if TARGET is not a symlink.
+# Usage: detach_symlink TARGET
+detach_symlink() {
+    local target="$1" dest
+    [ -L "$target" ] || return 0
+    dest="$(readlink "$target")"
+    if [ -f "$target" ]; then
+        backup_copy "$target"
+        rm -f "$target"
+    else
+        backup_file "$target" >/dev/null
+    fi
+    echo "[INFO] $(basename "$target") was a symlink to $dest; replacing it with a regular file (the file it points to is not changed)"
+    return 0
+}
+
+# Keys initialize-local-config.sh generates in ~/.gitconfig.local, as
+# `git config --list` names them. A regeneration rebuilds these from what it
+# detects on the machine, so their old values are not carried over: an old
+# gpg.ssh.program or signing key path can point git at a signer that is gone
+# (#171), and an old credential helper is the stale one #179 removed.
+# safe.directory is generated too, but it is also where users trust their own
+# repos, so values the new file lacks are kept.
+LOCAL_CONFIG_MANAGED_KEYS="core.excludesfile
+user.signingkey
+gpg.format
+gpg.ssh.program
+gpg.ssh.allowedsignersfile
+commit.gpgsign
+credential.helper
+credential.https://github.com.helper
+credential.https://gist.github.com.helper"
+
+# Comment written above the settings carried over into a regenerated
+# ~/.gitconfig.local (used by initialize-local-config.sh).
+# shellcheck disable=SC2034
+LOCAL_CONFIG_KEPT_HEADER="# --- Your settings ----------------------------------------------------------
+# Kept from the previous file when it was regenerated: everything except the
+# signing, credential-helper and excludesfile settings generated above is
+# kept. Add your own settings anywhere in this file."
+
+# Collect the settings in EXISTING (the current ~/.gitconfig.local) that a
+# regenerated file with NEW_CONTENT must keep (#257): every entry whose key is
+# not in LOCAL_CONFIG_MANAGED_KEYS, plus safe.directory values NEW_CONTENT
+# lacks. They are written to OUT as git config text (OUT is left empty when
+# there is nothing to keep). Prints the names of the kept settings, and warns,
+# by name only, about generated settings whose old value the regeneration
+# replaces or drops. Returns 1 if EXISTING can't be parsed.
+# Usage: keep_local_settings EXISTING NEW_CONTENT OUT
+keep_local_settings() {
+    local existing="$1" new_content="$2" out="$3"
+    local tmp entry key value e n managed kept="" reset="" nl=$'\n'
+    local -a new_entries=()
+    : > "$out"
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/gitconfig-local.XXXXXX")" || return 1
+    if ! git config --file "$existing" --null --list > "$tmp/old.list" 2>/dev/null; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    printf '%s\n' "$new_content" > "$tmp/new.cfg"
+    git config --file "$tmp/new.cfg" --null --list > "$tmp/new.list" 2>/dev/null || : > "$tmp/new.list"
+    while IFS= read -r -d '' e; do new_entries+=("$e"); done < "$tmp/new.list"
+
+    # --null prints each entry as "key\nvalue\0", or "key\0" for a key with
+    # no value (which git reads as true).
+    while IFS= read -r -d '' entry; do
+        # The expansion is unquoted (an assignment doesn't word-split) so the
+        # inner quotes work on macOS /bin/bash 3.2 too.
+        key=${entry%%"$nl"*}
+        if [ "$key" = "$entry" ]; then value=true; else value=${entry#*"$nl"}; fi
+        # Already in the new file, exactly: nothing to keep.
+        for n in ${new_entries[@]+"${new_entries[@]}"}; do
+            if [ "$n" = "$entry" ]; then continue 2; fi
+        done
+        managed=false
+        while IFS= read -r n; do
+            if [ "$n" = "$key" ]; then managed=true; break; fi
+        done <<< "$LOCAL_CONFIG_MANAGED_KEYS"
+        if [ "$managed" = true ]; then
+            reset="$reset$key$nl"
+            continue
+        fi
+        if git config --file "$out" --add "$key" "$value" 2>/dev/null; then
+            kept="$kept$key$nl"
+        else
+            echo "[WARN] Could not keep the setting $key; it is only in the backup"
+        fi
+    done < "$tmp/old.list"
+    rm -rf "$tmp"
+
+    if [ -n "$kept" ]; then
+        echo "[INFO] Keeping your own settings from the existing .gitconfig.local:"
+        printf '%s' "$kept" | LC_ALL=C sort -u | sed 's/^/         /'
+    fi
+    if [ -n "$reset" ]; then
+        echo "[WARN] These generated settings are rebuilt from what this machine has, so"
+        echo "       their old values are replaced or dropped (the backup keeps them):"
+        printf '%s' "$reset" | LC_ALL=C sort -u | sed 's/^/         /'
+    fi
+    return 0
+}
+
 # Create a symlink from SOURCE to LINK. An existing LINK that is already the
 # right symlink is left alone; a symlink into REPO_ROOT (default: the directory
 # holding SOURCE) is replaced without a backup; anything else is moved to a
@@ -429,6 +543,12 @@ enable_git_alias_widget() {
 }
 
 # Remove the git-alias browser keybinding block from the user's shell rc files.
+# Only complete blocks are removed: each begin marker line must be followed by
+# an end marker line, both exactly as enable_git_alias_widget wrote them. If
+# not (say the end marker was edited), everything after the begin marker would
+# go, so the file is left alone with a warning (#257). The rc file is backed
+# up before it is rewritten. The rewrite goes through a symlinked rc on
+# purpose: that is where the block was appended.
 # Args: home_dir
 disable_git_alias_widget() {
     local home_dir="$1"
@@ -436,14 +556,30 @@ disable_git_alias_widget() {
     for rc in "$home_dir/.zshrc" "$home_dir/.bashrc"; do
         [ -f "$rc" ] || continue
         grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$rc" 2>/dev/null || continue
-        tmp="$(mktemp)" || continue
-        awk -v b="$GIT_ALIAS_WIDGET_BEGIN" -v e="$GIT_ALIAS_WIDGET_END" '
-            $0 == b { skip = 1 }
+        tmp="$(mktemp "${TMPDIR:-/tmp}/gitconfig-rc.XXXXXX")" || continue
+        # Exit 2 when a begin marker has no end marker before EOF or before
+        # the next begin marker, 3 when there is no exact begin marker line.
+        if awk -v b="$GIT_ALIAS_WIDGET_BEGIN" -v e="$GIT_ALIAS_WIDGET_END" '
+            skip && $0 == b { bad = 1; exit }
+            $0 == b { skip = 1; found = 1; next }
             skip && $0 == e { skip = 0; next }
             !skip { print }
-        ' "$rc" > "$tmp" && cat "$tmp" > "$rc"
+            END {
+                if (bad || skip) exit 2
+                if (!found) exit 3
+            }
+        ' "$rc" > "$tmp"; then
+            if backup_copy "$rc" && cat "$tmp" > "$rc"; then
+                echo "[OK] Disabled git-alias keybinding in $rc"
+            else
+                echo "[WARN] Could not rewrite $rc; remove the git-alias keybinding block by hand"
+            fi
+        else
+            echo "[WARN] $rc has a git-alias keybinding block whose begin or end marker"
+            echo "       line is missing or was changed, so it was left unchanged."
+            echo "       Remove the block by hand (it ends at \"$GIT_ALIAS_WIDGET_END\")."
+        fi
         rm -f "$tmp"
-        echo "[OK] Disabled git-alias keybinding in $rc"
     done
 }
 
