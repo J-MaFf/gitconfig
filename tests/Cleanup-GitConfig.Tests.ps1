@@ -17,87 +17,219 @@ BeforeDiscovery {
 }
 
 BeforeAll {
-    # Import the script
     $repoRoot = Split-Path -Parent $PSScriptRoot
-    $scriptPath = Join-Path $repoRoot "scripts\windows version\Cleanup-GitConfig.ps1"
+    $scriptPath = Join-Path (Join-Path (Join-Path $repoRoot "scripts") "windows version") "Cleanup-GitConfig.ps1"
+    $script:pwshPath = (Get-Process -Id $PID).Path
+    $script:managedFiles = @(".gitconfig", ".gitignore_global", "gitconfig_helper.py")
+    $script:beginMarker = "# >>> gitconfig git-alias browser (Ctrl-G) >>>"
+    $script:endMarker = "# <<< gitconfig git-alias browser <<<"
 
-    # Test variables
-    $testHome = $env:USERPROFILE
-    $testRepo = $repoRoot
-}
-
-Describe "Cleanup-GitConfig.ps1" {
-
-    Context "Script Parameters" {
-        It "Should accept -Force parameter" {
-            $scriptContent = Get-Content $scriptPath -Raw
-            $scriptContent | Should -Match '\[switch\]\s*\$Force'
+    # Run the real Cleanup-GitConfig.ps1 in a child PowerShell of the same
+    # edition: the elevation check stubbed to "admin", Read-Host logging its
+    # prompt and answering -Answer, USERPROFILE/HOME, the git config and
+    # $PROFILE sandboxed, the Documents folder holding both editions' profiles
+    # passed as -InvokingDocuments (otherwise the script would use the real
+    # MyDocuments), and the ScheduledTasks cmdlets replaced by functions that
+    # log their calls. The task "exists" while a marker file does.
+    # -EncodedCommand, because Windows PowerShell 5.1 strips double quotes
+    # inside a native command's argument.
+    function New-CleanupSandbox {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $sandboxHome = Join-Path $root "home"
+        New-Item -ItemType Directory -Path $sandboxHome -Force | Out-Null
+        $sb = [pscustomobject]@{
+            Root      = $root
+            Home      = $sandboxHome
+            Profile   = Join-Path (Join-Path $root "profile") "profile.ps1"
+            Documents = Join-Path $root "Documents"
+            PromptLog = Join-Path $root "prompts.txt"
+            GitConfig = Join-Path $root "global.gitconfig"
+            TaskFile  = Join-Path $root "task-exists"
+            TaskCalls = Join-Path $root "task-calls.txt"
         }
+        Set-Content -LiteralPath $sb.GitConfig -Value "[user]`n`tname = Sandbox"
+        $sb
+    }
 
-        It "Should accept -Help parameter" {
-            $scriptContent = Get-Content $scriptPath -Raw
-            $scriptContent | Should -Match '\[switch\]\s*\$Help'
+    function Invoke-Cleanup {
+        param($Sandbox, [string[]]$ScriptArgs = @('-Force'), [string]$Answer = 'n', [switch]$TaskExists)
+        $sb = $Sandbox
+        $ScriptArgs = @($ScriptArgs) + @('-InvokingDocuments', "`"$($sb.Documents)`"")
+        if ($TaskExists) { Set-Content -LiteralPath $sb.TaskFile -Value "" }
+        $cmd = @"
+function Test-AsAdministrator { `$true }
+Set-Alias -Name Test-IsAdministrator -Value Test-AsAdministrator
+function Read-Host { param([string]`$Prompt) Add-Content -LiteralPath '$($sb.PromptLog)' -Value `$Prompt; '$Answer' }
+function Get-ScheduledTask { param([string]`$TaskName, `$ErrorAction) Add-Content -LiteralPath '$($sb.TaskCalls)' -Value "Get `$TaskName"; if (Test-Path '$($sb.TaskFile)') { [pscustomobject]@{ TaskName = `$TaskName } } }
+function Unregister-ScheduledTask { param([string]`$TaskName, [switch]`$Confirm) Add-Content -LiteralPath '$($sb.TaskCalls)' -Value "Unregister `$TaskName"; Remove-Item -LiteralPath '$($sb.TaskFile)' }
+`$env:USERPROFILE = '$($sb.Home)'; `$env:HOME = '$($sb.Home)'
+`$env:GIT_CONFIG_GLOBAL = '$($sb.GitConfig)'; `$env:GIT_CONFIG_SYSTEM = '$($sb.GitConfig).none'
+`$global:PROFILE = [pscustomobject]@{ CurrentUserAllHosts = '$($sb.Profile)' }
+& '$scriptPath' $($ScriptArgs -join ' ')
+exit `$LASTEXITCODE
+"@
+        $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($cmd))
+        $out = & {
+            $ErrorActionPreference = 'Continue'
+            & $script:pwshPath -NoProfile -NonInteractive -EncodedCommand $encoded *>&1 | Out-String
         }
-
-        It "Should accept -KeepLocal parameter" {
-            $scriptContent = Get-Content $scriptPath -Raw
-            $scriptContent | Should -Match '\[switch\]\s*\$KeepLocal'
+        $code = $LASTEXITCODE
+        [pscustomobject]@{
+            ExitCode  = $code
+            Output    = $out
+            Prompts   = if (Test-Path $sb.PromptLog) { @(Get-Content -LiteralPath $sb.PromptLog) } else { @() }
+            TaskCalls = if (Test-Path $sb.TaskCalls) { @(Get-Content -LiteralPath $sb.TaskCalls) } else { @() }
         }
     }
 
-    Context "Help text" {
+    # Put each named file in the sandbox home with content naming the file.
+    function Add-HomeFile($Sandbox, [string[]]$Name) {
+        foreach ($n in $Name) { Set-Content -LiteralPath (Join-Path $Sandbox.Home $n) -Value "original $n" }
+    }
+
+    # The Ctrl-G profile scripts of both editions under the sandbox Documents.
+    function Get-EditionProfile($Sandbox) {
+        foreach ($edition in 'WindowsPowerShell', 'PowerShell') { Join-Path (Join-Path $Sandbox.Documents $edition) "profile.ps1" }
+    }
+
+    # The timestamped backups of Name left in the sandbox home.
+    function Get-Backup($Sandbox, [string]$Name) {
+        @(Get-ChildItem -LiteralPath $Sandbox.Home -Force -Filter "$Name.bak.*")
+    }
+}
+
+Describe "Cleanup-GitConfig.ps1 (#233)" -Tag 'Unit' {
+    # Behavioural: every test runs the real script in a child PowerShell
+    # against a sandboxed home, git config, profile and scheduled task.
+
+    Context "-Help" {
         BeforeAll {
-            # -Help prints via Write-Host (information stream 6) and exits before
-            # the elevation check, so it is safe to run on any platform.
+            # -Help prints via Write-Host and exits before the elevation check.
             $script:helpText = & $scriptPath -Help 6>&1 | Out-String
         }
 
-        It "Should name the scheduled task it actually removes" {
-            $taskName = [regex]::Match((Get-Content $scriptPath -Raw), '\$taskName\s*=\s*"([^"]+)"').Groups[1].Value
-            $taskName | Should -Not -BeNullOrEmpty
+        It "names the scheduled task the script actually unregisters" {
+            $sb = New-CleanupSandbox
+            $r = Invoke-Cleanup -Sandbox $sb -TaskExists
+            $unregistered = @($r.TaskCalls | Where-Object { $_ -like 'Unregister *' })
+            $unregistered.Count | Should -Be 1
+            $taskName = $unregistered[0].Substring('Unregister '.Length)
             $script:helpText | Should -Match ([regex]::Escape("`"$taskName`""))
         }
 
-        It "Should not list a signing-config step the script does not perform" {
-            # The script never touches user.signingkey / gpg.*; the help used to
-            # claim a 'Clears git SSH signing config' step.
+        It "does not list a signing-config step, and cleanup leaves signing config alone" {
+            # The help used to claim a 'Clears git SSH signing config' step.
             $script:helpText | Should -Not -Match '(?i)signing'
-            Get-Content $scriptPath -Raw | Should -Not -Match '(?i)--unset[^\r\n]*(signingkey|gpg\.)'
+            $sb = New-CleanupSandbox
+            Add-Content -LiteralPath $sb.GitConfig -Value "`tsigningkey = ~/.ssh/key.pub`n[gpg]`n`tformat = ssh"
+            $before = Get-Content -LiteralPath $sb.GitConfig -Raw
+            Invoke-Cleanup -Sandbox $sb | Out-Null
+            Get-Content -LiteralPath $sb.GitConfig -Raw | Should -Be $before
         }
     }
 
-    Context "Preserve machine-specific config" {
-        It "Should skip removing .gitconfig.local when -KeepLocal is set" {
-            $scriptContent = Get-Content $scriptPath -Raw
-            # Guard branch present: -KeepLocal short-circuits the removal step.
-            $scriptContent | Should -Match 'if \(\$KeepLocal\)'
-            $scriptContent | Should -Match 'Preserving \.gitconfig\.local'
+    Context "-Force on a configured home" {
+        BeforeAll {
+            $script:sb = New-CleanupSandbox
+            Add-HomeFile $script:sb ($script:managedFiles + ".gitconfig.local")
+            foreach ($p in Get-EditionProfile $script:sb) {
+                New-Item -ItemType Directory -Path (Split-Path -Parent $p) -Force | Out-Null
+                Set-Content -LiteralPath $p -Value "# mine`n$script:beginMarker`n. 'widget.ps1'`n$script:endMarker`nSet-Alias g git"
+            }
+            $script:r = Invoke-Cleanup -Sandbox $script:sb -TaskExists
+        }
+
+        It "does not prompt, reports success and exits 0" {
+            $script:r.Prompts | Should -BeNullOrEmpty
+            $script:r.Output | Should -Match 'Cleanup SUCCESSFUL'
+            $script:r.ExitCode | Should -Be 0
+        }
+
+        It "moves <_> to one timestamped backup holding the original content" -ForEach @(".gitconfig", ".gitignore_global", "gitconfig_helper.py") {
+            Join-Path $script:sb.Home $_ | Should -Not -Exist
+            $backups = Get-Backup $script:sb $_
+            $backups.Count | Should -Be 1
+            $backups[0].Name | Should -Match ('^' + [regex]::Escape($_) + '\.bak\.\d{8}-\d{6}$')
+            (Get-Content -LiteralPath $backups[0].FullName -Raw).Trim() | Should -Be "original $_"
+            $script:r.Output | Should -Match ([regex]::Escape("[OK] Backed up $_ to $($backups[0].Name)"))
+        }
+
+        It "leaves no old-style Existing.* backups" {
+            Get-ChildItem -LiteralPath $script:sb.Home -Force -Filter "Existing.*" | Should -BeNullOrEmpty
+        }
+
+        It "moves .gitconfig.local to a backup" {
+            Join-Path $script:sb.Home ".gitconfig.local" | Should -Not -Exist
+            (Get-Backup $script:sb ".gitconfig.local").Count | Should -Be 1
+            $script:r.Output | Should -Match '\[OK\] \.gitconfig\.local removed'
+            $script:r.Output | Should -Not -Match 'Preserving \.gitconfig\.local'
+        }
+
+        It "removes the scheduled task" {
+            $script:r.TaskCalls | Should -Contain 'Unregister GitConfig Pull at Login'
+            $script:sb.TaskFile | Should -Not -Exist
+        }
+
+        It "removes the Ctrl-G block from both editions' profiles and keeps the user's lines" {
+            foreach ($p in Get-EditionProfile $script:sb) {
+                $content = Get-Content -LiteralPath $p -Raw
+                $content | Should -Not -Match ([regex]::Escape($script:beginMarker))
+                $content | Should -Not -Match 'widget\.ps1'
+                $content | Should -Match '# mine'
+                $content | Should -Match 'Set-Alias g git'
+            }
         }
     }
 
-    Context "Script Functionality" {
-        It "Should be executable PowerShell script" {
-            $scriptPath | Should -Exist
-        }
-
-        It "Should contain cleanup logic" {
-            $scriptContent = Get-Content $scriptPath -Raw
-            $scriptContent | Should -Match 'Backup-UserFile'
-            $scriptContent | Should -Match 'ScheduledTask'
-        }
-
-        It "Should move files to timestamped backups, skipping links into the repo" {
-            # Behaviour of Backup-UserFile is covered in Backups.Tests.ps1.
-            $scriptContent = Get-Content $scriptPath -Raw
-            $scriptContent | Should -Match 'Backup-UserFile -Path \$Path -Move -RepoRoot \$repoRoot'
-            $scriptContent | Should -Not -Match 'Existing\.'
+    Context "-KeepLocal" {
+        It "preserves .gitconfig.local and still removes the managed files" {
+            $sb = New-CleanupSandbox
+            Add-HomeFile $sb ($script:managedFiles + ".gitconfig.local")
+            $local = Join-Path $sb.Home ".gitconfig.local"
+            $r = Invoke-Cleanup -Sandbox $sb -ScriptArgs @('-Force', '-KeepLocal')
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match '\[SKIP\] Preserving \.gitconfig\.local \(-KeepLocal\)'
+            $r.Output | Should -Match '\[OK\] \.gitconfig\.local preserved \(-KeepLocal\)'
+            (Get-Content -LiteralPath $local -Raw).Trim() | Should -Be "original .gitconfig.local"
+            Get-Backup $sb ".gitconfig.local" | Should -BeNullOrEmpty
+            foreach ($f in $script:managedFiles) { Join-Path $sb.Home $f | Should -Not -Exist }
         }
     }
 
-    Context "Verification" {
-        It "Should have self-verification after cleanup" {
-            $scriptContent = Get-Content $scriptPath -Raw
-            $scriptContent | Should -Match 'Cleanup SUCCESSFUL'
+    Context "symlinks into the repo" {
+        It "removes a link into the repo without a backup and leaves the repo file" -Skip:(-not $canSymlink) {
+            $sb = New-CleanupSandbox
+            $target = Join-Path $repoRoot ".gitignore_global"
+            $before = Get-Content -LiteralPath $target -Raw
+            New-Item -ItemType SymbolicLink -Path (Join-Path $sb.Home ".gitignore_global") -Target $target | Out-Null
+            $r = Invoke-Cleanup -Sandbox $sb
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match ([regex]::Escape("[OK] Removed .gitignore_global (symlink into the repo; no backup needed)"))
+            Get-Item -LiteralPath (Join-Path $sb.Home ".gitignore_global") -Force -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+            Get-Backup $sb ".gitignore_global" | Should -BeNullOrEmpty
+            Get-Content -LiteralPath $target -Raw | Should -Be $before
+        }
+    }
+
+    Context "without -Force" {
+        It "asks first, and declining leaves everything in place and exits 0" {
+            $sb = New-CleanupSandbox
+            Add-HomeFile $sb $script:managedFiles
+            $r = Invoke-Cleanup -Sandbox $sb -ScriptArgs @() -Answer 'n' -TaskExists
+            $r.Prompts | Should -Contain 'Continue? (y/n)'
+            $r.Output | Should -Match 'Cancelled\.'
+            $r.ExitCode | Should -Be 0
+            foreach ($f in $script:managedFiles) { Join-Path $sb.Home $f | Should -Exist }
+            $r.TaskCalls | Should -BeNullOrEmpty
+            $sb.TaskFile | Should -Exist
+        }
+
+        It "goes ahead when the answer is y" {
+            $sb = New-CleanupSandbox
+            Add-HomeFile $sb $script:managedFiles
+            $r = Invoke-Cleanup -Sandbox $sb -ScriptArgs @() -Answer 'y'
+            $r.Output | Should -Match 'Cleanup SUCCESSFUL'
+            foreach ($f in $script:managedFiles) { Join-Path $sb.Home $f | Should -Not -Exist }
         }
     }
 }
