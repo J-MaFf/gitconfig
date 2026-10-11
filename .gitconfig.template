@@ -74,8 +74,11 @@
 	# --- Branch & Sync ---
 	# Create and switch to a new branch: git nb <name>
 	nb = switch -c
-	# Force-push the current branch safely (refuses to clobber others' work)
-	pushf = push --force-with-lease
+	# Force-push the current branch, refusing if the remote has commits you
+	# haven't integrated. --force-if-includes (git 2.30+) keeps the lease armed
+	# after a background fetch (IDE autofetch, git main, the auto-updater), which
+	# a bare --force-with-lease would otherwise silently trust.
+	pushf = push --force-with-lease --force-if-includes
 	# Update the current branch with rebase, stashing/restoring local changes
 	sync = pull --rebase --autostash
 	# Start work on a GitHub issue: create a conventionally named branch from its

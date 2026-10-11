@@ -456,7 +456,7 @@ ALIAS_METADATA = {
     "cleanup": ("Branch & Sync", "Delete branches with deleted remotes (merged). Use --force for local-only too"),
     "main": ("Branch & Sync", "Switch to the default branch (fetch, fast-forward, cleanup). Use --all/-a for every repo in the Scripts root"),
     "nb": ("Branch & Sync", "Create and switch to a new branch (git nb <name>)"),
-    "pushf": ("Branch & Sync", "Force-push the current branch safely (--force-with-lease)"),
+    "pushf": ("Branch & Sync", "Force-push safely: refuses if the remote has commits you haven't integrated (--force-with-lease --force-if-includes)"),
     "sync": ("Branch & Sync", "Update the current branch with rebase and autostash"),
     "start": ("Branch & Sync", "Start a GitHub issue: make a conventionally named branch from its title"),
     # GitHub

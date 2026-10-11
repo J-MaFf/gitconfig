@@ -153,7 +153,7 @@ git wip            # Park all current work as a WIP commit (skips hooks)
 
 ```bash
 git nb <name>      # Create and switch to a new branch (switch -c)
-git pushf          # Force-push the current branch safely (--force-with-lease)
+git pushf          # Force-push safely (--force-with-lease --force-if-includes; git 2.30+)
 git sync           # Update the current branch with rebase + autostash
 git start <issue#> # Make a conventionally named branch from a GitHub issue's title
 git branches       # Track all remote branches
