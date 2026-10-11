@@ -10,6 +10,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_PATH="${1:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 LOG_FILE="$REPO_PATH/docs/update-gitconfig.log"
 
+# Run by hand (`git selfupdate`, stdout is a terminal) rather than by
+# cron/launchd: progress also goes to the terminal, not just to the log, and a
+# failed pull makes the run fail. Headless runs keep a failed pull a warning,
+# since being offline at login is routine (#258).
+if [ -t 1 ]; then INTERACTIVE=true; else INTERACTIVE=false; fi
+# The main block below sends stdout and stderr to the log; fd 3 keeps the
+# terminal's stderr so log_message can still reach it.
+exec 3>&2
+
 # Headless (cron/launchd/login): a git credential prompt would block forever
 # with nobody to answer it. Fail the network step instead; it is best-effort.
 export GIT_TERMINAL_PROMPT=0
@@ -23,6 +32,17 @@ log_message() {
     # headless under launchd/cron with no terminal attached, so the block
     # redirect is the single source of truth for log output.
     echo "[$timestamp] $1"
+    if [ "$INTERACTIVE" = true ]; then echo "$1" >&3; fi
+}
+
+# A pull that failed: a warning when headless, a failure when run by hand.
+pull_failed() {
+    if [ "$INTERACTIVE" = true ]; then
+        log_message "ERROR: $1"
+        EXIT_CODE=1
+    else
+        log_message "WARN: $1"
+    fi
 }
 
 # Check the path BEFORE creating anything: a wrong path must not leave a stray
@@ -58,7 +78,7 @@ mkdir -p "$(dirname "$LOG_FILE")"
         if git fetch origin main:main; then
             log_message "SUCCESS: main up to date (still on '$CURRENT_BRANCH')"
         else
-            log_message "WARN: could not fast-forward main (offline, diverged, or checked out elsewhere); continuing"
+            pull_failed "could not fast-forward main (offline, diverged, or checked out elsewhere); continuing"
         fi
     elif [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
         log_message "WARN: working tree not clean; skipping pull (will still converge ~/.gitconfig)"
@@ -67,7 +87,7 @@ mkdir -p "$(dirname "$LOG_FILE")"
         if git pull --ff-only; then
             log_message "SUCCESS: repo up to date"
         else
-            log_message "WARN: pull failed (offline or diverged); continuing with the local template"
+            pull_failed "pull failed (offline or diverged); continuing with the local template"
         fi
     fi
 
@@ -141,5 +161,9 @@ mkdir -p "$(dirname "$LOG_FILE")"
 
 # The block above is a brace group, not a subshell, so EXIT_CODE set inside it
 # is visible here. Non-zero when ~/.gitconfig could not be converged or a
-# branch could not be deleted; a failed pull or fetch (offline) is only a WARN.
+# branch could not be deleted, and, when run by hand, when the pull failed;
+# headless, a failed pull or fetch (offline) is only a WARN.
+if [ "$INTERACTIVE" = true ] && [ "$EXIT_CODE" -ne 0 ]; then
+    echo "Details (including git's own messages): $LOG_FILE" >&2
+fi
 exit "$EXIT_CODE"

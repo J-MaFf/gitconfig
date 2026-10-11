@@ -58,6 +58,22 @@ branches() {
     git -C "$REPO" for-each-ref --format='%(refname:short)' refs/heads/
 }
 
+# Run the updater the way `git selfupdate` does from a terminal: stdout on a
+# pseudo-terminal, made by script(1) (util-linux on Linux, BSD on macOS). Sets
+# $status to the updater's exit code and $output to what reached the terminal.
+run_on_terminal() {
+    local st="$TESTDIR/tty-status" cmd
+    cmd="bash '$UPDATER' '$REPO'; echo \$? > '$st'"
+    if script -qec true /dev/null > /dev/null 2>&1; then
+        run script -qec "$cmd" /dev/null < /dev/null
+    elif script -q /dev/null true > /dev/null 2>&1; then
+        run script -q /dev/null bash -c "$cmd" < /dev/null
+    else
+        skip "script(1) is not available to provide a terminal"
+    fi
+    status="$(cat "$st")"
+}
+
 @test "keeps a live branch whose commit subject contains ': gone]'" {
     pushed_branch trap "docs: gone] marks a deleted upstream"
 
@@ -141,4 +157,21 @@ branches() {
     run bash "$UPDATER" "$REPO"
     [ "$status" -eq 0 ]
     grep -qF "WARN: git fetch --prune failed" "$LOG"
+}
+
+@test "run from a terminal, a failed pull is shown there and fails the run (#258)" {
+    git -C "$REPO" remote set-url origin "$TESTDIR/missing.git"
+
+    run_on_terminal
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"ERROR: pull failed"* ]]
+    [[ "$output" == *"$LOG"* ]]
+    grep -qF "ERROR: pull failed" "$LOG"
+}
+
+@test "run from a terminal, a successful sync is shown there (#258)" {
+    run_on_terminal
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"SUCCESS: repo up to date"* ]]
+    [[ "$output" == *"Repository synchronization completed"* ]]
 }

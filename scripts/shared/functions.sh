@@ -2,8 +2,26 @@
 # Shared bash utilities sourced by mac and linux gitconfig scripts.
 # Source this file from a script that has already set REPO_ROOT and HOME_DIR.
 
+# Ask a yes/no question and succeed only on y or Y. With no input to read
+# (stdin at end of file: cron, CI, `< /dev/null`), `read` fails, which under
+# set -e used to end the calling script on the spot with no message (#258).
+# Here no input counts as "no", and the user is told how to skip the prompt.
+# Usage: ask_yes_no QUESTION
+ask_yes_no() {
+    REPLY=
+    if ! read -p "$1 (y/n) " -n 1 -r; then
+        echo
+        echo "[INFO] No answer (no input to read), so: no. Pass --force to skip this prompt."
+        return 1
+    fi
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]]
+}
+
 # Generate ~/.gitconfig from .gitconfig.template
 # Usage: generate_gitconfig REPO_ROOT HOME_DIR FORCE
+# Returns 0 when ~/.gitconfig was written or already up to date, 1 on error,
+# and 2 when the user declined to overwrite it (or there was no answer).
 generate_gitconfig() {
     local repo_root="$1"
     local home_dir="$2"
@@ -53,11 +71,9 @@ generate_gitconfig() {
 
     if { [ -f "$output_path" ] || [ -L "$output_path" ]; } && [ "$force" = "false" ]; then
         echo ".gitconfig already exists at: $output_path"
-        read -p "Overwrite? (y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        if ! ask_yes_no "Overwrite?"; then
             echo "Cancelled."
-            return 0
+            return 2
         fi
     fi
 
@@ -73,7 +89,10 @@ generate_gitconfig() {
         backup_copy "$output_path"
     fi
 
-    echo "$generated_content" > "$output_path"
+    if ! echo "$generated_content" > "$output_path"; then
+        echo "[ERROR] Could not write $output_path"
+        return 1
+    fi
     echo "[OK] Generated .gitconfig"
     echo ""
 
@@ -109,8 +128,16 @@ warn_dropped_gitconfig_keys() {
     command -v git >/dev/null 2>&1 || return 0
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/gitconfig-keys.XXXXXX")" || return 0
     printf '%s\n' "$new_content" > "$tmp/new.cfg"
-    git config --file "$tmp/new.cfg" --list > "$tmp/new.list" 2>/dev/null
-    git config --file "$existing" --list > "$tmp/old.list" 2>/dev/null
+    # `|| :` because a file git can't parse makes --list fail, and under
+    # set -e (initialize-gitconfig.sh) that ended the run silently with exit
+    # 128 (#258). An unparsable old file is still backed up before the rewrite.
+    git config --file "$tmp/new.cfg" --list > "$tmp/new.list" 2>/dev/null || :
+    if ! git config --file "$existing" --list > "$tmp/old.list" 2>/dev/null; then
+        rm -rf "$tmp"
+        echo "[WARN] git can't read the existing ~/.gitconfig (is it valid git config?),"
+        echo "       so the settings it would drop can't be listed. It is kept in the backup below."
+        return 0
+    fi
     dropped="$(awk '
         FILENAME == ARGV[1] { k = $0; sub(/=.*/, "", k); have[$0] = 1; newn[k]++; next }
         { k = $0; sub(/=.*/, "", k); oldn[k]++; line[++n] = $0; key[n] = k }
@@ -418,9 +445,7 @@ create_symlink() {
         rm -f "$link_path"
     elif [ -e "$link_path" ] || [ -L "$link_path" ]; then
         if [ "$force" = "false" ]; then
-            read -p "$file exists. Overwrite? (y/n) " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            if ! ask_yes_no "$file exists. Overwrite?"; then
                 echo "Skipped: $file"
                 return 0
             fi

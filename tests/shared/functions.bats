@@ -521,6 +521,67 @@ backups_of() {
     grep -qF "repo = $repo" "$HOME_DIR/.gitconfig"
 }
 
+@test "generate_gitconfig returns 2 and keeps the file when the prompt has no answer (#258)" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo"
+    printf '[core]\n\trepo = {{REPO_PATH}}\n' > "$repo/.gitconfig.template"
+    printf '[user]\n\tname = Mine\n' > "$HOME_DIR/.gitconfig"
+    run generate_gitconfig "$repo" "$HOME_DIR" false < /dev/null
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"No answer"* ]]
+    [[ "$output" == *"Cancelled."* ]]
+    [[ "$output" != *"[OK] Generated .gitconfig"* ]]
+    [ "$(cat "$HOME_DIR/.gitconfig")" = "$(printf '[user]\n\tname = Mine')" ]
+
+    run generate_gitconfig "$repo" "$HOME_DIR" false <<< "n"
+    [ "$status" -eq 2 ]
+    grep -qF "name = Mine" "$HOME_DIR/.gitconfig"
+}
+
+@test "generate_gitconfig returns 1 when ~/.gitconfig can't be written (#258)" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo" "$HOME_DIR/.gitconfig"
+    printf '[core]\n\trepo = {{REPO_PATH}}\n' > "$repo/.gitconfig.template"
+    run generate_gitconfig "$repo" "$HOME_DIR" true
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[ERROR] Could not write"* ]]
+    [[ "$output" != *"[OK] Generated .gitconfig"* ]]
+}
+
+@test "initialize-gitconfig.sh --force replaces a ~/.gitconfig git can't parse (#258)" {
+    # Under set -e, listing the old file's settings used to fail and end the
+    # script silently with exit 128.
+    printf '[user\n\tname = broken\n' > "$HOME_DIR/.gitconfig"
+    run env HOME="$HOME_DIR" bash "$REPO_ROOT/scripts/shared/initialize-gitconfig.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"git can't read the existing ~/.gitconfig"* ]]
+    [[ "$output" == *"[OK] Generated .gitconfig"* ]]
+    git config --file "$HOME_DIR/.gitconfig" --list > /dev/null
+    grep -qF "name = broken" "$HOME_DIR"/.gitconfig.bak.*
+}
+
+@test "initialize-gitconfig.sh exits 2 when the prompt has no answer (#258)" {
+    printf '[user]\n\tname = Mine\n' > "$HOME_DIR/.gitconfig"
+    run env HOME="$HOME_DIR" bash "$REPO_ROOT/scripts/shared/initialize-gitconfig.sh" < /dev/null
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"Cancelled."* ]]
+    grep -qF "name = Mine" "$HOME_DIR/.gitconfig"
+}
+
+@test "ask_yes_no is yes only for y or Y, and no without input (#258)" {
+    run ask_yes_no "Go?" <<< "y"
+    [ "$status" -eq 0 ]
+    run ask_yes_no "Go?" <<< "Y"
+    [ "$status" -eq 0 ]
+    run ask_yes_no "Go?" <<< "n"
+    [ "$status" -eq 1 ]
+    run ask_yes_no "Go?" <<< ""
+    [ "$status" -eq 1 ]
+    run ask_yes_no "Go?" < /dev/null
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"No answer"*"--force"* ]]
+}
+
 # ---------------------------------------------------------------------------
 # enable_git_alias_widget / disable_git_alias_widget
 # ---------------------------------------------------------------------------

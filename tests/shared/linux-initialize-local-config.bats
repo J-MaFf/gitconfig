@@ -264,3 +264,14 @@ exit 0
     git config --file "$SANDBOX/.gitconfig.local" --list >/dev/null
     grep -qF "name = broken" "$SANDBOX"/.gitconfig.local.bak.*
 }
+
+@test "exits 2 and keeps the file when the prompt has no answer (#258)" {
+    printf '[alias]\n\tco = checkout\n' > "$SANDBOX/.gitconfig.local"
+    # Under set -e the prompt's read used to fail at end of input and end the
+    # script with exit 1 and no message.
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" < /dev/null
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"No answer"* ]]
+    [[ "$output" == *"Cancelled."* ]]
+    [ "$(cat "$SANDBOX/.gitconfig.local")" = "$(printf '[alias]\n\tco = checkout')" ]
+}

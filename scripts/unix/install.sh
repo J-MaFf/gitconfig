@@ -62,6 +62,9 @@ DESCRIPTION:
        each login on macOS, a daily 9 AM cron job on Linux
     5. Verifies the complete setup
 
+    Exits 1 if any step failed or the verification found something missing
+    (see the [FAIL] lines), 0 otherwise. Declining a prompt is not a failure.
+
     Files that would be replaced are first kept as timestamped backups
     (<file>.bak.YYYYMMDD-HHMMSS; newest 5 per file, set GITCONFIG_BACKUP_KEEP
     to change, 0 keeps all). The first backup also keeps your original as
@@ -111,6 +114,9 @@ echo "Repository: $REPO_ROOT"
 echo "Home Directory: $HOME_DIR"
 echo ""
 
+# Failures counted by every step below; any makes the install exit 1 (#258).
+ERRORS=0
+
 # STEP 0: Tear down the previous installation, only when asked (--reinstall).
 # A plain re-run converges in place: existing files that differ are backed up
 # with a timestamp, and links that already point into the repo are left alone.
@@ -132,11 +138,15 @@ fi
 # STEP 1: Generate .gitconfig from template
 echo "[STEP 1] Generating .gitconfig from template..."
 echo "-----"
-if [ "$FORCE" = true ]; then
-    generate_gitconfig "$REPO_ROOT" "$HOME_DIR" "true" && echo "[OK] Generated .gitconfig" || echo "[FAIL] Could not generate .gitconfig"
-else
-    generate_gitconfig "$REPO_ROOT" "$HOME_DIR" "false" && echo "[OK] Generated .gitconfig" || echo "[FAIL] Could not generate .gitconfig"
-fi
+# generate_gitconfig reports what it did; 2 means the user kept the existing
+# file, which used to be followed by "[OK] Generated .gitconfig" (#258).
+STEP_RC=0
+generate_gitconfig "$REPO_ROOT" "$HOME_DIR" "$FORCE" || STEP_RC=$?
+case $STEP_RC in
+    0) ;;
+    2) echo "[SKIP] Kept the existing .gitconfig (not regenerated)" ;;
+    *) echo "[FAIL] Could not generate .gitconfig"; ERRORS=$((ERRORS+1)) ;;
+esac
 echo ""
 
 # STEP 2: Create symlinks
@@ -146,19 +156,30 @@ LINK_ERRORS=0
 for file in ".gitignore_global" "gitconfig_helper.py"; do
     create_symlink "$REPO_ROOT/$file" "$HOME_DIR/$file" "$FORCE" "$REPO_ROOT" || LINK_ERRORS=$((LINK_ERRORS+1))
 done
+ERRORS=$((ERRORS+LINK_ERRORS))
 echo ""
 
 # STEP 3: Generate local config
 echo "[STEP 3] Generating machine-specific configuration..."
 echo "-----"
 if [ -f "$LOCAL_CONFIG_SCRIPT" ]; then
+    # Exit 2 is "kept the existing file" (declined, or no input to answer the
+    # prompt). Any other failure used to end the install here, under set -e,
+    # without a summary (#258).
+    STEP_RC=0
     if [ "$FORCE" = true ]; then
-        bash "$LOCAL_CONFIG_SCRIPT" --force
+        bash "$LOCAL_CONFIG_SCRIPT" --force || STEP_RC=$?
     else
-        bash "$LOCAL_CONFIG_SCRIPT"
+        bash "$LOCAL_CONFIG_SCRIPT" || STEP_RC=$?
     fi
+    case $STEP_RC in
+        0) ;;
+        2) echo "[SKIP] Kept the existing .gitconfig.local (not regenerated)" ;;
+        *) echo "[FAIL] Could not generate .gitconfig.local (exit $STEP_RC)"; ERRORS=$((ERRORS+1)) ;;
+    esac
 else
     echo "[ERROR] Local config script not found: $LOCAL_CONFIG_SCRIPT"
+    ERRORS=$((ERRORS+1))
 fi
 echo ""
 
@@ -196,8 +217,6 @@ echo ""
 echo "[STEP 7] Verifying setup..."
 echo "-----"
 
-ERRORS=0
-
 [ -f "$HOME_DIR/.gitconfig" ]          && echo "[OK] .gitconfig verified"          || { echo "[FAIL] .gitconfig missing";          ERRORS=$((ERRORS+1)); }
 [ -e "$HOME_DIR/.gitignore_global" ]   && echo "[OK] .gitignore_global verified"   || { echo "[FAIL] .gitignore_global missing";   ERRORS=$((ERRORS+1)); }
 [ -e "$HOME_DIR/gitconfig_helper.py" ] && echo "[OK] gitconfig_helper.py verified" || { echo "[FAIL] gitconfig_helper.py missing"; ERRORS=$((ERRORS+1)); }
@@ -219,14 +238,19 @@ python3 -c "import textual" &>/dev/null && echo "[OK] Python 'textual' importabl
 git config --list > /dev/null 2>&1 && echo "[OK] Git configuration accessible" || echo "[WARN] Could not verify git configuration"
 
 echo ""
-echo "Setup Complete!"
-echo "====================================="
-echo ""
-
-if [ $ERRORS -eq 0 ]; then
+if [ "$ERRORS" -eq 0 ]; then
+    echo "Setup Complete!"
+    echo "====================================="
+    echo ""
     echo "Verify your git aliases:"
     echo "  git alias"
+    echo ""
 else
-    echo "Setup completed with $ERRORS error(s). Review the output above."
+    echo "Setup finished with $ERRORS error(s)"
+    echo "====================================="
+    echo ""
+    echo "Review the [FAIL] lines above."
+    echo ""
+    # It used to exit 0 here whatever happened (#258).
+    exit 1
 fi
-echo ""
