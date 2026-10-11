@@ -14,7 +14,9 @@ Healthy; `main` is clean and no PRs are open. A repo-wide bug review filed [#250
 - **Windows:** a failed symlink keeps the existing file and exits 1, cleanup keeps the PowerShell profile's encoding ([#255](https://github.com/J-MaFf/gitconfig/issues/255)); the login task no longer waits for a network and a failed pip install is no longer logged as `[OK]` ([#256](https://github.com/J-MaFf/gitconfig/issues/256)); the Ctrl-G widget inserts the picked alias again ([#254](https://github.com/J-MaFf/gitconfig/issues/254)).
 - **Helper:** unknown flags and `-h` run nothing ([#250](https://github.com/J-MaFf/gitconfig/issues/250)), `git pushf` adds `--force-if-includes` ([#251](https://github.com/J-MaFf/gitconfig/issues/251)), `git start` names branches `<type>/<issue>-<slug>` ([#252](https://github.com/J-MaFf/gitconfig/issues/252)), the original pre-install file is kept as `<file>.pre-gitconfig` ([#253](https://github.com/J-MaFf/gitconfig/issues/253)).
 
-Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows PowerShell 5.1 ([#269](https://github.com/J-MaFf/gitconfig/pull/269)), and `install.ps1` replacing a network-gated login task left by an older version ([#275](https://github.com/J-MaFf/gitconfig/pull/275)).
+- **macOS:** the bash Ctrl-G widget needs bash 4+ and says so under `/bin/bash` 3.2, launchd uses `launchctl bootstrap`/`bootout`, and a per-user lock keeps to one sync at a time ([#234](https://github.com/J-MaFf/gitconfig/issues/234)).
+
+Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows PowerShell 5.1 ([#269](https://github.com/J-MaFf/gitconfig/pull/269)), `install.ps1` replacing a network-gated login task left by an older version ([#275](https://github.com/J-MaFf/gitconfig/pull/275)), and `launchctl bootstrap`/`bootout` plus the bash 3.2 Ctrl-G note on a real Mac ([#234](https://github.com/J-MaFf/gitconfig/issues/234)).
 
 ### Components
 
@@ -75,6 +77,7 @@ Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows Po
 | [#239](https://github.com/J-MaFf/gitconfig/issues/239) | Helper printed external text (gh stderr, paths, repo/branch names, alias bodies, exception text) as rich markup: `[/]` crashed it, `[slug]`/`[rejected]` vanished; now escaped, with `_print_ext()` for whole lines | [#285](https://github.com/J-MaFf/gitconfig/pull/285) |
 | [#241](https://github.com/J-MaFf/gitconfig/issues/241) | `git main --all` swept the clone's parent folder, which is the home folder for a `~/gitconfig` clone (or its parent via the install symlink); root now from `gitconfig.scriptsRoot`, realpath-derived, and $HOME / its parent / `/` refused without `--force` | [#287](https://github.com/J-MaFf/gitconfig/pull/287) |
 | [#240](https://github.com/J-MaFf/gitconfig/issues/240) | Windows `install.ps1` printed `Setup Complete!` and exited 0 after failed steps, the elevated relaunch lost the exit code, `Initialize-Symlinks.ps1` asked about the task even with `-NoTask` and `-Reinstall -NoTask` deleted it, and elevating with another account's password set up the administrator's profile and task; now failures exit 1, `-KeepTask`, and the invoking account is configured | [#288](https://github.com/J-MaFf/gitconfig/pull/288) |
+| [#234](https://github.com/J-MaFf/gitconfig/issues/234) | macOS: the bash Ctrl-G widget bound but did nothing under `/bin/bash` 3.2, the scheduler used the deprecated `launchctl load`/`unload`, and the `RunAtLoad` sync ran the same pip install as the installer's STEP 6; now the widget binds only under bash 4+ (with a note), `bootstrap`/`bootout` are used, and a per-user lock keeps to one sync at a time | PRLINK |
 
 ### Open Issues
 
@@ -86,7 +89,6 @@ From an earlier review; none are being worked on.
 | [#231](https://github.com/J-MaFf/gitconfig/issues/231) | Template: dedupe the Python-finder alias loop (quote the repo path) and move machine-specific settings out |
 | [#232](https://github.com/J-MaFf/gitconfig/issues/232) | gitconfig_helper.py cleanups: batch skill git log, share audit command, fix stale 'git update' message |
 | [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Replace source-text tests with behavioural tests in a sandboxed HOME |
-| [#234](https://github.com/J-MaFf/gitconfig/issues/234) | macOS: bash 3.2 Ctrl-G, deprecated launchctl load/unload, install-time sync race |
 | [#235](https://github.com/J-MaFf/gitconfig/issues/235) | Stop hardcoding machine-specific values in .gitconfig.local generation |
 | [#246](https://github.com/J-MaFf/gitconfig/issues/246) | Add a systemd user timer backend to the Unix scheduler |
 

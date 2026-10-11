@@ -565,6 +565,25 @@ enable_git_alias_widget() {
         } >> "$rc"
         echo "[OK] Enabled git-alias keybinding (Ctrl-G) in $rc"
     done
+    _note_old_bash_widget
+}
+
+# The bash widget needs bash 4+ (READLINE_LINE); under the stock macOS
+# /bin/bash 3.2 it skips its binding (issue #234). Say so at install time when
+# the login shell is such a bash, so a missing Ctrl-G isn't a surprise.
+_note_old_bash_widget() {
+    local major
+    [ "$(basename "${SHELL:-}")" = bash ] || return 0
+    # shellcheck disable=SC2016  # expanded by $SHELL, not here
+    major="$("$SHELL" -c 'echo "${BASH_VERSINFO[0]}"' 2>/dev/null)" || return 0
+    case "$major" in
+        [0-3])
+            echo "[NOTE] Ctrl-G in bash needs bash 4+, and $SHELL is bash $major."
+            echo "       Use zsh (the macOS default shell) or Homebrew's bash (brew install bash);"
+            echo "       'git alias' works either way."
+            ;;
+    esac
+    return 0
 }
 
 # Remove the git-alias browser keybinding block from the user's shell rc files.
@@ -692,4 +711,73 @@ install_python_deps() {
         fi
     fi
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# Update lock
+#
+# One sync at a time per user. The launchd agent's RunAtLoad starts
+# update-gitconfig.sh the moment install.sh registers it, and both used to run
+# the same pip install at once (issue #234). The lock is a directory, since
+# mkdir is atomic everywhere (no flock on macOS); it holds a "pid" file naming
+# its owner. A lock whose owner is gone, or one older than
+# GITCONFIG_LOCK_STALE_MINUTES (default 60), is stale and taken over, so a
+# crashed or killed run can't block syncing for good.
+# ---------------------------------------------------------------------------
+
+# Print the lock directory: per user, next to the cron log under
+# ${XDG_STATE_HOME:-~/.local/state}/gitconfig/ (a relative XDG_STATE_HOME is
+# ignored, as the XDG spec says).
+# Usage: update_lock_path
+update_lock_path() {
+    local state="${XDG_STATE_HOME:-}"
+    case "$state" in
+        /*) ;;
+        *)  state="$HOME/.local/state" ;;
+    esac
+    echo "$state/gitconfig/update.lock"
+}
+
+# Succeed if LOCK is stale: its owner PID is recorded and no longer running,
+# or the lock is older than GITCONFIG_LOCK_STALE_MINUTES. A lock without a pid
+# file yet is only stale by age: its owner may be between mkdir and writing it.
+# Usage: _update_lock_stale LOCK
+_update_lock_stale() {
+    local lock="$1" owner minutes="${GITCONFIG_LOCK_STALE_MINUTES:-60}"
+    owner="$(cat "$lock/pid" 2>/dev/null || true)"
+    case "$owner" in
+        ''|*[!0-9]*) ;;
+        *) kill -0 "$owner" 2>/dev/null || return 0 ;;
+    esac
+    # find -mmin works the same in BSD and GNU find; it prints the lock when
+    # its mtime is more than MINUTES minutes ago.
+    [ -n "$(find "$lock" -maxdepth 0 -mmin +"$minutes" 2>/dev/null)" ]
+}
+
+# Take the update lock for this process ($$). Returns 0 when taken, 1 when
+# another live run holds it, 2 when the lock can't be created at all (no
+# writable state directory); callers treat 2 as "run without a lock".
+# Usage: acquire_update_lock
+acquire_update_lock() {
+    local lock
+    lock="$(update_lock_path)"
+    mkdir -p "$(dirname "$lock")" 2>/dev/null || return 2
+    if ! mkdir "$lock" 2>/dev/null; then
+        [ -d "$lock" ] || return 2
+        _update_lock_stale "$lock" || return 1
+        rm -rf "$lock"
+        # Another run may take over the same stale lock first; then it's held.
+        mkdir "$lock" 2>/dev/null || return 1
+    fi
+    echo "$$" > "$lock/pid"
+    return 0
+}
+
+# Release the update lock, but only if this process ($$) holds it.
+# Usage: release_update_lock
+release_update_lock() {
+    local lock
+    lock="$(update_lock_path)"
+    [ "$(cat "$lock/pid" 2>/dev/null || true)" = "$$" ] || return 0
+    rm -rf "$lock"
 }

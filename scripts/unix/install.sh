@@ -183,6 +183,15 @@ else
 fi
 echo ""
 
+# Hold the update lock across STEPs 5 and 6. Registering the launchd agent
+# starts update-gitconfig.sh at once (RunAtLoad), and it used to run the same
+# pip install as STEP 6 at the same time (issue #234). While the lock is held
+# the updater exits quietly; the install has just done what it would do. If a
+# sync is already running, carry on without the lock rather than wait.
+if acquire_update_lock; then
+    trap release_update_lock EXIT
+fi
+
 # STEP 5: Register the auto-sync job (launchd login agent on macOS, daily cron
 # job on Linux). It runs scripts/shared/update-gitconfig.sh with this clone's
 # path, so the updater syncs THIS clone wherever it lives.
@@ -205,6 +214,7 @@ fi
 echo "[STEP 6] Installing Python dependencies..."
 echo "-----"
 install_python_deps "$REPO_ROOT"
+release_update_lock
 echo ""
 
 # STEP 6b: Enable the interactive git-alias browser keybinding (Ctrl-G)

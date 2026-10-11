@@ -418,3 +418,85 @@ EOF
     [[ "$output" == *"[FAIL] cron job still exists!"* ]]
     [[ "$output" == *"Cleanup INCOMPLETE"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# launchctl bootstrap/bootout and the install-time race (issue #234)
+# ---------------------------------------------------------------------------
+
+# A launchctl that logs each call to $SANDBOX/launchctl.log. `bootout` exits
+# $BOOTOUT_RC (default 0); on `bootstrap` it records whether the update lock is
+# held at that moment, as the RunAtLoad sync would find it.
+_stub_launchctl() {
+    cat > "$SANDBOX/bin/launchctl" <<EOF
+#!/bin/sh
+echo "\$*" >> "$SANDBOX/launchctl.log"
+case "\$1" in
+    bootout) exit \${BOOTOUT_RC:-0} ;;
+    bootstrap)
+        if [ -d "$HOME/.local/state/gitconfig/update.lock" ]; then
+            echo "lock held at bootstrap" >> "$SANDBOX/launchctl.log"
+        fi
+        ;;
+esac
+exit 0
+EOF
+    chmod +x "$SANDBOX/bin/launchctl"
+}
+
+@test "mac install uses launchctl bootstrap/bootout, never the deprecated load/unload" {
+    _stub_launchctl
+    uid="$(id -u)"
+    plist="$HOME/Library/LaunchAgents/com.gitconfig.update.plist"
+    run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" \
+        bash "$REPO_ROOT/scripts/mac version/install.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] launchd agent registered"* ]]
+    # The reload hint names the new commands too.
+    [[ "$output" == *"launchctl bootstrap gui/$uid"* ]]
+    [[ "$output" != *"launchctl unload"* ]]
+    grep -qxF "bootout gui/$uid/com.gitconfig.update" "$SANDBOX/launchctl.log"
+    grep -qxF "bootstrap gui/$uid $plist" "$SANDBOX/launchctl.log"
+    run ! grep -qE '^(load|unload)( |$)' "$SANDBOX/launchctl.log"
+
+    # Re-installing unloads the running copy before bootstrapping again.
+    : > "$SANDBOX/launchctl.log"
+    run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" \
+        bash "$REPO_ROOT/scripts/mac version/install.sh" --force
+    [ "$status" -eq 0 ]
+    [ "$(sed -n 1p "$SANDBOX/launchctl.log")" = "bootout gui/$uid/com.gitconfig.update" ]
+    grep -qxF "bootstrap gui/$uid $plist" "$SANDBOX/launchctl.log"
+}
+
+@test "mac install holds the update lock while the agent is bootstrapped, then releases it" {
+    # RunAtLoad starts the updater the moment the agent is bootstrapped. It
+    # used to run the same pip install as STEP 6 at the same time.
+    _stub_launchctl
+    run env GITCONFIG_ALLOW_CROSS_OS=1 PATH="$SANDBOX/bin:$PATH" \
+        bash "$REPO_ROOT/scripts/mac version/install.sh" --force
+    [ "$status" -eq 0 ]
+    grep -qxF "lock held at bootstrap" "$SANDBOX/launchctl.log"
+    [ ! -e "$HOME/.local/state/gitconfig/update.lock" ]
+}
+
+@test "mac cleanup boots the agent out, and still removes the plist when it wasn't loaded" {
+    _stub_launchctl
+    uid="$(id -u)"
+    mkdir -p "$HOME/Library/LaunchAgents"
+    : > "$HOME/Library/LaunchAgents/com.gitconfig.update.plist"
+
+    run env PATH="$SANDBOX/bin:$PATH" bash "$REPO_ROOT/scripts/mac version/cleanup-gitconfig.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[OK] Unloaded launchd agent"* ]]
+    grep -qxF "bootout gui/$uid/com.gitconfig.update" "$SANDBOX/launchctl.log"
+    run ! grep -qE '^(load|unload)( |$)' "$SANDBOX/launchctl.log"
+    [ ! -e "$HOME/Library/LaunchAgents/com.gitconfig.update.plist" ]
+
+    # bootout fails for an agent that isn't loaded (launchctl exits 3 or 113).
+    : > "$HOME/Library/LaunchAgents/com.gitconfig.update.plist"
+    run env BOOTOUT_RC=113 PATH="$SANDBOX/bin:$PATH" \
+        bash "$REPO_ROOT/scripts/mac version/cleanup-gitconfig.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[SKIP] launchd agent was not loaded"* ]]
+    [[ "$output" == *"Cleanup SUCCESSFUL!"* ]]
+    [ ! -e "$HOME/Library/LaunchAgents/com.gitconfig.update.plist" ]
+}

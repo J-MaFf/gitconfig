@@ -23,7 +23,17 @@ __git_alias_insert() {
     READLINE_POINT=$((READLINE_POINT + ${#selection}))
 }
 
-# Bind only in interactive shells that support `bind -x`. Change \C-g to rebind.
+# Bind only in interactive shells. Change \C-g to rebind.
+# The widget edits READLINE_LINE/READLINE_POINT, which bash only has since 4.0.
+# Under the stock macOS /bin/bash 3.2, `bind -x` succeeds but Ctrl-G would do
+# nothing, so skip the binding there and say why (issue #234). On a Mac, zsh
+# (the default shell) or Homebrew's bash (brew install bash) gets Ctrl-G.
 case $- in
-    *i*) bind -x '"\C-g": __git_alias_insert' 2>/dev/null ;;
+    *i*)
+        if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+            bind -x '"\C-g": __git_alias_insert' 2>/dev/null
+        else
+            echo "git-alias widget: Ctrl-G needs bash 4+ (this is bash ${BASH_VERSION}); use zsh or Homebrew bash. 'git alias' still works." >&2
+        fi
+        ;;
 esac

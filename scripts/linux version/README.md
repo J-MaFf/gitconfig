@@ -278,7 +278,7 @@ git config --list
 
 ## Notes
 
-- The setup scripts use no bash 4-only features and run under bash 3.2+; only the optional Ctrl-G alias widget for bash needs bash 4.0+ (`READLINE_LINE`)
+- The setup scripts use no bash 4-only features and run under bash 3.2+; only the optional Ctrl-G alias widget for bash needs bash 4.0+ (`READLINE_LINE`); under an older bash it skips the binding with a one-line note
 - Scripts preserve existing files by backing them up as `<file>.bak.YYYYMMDD-HHMMSS`; the newest 5 per file are kept (`GITCONFIG_BACKUP_KEEP` changes this, `0` keeps all), and the original is kept for good as `<file>.pre-gitconfig`
 - No root/sudo required unless dealing with system-wide git config
 - Cron job logs to `${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log` (per user; older installs used `/tmp/gitconfig-update.log`, and re-running the installer moves the job to the new log)
