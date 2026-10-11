@@ -483,7 +483,7 @@ ALIAS_METADATA = {
     # Branch & Sync
     "branches": ("Branch & Sync", "Download all remote branches and create local tracking branches"),
     "cleanup": ("Branch & Sync", "Delete branches with deleted remotes (merged). Use --force for local-only too"),
-    "main": ("Branch & Sync", "Switch to the default branch (fetch, fast-forward, cleanup). Use --all/-a for every repo in the Scripts root"),
+    "main": ("Branch & Sync", "Switch to the default branch (fetch, fast-forward, cleanup). Use --all/-a for every repo in the Scripts root (gitconfig.scriptsRoot; --force to sweep the home folder)"),
     "nb": ("Branch & Sync", "Create and switch to a new branch (git nb <name>)"),
     "pushf": ("Branch & Sync", "Force-push safely: refuses if the remote has commits you haven't integrated (--force-with-lease --force-if-includes)"),
     "sync": ("Branch & Sync", "Update the current branch with rebase and autostash"),
@@ -1688,15 +1688,51 @@ def _dirty_triage_lines(default_branch):
     ]
 
 
-def _scripts_root():
-    """Return the derived Scripts root: the parent of this repo's directory.
+SCRIPTS_ROOT_KEY = "gitconfig.scriptsRoot"
 
-    gitconfig_helper.py lives in <ScriptsRoot>/gitconfig/, so the root is this
-    file's grandparent directory -- ~/Documents/Scripts on a standard install on
-    any OS. No hardcoded path and no per-OS branching; it self-adapts if the
-    repo is cloned elsewhere.
+
+def _scripts_root():
+    """Return the Scripts root that `git main --all` and `git issues --all --local` scan.
+
+    The `gitconfig.scriptsRoot` git config key wins when set (put it in the
+    machine-local ~/.gitconfig.local, e.g. `git localconfig
+    gitconfig.scriptsRoot ~/Documents/Scripts`); `~` is expanded. Otherwise
+    the root is derived: gitconfig_helper.py lives in <ScriptsRoot>/gitconfig/,
+    so the root is this file's grandparent directory -- ~/Documents/Scripts on
+    a standard install on any OS (#241).
+
+    Both paths are resolved with realpath: install symlinks the helper into the
+    home folder as ~/gitconfig_helper.py, and deriving from the unresolved link
+    would make the root the parent of $HOME (e.g. /home or C:\\Users).
     """
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # --global reads ~/.gitconfig (or $GIT_CONFIG_GLOBAL) but ignores [include]
+    # unless --includes is given, and ~/.gitconfig.local arrives via include.
+    result = run_git(
+        "config", "--global", "--includes", "--type=path", "--get", SCRIPTS_ROOT_KEY
+    )
+    configured = result.stdout.strip() if result.returncode == 0 else ""
+    if configured:
+        return os.path.realpath(os.path.expanduser(configured))
+    return os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+
+def _unsafe_scripts_root(root):
+    """Return why `root` is too broad to sweep with `git main --all`, else None.
+
+    Refuses the home folder, its parent (/home, /Users, C:\\Users) and any
+    filesystem root (/ or a drive root) -- the directories a mis-derived or
+    mistyped root lands on, where a sweep would switch and pull every repo it
+    finds (#241). `root` must already be realpath-resolved.
+    """
+    home = os.path.realpath(os.path.expanduser("~"))
+    norm = os.path.normcase
+    if norm(root) == norm(home):
+        return "it is your home folder"
+    if os.path.dirname(root) == root:
+        return "it is a filesystem root"
+    if norm(root) == norm(os.path.dirname(home)):
+        return "it is the parent of your home folder"
+    return None
 
 
 def _scripts_root_repos():
@@ -1705,23 +1741,29 @@ def _scripts_root_repos():
     Scans the immediate subdirectories of _scripts_root() -- the current working
     directory is irrelevant. A subdirectory counts as a git repo when it
     contains a .git entry, which may be a directory or a file (the latter for
-    worktrees/submodules). Names are sorted for stable output. Shared by
-    `git main --all` and `git issues --all --local`.
+    worktrees/submodules). Names are sorted for stable output; a root that is
+    not a directory yields no repos. Shared by `git main --all` and
+    `git issues --all --local`.
     """
     root = _scripts_root()
     repos = []
+    if not os.path.isdir(root):
+        return root, repos
     for entry in sorted(os.scandir(root), key=lambda e: e.name):
         if entry.is_dir() and os.path.exists(os.path.join(entry.path, ".git")):
             repos.append(entry.name)
     return root, repos
 
 
-def update_all_main():
+def update_all_main(force=False):
     """Run the switch-to-main flow for every git repo under the Scripts root.
 
-    Scans the immediate subdirectories of the derived Scripts root (the parent
-    of the repo containing this helper -- see _scripts_root_repos()), regardless
-    of the current working directory. For each git repo that is clean, runs
+    Scans the immediate subdirectories of the Scripts root (gitconfig.scriptsRoot,
+    else the parent of the repo containing this helper -- see _scripts_root()),
+    regardless of the current working directory. A root that is the home
+    folder, its parent, or a filesystem root is refused (exit 1) unless
+    `force` is set (`git main --all --force`), since the helper also runs
+    non-interactively and cannot ask (#241). For each git repo that is clean, runs
     switch_to_main() (fetch, switch to the default branch, fast-forward, branch
     cleanup). Repos with a dirty working tree are NOT switched -- instead a
     triage report (branch position vs origin/main, last-commit age, working-tree
@@ -1737,6 +1779,22 @@ def update_all_main():
     original_cwd = os.getcwd()
 
     root, repos = _scripts_root_repos()
+
+    if not os.path.isdir(root):
+        console.print(
+            f"[red]Scripts root {escape(root)} is not a directory.[/red] "
+            f"Check {SCRIPTS_ROOT_KEY} (git config --global --includes --get {SCRIPTS_ROOT_KEY})."
+        )
+        return 1
+
+    reason = _unsafe_scripts_root(root)
+    if reason and not force:
+        console.print(
+            f"[red]Refusing to update every repo under {escape(root)}: {reason}.[/red]\n"
+            f"Set the Scripts root with `git localconfig {SCRIPTS_ROOT_KEY} <path>`, "
+            "or pass --force to sweep it anyway."
+        )
+        return 1
 
     if not repos:
         console.print(
@@ -2482,8 +2540,8 @@ CLI_ARGS = {
     "print_aliases": ("git alias [--plain] [--out <file>]", {"--plain"}, {"--out"}, 0),
     "start": ("git start <issue-number>", (), (), 1),
     "cleanup": ("git cleanup [--force|-f]", {"--force", "-f"}, (), 0),
-    "switch_to_main": ("git main [--all|-a]", {"--all", "-a"}, (), 0),
-    "update_all_main": ("git main --all", (), (), 0),
+    "switch_to_main": ("git main [--all|-a [--force]]", {"--all", "-a", "--force"}, (), 0),
+    "update_all_main": ("git main --all [--force]", {"--force"}, (), 0),
 }
 
 
@@ -2510,11 +2568,18 @@ if __name__ == "__main__":
             sys.exit(cleanup_branches(force=force))
         elif function_name == "switch_to_main":
             # `git main --all` / `-a` updates every repo in immediate subdirectories
+            force = "--force" in sys.argv
             if "--all" in sys.argv or "-a" in sys.argv:
-                sys.exit(update_all_main())
+                sys.exit(update_all_main(force=force))
+            if force:
+                print(
+                    "--force only applies with --all\nUsage: git main [--all|-a [--force]]",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
             sys.exit(switch_to_main())
         elif function_name == "update_all_main":
-            sys.exit(update_all_main())
+            sys.exit(update_all_main(force="--force" in sys.argv))
         elif function_name == "skill":
             sys.exit(skill(sys.argv[2:]))
         elif function_name == "issues":

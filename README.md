@@ -167,8 +167,10 @@ git start <issue#> # Start or resume the branch for a GitHub issue: <type>/<issu
 git branches       # Track all remote branches
 git cleanup        # Delete local branches whose remote is gone (--force: merged local-only too)
 git main           # Switch to the default branch: fetch, fast-forward only, branch cleanup
-git main --all     # Run the above for every git repo in immediate subdirectories (alias: -a)
+git main --all     # Run the above for every git repo directly under the Scripts root (alias: -a)
 ```
+
+The Scripts root is the folder that holds this repo's clone (`~/Documents/Scripts` on a standard install). To point it somewhere else, set it in your machine-local config: `git localconfig gitconfig.scriptsRoot ~/code`. `git main --all` won't sweep your home folder, its parent (`/home`, `/Users`, `C:\Users`) or a filesystem root. It stops with exit 1 and asks you to set `gitconfig.scriptsRoot`, or to pass `--force` if you really mean it. This guards against a clone at `~/gitconfig`, which would otherwise make the home folder the root.
 
 `git main` and `git cleanup` work from any worktree. git won't check a branch out in two worktrees, so when the default branch is checked out in another one, your current worktree stays where it is: the default branch is fast-forwarded in its own worktree (only if that one is clean) and branches are cleaned up from there. If your current worktree's own branch is gone upstream, you get a `git worktree remove <path>` hint. Repos with no remote skip the fetch and the fast-forward.
 
