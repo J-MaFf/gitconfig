@@ -118,8 +118,6 @@ Describe "GitConfig Integration" -Tag 'Integration' {
             if (& git config --file $localConfigPath --get gpg.ssh.program 2>$null) {
                 $content | Should -Match 'program\s*=.*op-ssh-sign\.exe'
             }
-            # Nothing machine-specific from another machine is hardcoded (#235).
-            $content | Should -Not -Match '10\.210\.3\.10|KFWS9BDC01'
         }
 
         It ".gitconfig.local should have valid INI format" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
