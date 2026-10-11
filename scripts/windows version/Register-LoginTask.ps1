@@ -41,13 +41,17 @@ if ($existingTask -and -not $Force) {
     # Keep the task only if it already runs exactly what we would register. A
     # task left by an older install (moved repo, or arguments without
     # -ExecutionPolicy Bypass / -RepoPath) never works, so replace it.
+    # A task registered with "Start only if the network is available" (every
+    # install before #256) is replaced too: that condition skipped the whole run
+    # when the network came up late, including the offline-safe convergence.
     $existingAction = @($existingTask.Actions)[0]
-    if ($existingAction -and $existingAction.Execute -eq $taskExecute -and $existingAction.Arguments -eq $taskArguments) {
+    $needsNetwork = $existingTask.Settings -and $existingTask.Settings.RunOnlyIfNetworkAvailable
+    if ($existingAction -and $existingAction.Execute -eq $taskExecute -and $existingAction.Arguments -eq $taskArguments -and -not $needsNetwork) {
         Write-Host "Scheduled task '$taskName' already exists and is up to date." -ForegroundColor Yellow
         Write-Host "Use -Force flag to replace the existing task."
         exit 0
     }
-    Write-Host "Scheduled task '$taskName' points at an old path or uses old arguments; replacing it." -ForegroundColor Yellow
+    Write-Host "Scheduled task '$taskName' points at an old path or uses old arguments or settings; replacing it." -ForegroundColor Yellow
 }
 
 try {
@@ -62,12 +66,14 @@ try {
     $trigger.Delay = 'PT1M'
 
     # Create task settings. A run is a pull plus a config render: stop it after
-    # 10 minutes instead of the 72-hour default, and skip it when offline.
+    # 10 minutes instead of the 72-hour default. No -RunOnlyIfNetworkAvailable:
+    # rendering ~/.gitconfig from the local template needs no network, and the
+    # updater already logs a failed pull or fetch and carries on (#256). With the
+    # condition, a network that came up late skipped the whole run.
     $settings = New-ScheduledTaskSettingsSet `
         -AllowStartIfOnBatteries `
         -DontStopIfGoingOnBatteries `
         -StartWhenAvailable `
-        -RunOnlyIfNetworkAvailable `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
 
     # Register the task

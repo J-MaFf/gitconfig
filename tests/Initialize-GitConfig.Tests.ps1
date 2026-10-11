@@ -167,6 +167,66 @@ Describe "Initialize-GitConfig.ps1" {
         }
     }
 
+    Context "Overwrite prompt (#256)" {
+        BeforeAll {
+            # A global function shadows the Read-Host cmdlet inside the script
+            # (which runs in this session): it records the prompt and answers
+            # with $global:igcAnswer, so no test ever waits for input.
+            function global:Read-Host {
+                param([string]$Prompt)
+                $global:igcPrompts += $Prompt
+                $global:igcAnswer
+            }
+        }
+
+        AfterAll {
+            Remove-Item Function:\Read-Host -ErrorAction SilentlyContinue
+            Remove-Variable igcPrompts, igcAnswer -Scope Global -ErrorAction SilentlyContinue
+        }
+
+        BeforeEach {
+            $global:igcPrompts = @()
+            $global:igcAnswer = 'n'
+            Get-ChildItem -LiteralPath $script:testHome -Force -Filter ".gitconfig*" | Remove-Item -Force
+        }
+
+        It "Should not prompt when ~/.gitconfig already matches the template" {
+            & $script:scriptPath -Force | Out-Null
+            $before = Get-Content $script:outputPath -Raw
+
+            & $script:scriptPath *> $null
+
+            $LASTEXITCODE | Should -Be 0
+            $global:igcPrompts.Count | Should -Be 0
+            (Get-Content $script:outputPath -Raw) | Should -Be $before
+            @(Get-ChildItem -LiteralPath $script:testHome -Force -Filter ".gitconfig.bak*").Count | Should -Be 0
+        }
+
+        It "Should still prompt before replacing a ~/.gitconfig that differs, and keep it on 'n'" {
+            Set-Content -Path $script:outputPath -Value "# hand-written config"
+
+            & $script:scriptPath *> $null
+
+            $LASTEXITCODE | Should -Be 0
+            $global:igcPrompts.Count | Should -Be 1
+            $global:igcPrompts[0] | Should -Match 'Overwrite'
+            (Get-Content $script:outputPath -Raw) | Should -Match '# hand-written config'
+            @(Get-ChildItem -LiteralPath $script:testHome -Force -Filter ".gitconfig.bak*").Count | Should -Be 0
+        }
+
+        It "Should replace a ~/.gitconfig that differs when the answer is 'y'" {
+            Set-Content -Path $script:outputPath -Value "# hand-written config"
+            $global:igcAnswer = 'y'
+
+            & $script:scriptPath *> $null
+
+            $LASTEXITCODE | Should -Be 0
+            $global:igcPrompts.Count | Should -Be 1
+            (Get-Content $script:outputPath -Raw) | Should -Not -Match '# hand-written config'
+            (Get-Content $script:outputPath -Raw) | Should -Match '\[alias\]'
+        }
+    }
+
     Context "Error Handling" {
         It "Should fail gracefully if template is missing" {
             $scriptContent = Get-Content $script:scriptPath -Raw
