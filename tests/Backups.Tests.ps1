@@ -78,6 +78,20 @@ Describe "Backup helpers (Functions.ps1)" -Tag 'Unit' {
         (Get-Content -LiteralPath $backups[2].FullName -Raw).Trim() | Should -Be "third"
     }
 
+    It "more same-second backups than are kept still keep the newest (#268)" {
+        # Pin the clock so all eight backups land in the same second.
+        Mock Get-Date { '20260101-120000' } -ParameterFilter { $Format -eq 'yyyyMMdd-HHmmss' }
+        $f = Join-Path $script:dir "file"
+        foreach ($i in 1..8) {
+            Set-Content -LiteralPath $f -Value "v$i"
+            $null = Backup-UserFile -Path $f
+        }
+        $backups = Get-Backups $f
+        ($backups | ForEach-Object { (Get-Content -LiteralPath $_.FullName -Raw).Trim() }) -join ',' |
+            Should -Be 'v4,v5,v6,v7,v8'
+        $backups[-1].Name | Should -Be 'file.bak.20260101-120000-07'
+    }
+
     It "-Move moves the file away" {
         $f = Join-Path $script:dir "file"
         Set-Content -LiteralPath $f -Value "x"

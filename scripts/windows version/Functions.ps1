@@ -250,13 +250,18 @@ function Get-BackupKeep {
 function New-BackupPath {
     param([Parameter(Mandatory)][string]$Path)
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $candidate = "$Path.bak.$stamp"
-    $n = 1
-    while (Get-LinkAwareItem -Path $candidate) {
-        $candidate = "$Path.bak.$stamp-{0:D2}" -f $n
-        $n++
+    $base = "$Path.bak.$stamp"
+    # Go one past the highest name taken this second, never into a gap that
+    # pruning left: a reused lower name sorts as the oldest and would be
+    # pruned straight away (#268). The bare stamp counts as 0.
+    $max = -1
+    if (Get-LinkAwareItem -Path $base) { $max = 0 }
+    $pattern = '^' + [regex]::Escape((Split-Path -Leaf $base)) + '-(\d{2,})$'
+    foreach ($item in @(Get-ChildItem -LiteralPath (Split-Path -Parent $base) -Force -ErrorAction SilentlyContinue)) {
+        if ($item.Name -cmatch $pattern) { $max = [Math]::Max($max, [int]$Matches[1]) }
     }
-    return $candidate
+    if ($max -lt 0) { return $base }
+    return '{0}-{1:D2}' -f $base, ($max + 1)
 }
 
 # Return Path's timestamped backups, oldest first. Only names New-BackupPath

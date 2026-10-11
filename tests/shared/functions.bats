@@ -236,6 +236,19 @@ backups_of() {
     [ "$(backups_of "$TESTDIR/file" | while IFS= read -r f; do cat "$f"; done | tr -d '\n')" = "abc" ]
 }
 
+@test "more same-second backups than are kept still keep the newest (#268)" {
+    # Pin the clock so all eight backups land in the same second.
+    date() { printf '20260101-120000\n'; }
+    local i
+    unset GITCONFIG_BACKUP_KEEP
+    for i in 1 2 3 4 5 6 7 8; do
+        echo "v$i" > "$TESTDIR/file"
+        backup_copy "$TESTDIR/file" >/dev/null
+    done
+    [ "$(backups_of "$TESTDIR/file" | while IFS= read -r f; do cat "$f"; done | tr -d '\n')" = "v4v5v6v7v8" ]
+    [ "$(cat "$TESTDIR/file.bak.20260101-120000-07")" = "v8" ]
+}
+
 # ---------------------------------------------------------------------------
 # create_symlink
 # ---------------------------------------------------------------------------
