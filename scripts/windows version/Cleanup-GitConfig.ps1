@@ -31,6 +31,8 @@ DESCRIPTION:
 
     Removed files are kept as timestamped backups (<file>.bak.yyyyMMdd-HHmmss,
     newest 5 per file; set GITCONFIG_BACKUP_KEEP to change, 0 keeps all).
+    The first backup of a file also keeps your original as
+    <file>.pre-gitconfig, which is never pruned.
     Symlinks into this repo are removed without a backup.
 
 NOTE: Requires administrator privileges

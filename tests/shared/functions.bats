@@ -108,6 +108,78 @@ backups_of() {
 }
 
 # ---------------------------------------------------------------------------
+# pinned original (<name>.pre-gitconfig, #253)
+# ---------------------------------------------------------------------------
+
+@test "the first backup pins the original, and later backups never replace or prune it (#253)" {
+    echo "original" > "$TESTDIR/.gitconfig"
+    run backup_copy "$TESTDIR/.gitconfig"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *".gitconfig.pre-gitconfig"* ]]
+    local i
+    for i in 1 2 3 4 5 6 7; do
+        echo "generated $i" > "$TESTDIR/.gitconfig"
+        backup_copy "$TESTDIR/.gitconfig" >/dev/null
+    done
+    [ "$(cat "$TESTDIR/.gitconfig.pre-gitconfig")" = "original" ]
+    # Pruning still keeps exactly the newest 5 timestamped backups, and the
+    # original has aged out of them: the pin is what keeps it.
+    [ "$(backups_of "$TESTDIR/.gitconfig" | wc -l | tr -d ' ')" -eq 5 ]
+    run grep -lx original $(backups_of "$TESTDIR/.gitconfig")
+    [ "$status" -ne 0 ]
+}
+
+@test "backup_file pins the original before moving it away (#253)" {
+    echo "original" > "$TESTDIR/file"
+    backup_file "$TESTDIR/file" >/dev/null
+    local i
+    for i in 1 2 3 4 5 6; do
+        echo "generated $i" > "$TESTDIR/file"
+        backup_file "$TESTDIR/file" >/dev/null
+    done
+    [ ! -e "$TESTDIR/file" ]
+    [ "$(cat "$TESTDIR/file.pre-gitconfig")" = "original" ]
+    [ "$(backups_of "$TESTDIR/file" | wc -l | tr -d ' ')" -eq 5 ]
+}
+
+@test "an install from before the pin pins its oldest surviving backup (#253)" {
+    echo "oldest" > "$TESTDIR/file.bak.20260101-120000"
+    echo "newer" > "$TESTDIR/file.bak.20260102-120000"
+    echo "current" > "$TESTDIR/file"
+    backup_copy "$TESTDIR/file" >/dev/null
+    [ "$(cat "$TESTDIR/file.pre-gitconfig")" = "oldest" ]
+}
+
+@test "an existing pin is never overwritten (#253)" {
+    echo "pinned" > "$TESTDIR/file.pre-gitconfig"
+    echo "current" > "$TESTDIR/file"
+    run backup_copy "$TESTDIR/file"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"pre-gitconfig"* ]]
+    [ "$(cat "$TESTDIR/file.pre-gitconfig")" = "pinned" ]
+}
+
+@test "a symlink outside the repo is pinned as the same symlink (#253)" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo"
+    echo "theirs" > "$TESTDIR/elsewhere"
+    ln -s "$TESTDIR/elsewhere" "$TESTDIR/.gitignore_global"
+    backup_file "$TESTDIR/.gitignore_global" "$repo" >/dev/null
+    [ -L "$TESTDIR/.gitignore_global.pre-gitconfig" ]
+    [ "$(readlink "$TESTDIR/.gitignore_global.pre-gitconfig")" = "$TESTDIR/elsewhere" ]
+}
+
+@test "a symlink into the repo is not pinned (#253)" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo"
+    echo "ours" > "$repo/.gitignore_global"
+    ln -s "$repo/.gitignore_global" "$TESTDIR/.gitignore_global"
+    backup_file "$TESTDIR/.gitignore_global" "$repo" >/dev/null
+    [ ! -e "$TESTDIR/.gitignore_global.pre-gitconfig" ]
+    [ ! -L "$TESTDIR/.gitignore_global.pre-gitconfig" ]
+}
+
+# ---------------------------------------------------------------------------
 # prune_backups (retention)
 # ---------------------------------------------------------------------------
 
@@ -144,7 +216,9 @@ backups_of() {
     echo "legacy" > "$TESTDIR/Existing.file.bak"
     echo "legacy" > "$TESTDIR/file.bak"
     echo "note" > "$TESTDIR/file.bak.notes"
+    echo "pinned" > "$TESTDIR/file.pre-gitconfig"
     GITCONFIG_BACKUP_KEEP=1 prune_backups "$TESTDIR/file"
+    [ -e "$TESTDIR/file.pre-gitconfig" ]
     [ -e "$TESTDIR/Existing.file.bak" ]
     [ -e "$TESTDIR/file.bak" ]
     [ -e "$TESTDIR/file.bak.notes" ]

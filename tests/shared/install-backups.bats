@@ -135,6 +135,25 @@ mac_install() { bash "$MAC_INSTALL" --force --no-launchd "$@"; }
     some_backup_has "$HOME/.gitignore_global" "ORIGINAL-GITIGNORE"
 }
 
+@test "regenerating ~/.gitconfig over and over keeps the pinned original (#253)" {
+    run linux_install
+    [ "$status" -eq 0 ]
+    # shellcheck source=../../scripts/shared/functions.sh
+    source "$REPO_ROOT/scripts/shared/functions.sh"
+    local i
+    for i in 1 2 3 4 5 6; do
+        printf '# hand edit %s\n' "$i" >> "$HOME/.gitconfig"
+        generate_gitconfig "$REPO_ROOT" "$HOME" true >/dev/null
+    done
+    # The timestamped backups no longer hold the original; the pin does.
+    [ "$(backups_of "$HOME/.gitconfig" | wc -l | tr -d ' ')" -eq 5 ]
+    run some_backup_has "$HOME/.gitconfig" "Original Gitconfig"
+    [ "$status" -ne 0 ]
+    grep -qF "Original Gitconfig" "$HOME/.gitconfig.pre-gitconfig"
+    grep -qF "ORIGINAL-GITIGNORE" "$HOME/.gitignore_global.pre-gitconfig"
+    grep -qF "/original/local" "$HOME/.gitconfig.local.pre-gitconfig"
+}
+
 @test "mac installer: installing twice keeps the original files" {
     run mac_install
     [ "$status" -eq 0 ]
