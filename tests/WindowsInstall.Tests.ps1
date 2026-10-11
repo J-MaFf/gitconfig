@@ -28,6 +28,17 @@ function Read-Host { param([string]`$Prompt) Add-Content -LiteralPath '$PromptLo
 "@
     }
 
+    # Run Command in a child PowerShell of the same edition. -EncodedCommand,
+    # because Windows PowerShell 5.1 strips the double quotes inside a native
+    # command's argument, which would mangle the command text.
+    # Its stderr must not stop the test under a caller's ErrorActionPreference
+    # of Stop (5.1 turns redirected native stderr into error records).
+    function Invoke-Child([string]$Command) {
+        $ErrorActionPreference = 'Continue'
+        $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($Command))
+        & $script:pwshPath -NoProfile -NonInteractive -EncodedCommand $encoded
+    }
+
     function New-Sandbox {
         $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         $sandboxHome = Join-Path $root "home"
@@ -97,7 +108,7 @@ $exitLines
 & '$install' $($ScriptArgs -join ' ')
 exit `$LASTEXITCODE
 "@
-        $out = & $script:pwshPath -NoProfile -NonInteractive -Command $cmd *>&1 | Out-String
+        $out = Invoke-Child $cmd *>&1 | Out-String
         $code = $LASTEXITCODE
         [pscustomobject]@{
             ExitCode = $code
@@ -131,7 +142,7 @@ function Unregister-ScheduledTask { param([string]`$TaskName, [switch]`$Confirm)
 & '$script' $($ScriptArgs -join ' ')
 exit `$LASTEXITCODE
 "@
-        $out = & $script:pwshPath -NoProfile -NonInteractive -Command $cmd *>&1 | Out-String
+        $out = Invoke-Child $cmd *>&1 | Out-String
         $code = $LASTEXITCODE
         [pscustomobject]@{
             ExitCode   = $code
@@ -320,7 +331,7 @@ $(New-ChildPrelude -HomeDir $sb.Home -ProfilePath $sb.Profile -PromptLog $sb.Pro
 function Register-ScheduledTask { throw 'Initialize-Symlinks.ps1 registered a task' }
 & '$script' -Force
 "@
-        $out = & $script:pwshPath -NoProfile -NonInteractive -Command $cmd *>&1 | Out-String
+        $out = Invoke-Child $cmd *>&1 | Out-String
         $prompts = if (Test-Path $sb.PromptLog) { @(Get-Content -LiteralPath $sb.PromptLog) } else { @() }
         $prompts | Where-Object { $_ -match 'task' } | Should -BeNullOrEmpty
         $out | Should -Not -Match 'scheduled task'
