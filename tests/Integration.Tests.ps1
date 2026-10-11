@@ -1,3 +1,11 @@
+BeforeDiscovery {
+    # -Skip conditions are evaluated at discovery, before BeforeAll runs.
+    $script:platformIsWindows = if ($PSVersionTable.PSVersion.Major -ge 6) { $IsWindows } else { $true }
+    # Same condition the setup test below skips on: when it runs, the tests
+    # that depend on its result must run too.
+    $script:setupRuns = [System.Environment]::UserInteractive -and $script:platformIsWindows
+}
+
 BeforeAll {
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
     $script:setupScript = Join-Path $script:repoRoot "scripts\windows version\install.ps1"
@@ -130,6 +138,49 @@ Describe "GitConfig Integration" -Tag 'Integration' {
         }
     }
 
+    # Between setup and cleanup: once "Cleanup and Reset" has run there is no
+    # ~/.gitconfig left to read, so these used to come last and always skip
+    # (#262). They skip only when setup itself is skipped; after setup ran, a
+    # missing alias or config is a failure.
+    Context "Git Aliases" -Skip:(-not $setupRuns) {
+        BeforeAll {
+            $script:gitconfigPath = Join-Path $script:testHome ".gitconfig"
+        }
+
+        It "git alias should work after setup" {
+            $script:gitconfigPath | Should -Exist
+            $result = & git alias 2>&1
+            $LASTEXITCODE | Should -Be 0
+            $result | Should -Not -BeNullOrEmpty
+        }
+
+        It "git cleanup should be available" {
+            $result = & git config --get alias.cleanup 2>&1
+            $LASTEXITCODE | Should -Be 0
+            $result | Should -Not -BeNullOrEmpty
+        }
+
+        It "git branches alias should exist" {
+            $script:gitconfigPath | Should -Exist
+            $result = & git config --get alias.branches
+            $result | Should -Not -BeNullOrEmpty
+        }
+
+        It "git branches alias should have properly quoted format string" {
+            $script:gitconfigPath | Should -Exist
+            $result = & git config --get alias.branches
+            # Verify the format string is quoted to prevent shell interpretation
+            $result | Should -Match "--format='%\([^)]+\)'"
+        }
+
+        It "git branches alias should contain complete command with semicolons" {
+            $script:gitconfigPath | Should -Exist
+            $result = & git config --get alias.branches
+            $result | Should -Match "while read ref; do"
+            $result | Should -Match "2>/dev/null \|\| true; done"
+        }
+    }
+
     Context "Cleanup and Reset" {
         It "Should remove setup on cleanup" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
             # This test is skipped in non-interactive environments (Pester extension)
@@ -165,64 +216,5 @@ Describe "GitConfig Helper Script" -Tag 'Integration' {
         $helperPath = Join-Path $script:repoRoot "gitconfig_helper.py"
         & $script:python -m py_compile $helperPath 2>&1 | Out-Null
         $LASTEXITCODE | Should -Be 0
-    }
-}
-
-Describe "Git Aliases" -Tag 'Integration' {
-    It "git alias should work after setup" {
-        # Check if .gitconfig symlink exists (setup completed)
-        $gitconfigExists = Test-Path (Join-Path $testHome ".gitconfig")
-        if ($gitconfigExists) {
-            $result = & git alias 2>&1
-            $result | Should -Not -BeNullOrEmpty
-        }
-        else {
-            Set-ItResult -Skipped -Because "Setup has not been run (no .gitconfig symlink found)"
-        }
-    }
-
-    It "git cleanup should be available" {
-        $result = & git config --get alias.cleanup 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            $result | Should -Not -BeNullOrEmpty
-        }
-        else {
-            Set-ItResult -Skipped -Because "Setup has not been run (cleanup alias not configured)"
-        }
-    }
-
-    It "git branches alias should exist" {
-        $gitconfigExists = Test-Path (Join-Path $testHome ".gitconfig")
-        if ($gitconfigExists) {
-            $result = & git config --get alias.branches
-            $result | Should -Not -BeNullOrEmpty
-        }
-        else {
-            Set-ItResult -Skipped -Because "Setup has not been run (no .gitconfig symlink found)"
-        }
-    }
-
-    It "git branches alias should have properly quoted format string" {
-        $gitconfigExists = Test-Path (Join-Path $testHome ".gitconfig")
-        if ($gitconfigExists) {
-            $result = & git config --get alias.branches
-            # Verify the format string is quoted to prevent shell interpretation
-            $result | Should -Match "--format='%\([^)]+\)'"
-        }
-        else {
-            Set-ItResult -Skipped -Because "Setup has not been run (no .gitconfig symlink found)"
-        }
-    }
-
-    It "git branches alias should contain complete command with semicolons" {
-        $gitconfigExists = Test-Path (Join-Path $testHome ".gitconfig")
-        if ($gitconfigExists) {
-            $result = & git config --get alias.branches
-            $result | Should -Match "while read ref; do"
-            $result | Should -Match "2>/dev/null \|\| true; done"
-        }
-        else {
-            Set-ItResult -Skipped -Because "Setup has not been run (no .gitconfig symlink found)"
-        }
     }
 }

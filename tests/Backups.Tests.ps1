@@ -2,17 +2,23 @@
 # timestamped backups with retention, no backups of links into the repo, cleanup
 # only on -Reinstall, back up before linking, and Cleanup's elevated relaunch
 # keeping -KeepLocal. The helper tests run on any pwsh; tests that need real
-# symlinks or a non-admin elevation check say so in their -Skip condition.
+# symlinks say so in their -Skip condition.
 
 BeforeDiscovery {
-    $script:platformIsWindows = if ($PSVersionTable.PSVersion.Major -ge 6) { $IsWindows } else { $true }
-    # The relaunch tests stub Start-Process and rely on the script taking its
-    # "not elevated" branch. On an elevated Windows session the script would run
-    # its real cleanup instead, so skip there.
-    $script:isElevated = $false
-    if ($script:platformIsWindows) {
-        $script:isElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    # The symlink tests need to create real symlinks. Linux and macOS always
+    # can; Windows can when elevated (as on the CI runner) or in Developer Mode.
+    # Probe rather than guess, so they run wherever symlinks work (#262).
+    $script:canSymlink = $false
+    $probe = Join-Path ([IO.Path]::GetTempPath()) ("symlink-probe-" + [guid]::NewGuid().ToString('N'))
+    try {
+        New-Item -ItemType Directory -Path $probe -ErrorAction Stop | Out-Null
+        $probeTarget = Join-Path $probe "target"
+        Set-Content -LiteralPath $probeTarget -Value "probe"
+        New-Item -ItemType SymbolicLink -Path (Join-Path $probe "link") -Target $probeTarget -ErrorAction Stop | Out-Null
+        $script:canSymlink = $true
     }
+    catch { $script:canSymlink = $false }  # no symlink privilege: the tests skip
+    finally { Remove-Item -LiteralPath $probe -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 BeforeAll {
@@ -31,10 +37,31 @@ BeforeAll {
 
     # Run a script in a child process with Start-Process stubbed out, and
     # return the argument list the script tried to relaunch itself with.
+    # The script's elevation check (Test-IsAdministrator) is stubbed to report
+    # "not elevated" with an alias, which PowerShell resolves before the
+    # script's own function of that name. That makes the script take its
+    # relaunch branch even on an elevated session such as the CI runner (#262).
     function Get-RelaunchArgs([string]$Script, [string[]]$ScriptArgs) {
+        # Refuse to run a script whose elevation check the stub can't reach:
+        # on an elevated session it would do its real work instead.
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($Script, [ref]$null, [ref]$null)
+        $check = $ast.Find({
+                param($n)
+                $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $n.Left.Extent.Text -eq '$isAdmin' -and
+                $n.Right.Extent.Text -eq 'Test-IsAdministrator'
+            }, $true)
+        if (-not $check) { throw "$Script no longer sets `$isAdmin = Test-IsAdministrator; refusing to run it" }
+
         $capture = Join-Path $TestDrive ("relaunch-" + [guid]::NewGuid().ToString('N') + ".txt")
+        $sandbox = Join-Path $TestDrive ("relaunch-home-" + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $sandbox | Out-Null
         $cmd = @"
 function Start-Process { param([string]`$FilePath, [string[]]`$ArgumentList, [string]`$Verb, [switch]`$Wait) Set-Content -LiteralPath '$capture' -Value (`$ArgumentList -join ' ') }
+function Test-NotAdministrator { `$false }
+Set-Alias -Name Test-IsAdministrator -Value Test-NotAdministrator
+`$env:USERPROFILE = '$sandbox'; `$env:HOME = '$sandbox'
+`$env:GIT_CONFIG_GLOBAL = '$sandbox/.gitconfig'; `$env:GIT_CONFIG_SYSTEM = '$sandbox/none'
 & '$Script' $($ScriptArgs -join ' ')
 "@
         & $script:pwshPath -NoProfile -NonInteractive -Command $cmd *> $null
@@ -196,9 +223,9 @@ Describe "Backup helpers (Functions.ps1)" -Tag 'Unit' {
         (Get-Backups $f).Count | Should -Be 1
     }
 
-    Context "symlinks" -Skip:$platformIsWindows {
-        # Creating symlinks on Windows needs admin or Developer Mode, so these
-        # run on Linux/macOS pwsh; see the PR's human-verification list.
+    Context "symlinks" -Skip:(-not $canSymlink) {
+        # Creating symlinks on Windows needs admin or Developer Mode; see the
+        # probe in BeforeDiscovery.
 
         BeforeEach {
             $script:repo = Join-Path $script:dir "repo"
@@ -323,9 +350,9 @@ Describe "Initialize-GitConfig.ps1 backups and dropped-setting warning" -Tag 'Un
     }
 }
 
-Describe "Initialize-Symlinks.ps1 backs up before linking (finding 16)" -Tag 'Unit' -Skip:$platformIsWindows {
+Describe "Initialize-Symlinks.ps1 backs up before linking (finding 16)" -Tag 'Unit' -Skip:(-not $canSymlink) {
     # Runs the real script in a child pwsh with a sandboxed USERPROFILE and
-    # Read-Host stubbed. Real symlinks need Linux/macOS here (see above).
+    # Read-Host stubbed. Needs real symlinks (see the probe in BeforeDiscovery).
 
     BeforeAll {
         $script:symlinksScript = Join-Path $script:winDir "Initialize-Symlinks.ps1"
@@ -374,7 +401,8 @@ function Read-Host { param([string]`$Prompt) if (`$Prompt -like '*scheduled task
     }
 }
 
-Describe "Elevated relaunch keeps the caller's switches" -Tag 'Unit' -Skip:$isElevated {
+Describe "Elevated relaunch keeps the caller's switches" -Tag 'Unit' {
+    # Get-RelaunchArgs stubs the elevation check, so these run elevated too.
 
     It "Cleanup-GitConfig.ps1 passes -KeepLocal through (finding 25)" {
         $relaunch = Get-RelaunchArgs -Script (Join-Path $script:winDir "Cleanup-GitConfig.ps1") -ScriptArgs @('-Force', '-KeepLocal')
