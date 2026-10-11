@@ -125,6 +125,63 @@ Describe "Backup helpers (Functions.ps1)" -Tag 'Unit' {
         (Get-Backups $f).Count | Should -Be 1
     }
 
+    It "pins the original on the first backup and never replaces or prunes it (#253)" {
+        $f = Join-Path $script:dir ".gitconfig"
+        Set-Content -LiteralPath $f -Value "original"
+        $null = Backup-UserFile -Path $f
+        1..7 | ForEach-Object {
+            Set-Content -LiteralPath $f -Value "generated $_"
+            $null = Backup-UserFile -Path $f
+        }
+        $pinned = "$f.pre-gitconfig"
+        (Get-Content -LiteralPath $pinned -Raw).Trim() | Should -Be "original"
+        # Pruning still keeps exactly the newest 5 timestamped backups, and the
+        # original has aged out of them: the pin is what keeps it.
+        $backups = Get-Backups $f
+        $backups.Count | Should -Be 5
+        foreach ($b in $backups) { (Get-Content -LiteralPath $b.FullName -Raw).Trim() | Should -Not -Be "original" }
+    }
+
+    It "-Move pins the original before moving it away (#253)" {
+        $f = Join-Path $script:dir "file"
+        Set-Content -LiteralPath $f -Value "original"
+        $null = Backup-UserFile -Path $f -Move
+        1..6 | ForEach-Object {
+            Set-Content -LiteralPath $f -Value "generated $_"
+            $null = Backup-UserFile -Path $f -Move
+        }
+        $f | Should -Not -Exist
+        (Get-Content -LiteralPath "$f.pre-gitconfig" -Raw).Trim() | Should -Be "original"
+        (Get-Backups $f).Count | Should -Be 5
+    }
+
+    It "pins the oldest surviving backup on an install from before the pin (#253)" {
+        $f = Join-Path $script:dir "file"
+        Set-Content -LiteralPath "$f.bak.20260101-120000" -Value "oldest"
+        Set-Content -LiteralPath "$f.bak.20260102-120000" -Value "newer"
+        Set-Content -LiteralPath $f -Value "current"
+        $null = Backup-UserFile -Path $f
+        (Get-Content -LiteralPath "$f.pre-gitconfig" -Raw).Trim() | Should -Be "oldest"
+    }
+
+    It "never overwrites an existing pin (#253)" {
+        $f = Join-Path $script:dir "file"
+        Set-Content -LiteralPath "$f.pre-gitconfig" -Value "pinned"
+        Set-Content -LiteralPath $f -Value "current"
+        $null = Backup-UserFile -Path $f
+        (Get-Content -LiteralPath "$f.pre-gitconfig" -Raw).Trim() | Should -Be "pinned"
+        Save-OriginalBackup -Path $f | Should -BeNullOrEmpty
+    }
+
+    It "Remove-OldBackups never deletes the pinned original (#253)" {
+        $f = Join-Path $script:dir "file"
+        1..3 | ForEach-Object { Set-Content -LiteralPath "$f.bak.2026010$_-120000" -Value "v$_" }
+        Set-Content -LiteralPath "$f.pre-gitconfig" -Value "pinned"
+        Remove-OldBackups -Path $f -Keep 1
+        "$f.pre-gitconfig" | Should -Exist
+        (Get-Backups $f).Count | Should -Be 1
+    }
+
     Context "symlinks" -Skip:$platformIsWindows {
         # Creating symlinks on Windows needs admin or Developer Mode, so these
         # run on Linux/macOS pwsh; see the PR's human-verification list.
@@ -162,6 +219,22 @@ Describe "Backup helpers (Functions.ps1)" -Tag 'Unit' {
             New-Item -ItemType SymbolicLink -Path $link -Target $elsewhere | Out-Null
             Backup-UserFile -Path $link -Move -RepoRoot $script:repo | Should -Not -BeNullOrEmpty
             (Get-Backups $link).Count | Should -Be 1
+        }
+
+        It "pins a link outside the repo as a link to the same target, and never pins a link into the repo (#253)" {
+            $elsewhere = Join-Path $script:dir "elsewhere"
+            Set-Content -LiteralPath $elsewhere -Value "theirs"
+            $link = Join-Path $script:sbHome ".gitignore_global"
+            New-Item -ItemType SymbolicLink -Path $link -Target $elsewhere | Out-Null
+            $null = Backup-UserFile -Path $link -Move -RepoRoot $script:repo
+            $pin = Get-LinkAwareItem -Path "$link.pre-gitconfig"
+            $pin.LinkType | Should -Be "SymbolicLink"
+            Test-LinkPointsTo -Path "$link.pre-gitconfig" -Target $elsewhere | Should -BeTrue
+
+            $repoLink = Join-Path $script:sbHome "gitconfig_helper.py"
+            New-Item -ItemType SymbolicLink -Path $repoLink -Target (Join-Path $script:repo ".gitignore_global") | Out-Null
+            $null = Backup-UserFile -Path $repoLink -Move -RepoRoot $script:repo
+            Get-LinkAwareItem -Path "$repoLink.pre-gitconfig" | Should -BeNullOrEmpty
         }
     }
 
@@ -219,6 +292,20 @@ Describe "Initialize-GitConfig.ps1 backups and dropped-setting warning" -Tag 'Un
         $backups = Get-Backups $script:cfg
         $backups.Count | Should -Be 2
         (Get-Content -LiteralPath $backups[0].FullName -Raw) | Should -Match "git-lfs clean"
+    }
+
+    It "keeps the original pinned across many regenerations (#253)" {
+        Get-ChildItem -LiteralPath $script:testHome -Force -Filter ".gitconfig*" | Remove-Item -Force
+        Set-Content -LiteralPath $script:cfg -Value "[alias]`n`tprecious = status"
+        & $script:initScript -Force *> $null
+        1..6 | ForEach-Object {
+            Add-Content -LiteralPath $script:cfg -Value "# hand edit $_"
+            & $script:initScript -Force *> $null
+        }
+        $backups = Get-Backups $script:cfg
+        $backups.Count | Should -Be 5
+        foreach ($b in $backups) { (Get-Content -LiteralPath $b.FullName -Raw) | Should -Not -Match "precious" }
+        (Get-Content -LiteralPath "$($script:cfg).pre-gitconfig" -Raw) | Should -Match "precious = status"
     }
 }
 

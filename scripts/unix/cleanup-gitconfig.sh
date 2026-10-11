@@ -33,8 +33,9 @@ DESCRIPTION:
     1. Removes .gitconfig, .gitignore_global, gitconfig_helper.py
     2. Removes .gitconfig.local
     Removed files are kept as timestamped backups (<file>.bak.YYYYMMDD-HHMMSS,
-    newest $GITCONFIG_BACKUP_KEEP kept, default 5). Symlinks into this repo are
-    removed without a backup.
+    newest $GITCONFIG_BACKUP_KEEP kept, default 5). The first backup of a file
+    also keeps your original as <file>.pre-gitconfig, which is never pruned.
+    Symlinks into this repo are removed without a backup.
     3. Removes the auto-sync job: unloads and deletes the launchd login agent
        on macOS; deletes the cron line on Linux (lines tagged
        "# gitconfig-autoupdate", plus untagged ones from older installs that

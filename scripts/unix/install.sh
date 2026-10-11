@@ -64,9 +64,11 @@ DESCRIPTION:
 
     Files that would be replaced are first kept as timestamped backups
     (<file>.bak.YYYYMMDD-HHMMSS; newest 5 per file, set GITCONFIG_BACKUP_KEEP
-    to change, 0 keeps all). Put your own git settings in ~/.gitconfig.local:
-    ~/.gitconfig is regenerated from the template, so anything added to it
-    with `git config --global` is dropped (and backed up) at the next sync.
+    to change, 0 keeps all). The first backup also keeps your original as
+    <file>.pre-gitconfig, which is never pruned. Put your own git settings in
+    ~/.gitconfig.local: ~/.gitconfig is regenerated from the template, so
+    anything added to it with `git config --global` is dropped (and backed up)
+    at the next sync.
 
 REQUIREMENTS:
     - macOS 12+ or Linux

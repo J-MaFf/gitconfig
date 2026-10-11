@@ -215,12 +215,17 @@ function Install-PythonDeps {
 # ---------------------------------------------------------------------------
 # Backups
 #
-# Every backup is timestamped (<file>.bak.yyyyMMdd-HHmmss) so a second install
-# or the login auto-update can never overwrite the backup of the user's
-# original file. Only the newest $env:GITCONFIG_BACKUP_KEEP backups of each file
-# are kept (default 5; 0 keeps them all). Older single-slot backups from earlier
-# versions (Existing.<file>.bak, .gitconfig.bak) are never touched. Mirrors the
-# bash helpers in scripts/shared/functions.sh.
+# Every backup is timestamped (<file>.bak.yyyyMMdd-HHmmss) so a later backup
+# never overwrites an earlier one. Only the newest $env:GITCONFIG_BACKUP_KEEP
+# timestamped backups of each file are kept (default 5; 0 keeps them all), so on
+# their own they would lose the user's original file after five regenerations
+# (#253). The original is therefore also pinned: the first time a file is backed
+# up, a copy is kept as <file>.pre-gitconfig, which pruning never matches and
+# which is never overwritten afterwards. On an install that predates the pin,
+# the oldest surviving timestamped backup is pinned instead (the original,
+# unless it was already pruned). Older single-slot backups from earlier versions
+# (Existing.<file>.bak, .gitconfig.bak) are never touched. Mirrors the bash
+# helpers in scripts/shared/functions.sh.
 # ---------------------------------------------------------------------------
 
 # Return the item at Path without following a symlink (so a dangling link is
@@ -254,8 +259,21 @@ function New-BackupPath {
     return $candidate
 }
 
+# Return Path's timestamped backups, oldest first. Only names New-BackupPath
+# produces are listed (never <file>.pre-gitconfig).
+function Get-TimestampedBackups {
+    param([Parameter(Mandatory)][string]$Path)
+    $dir = Split-Path -Parent $Path
+    $name = Split-Path -Leaf $Path
+    $pattern = '^' + [regex]::Escape($name) + '\.bak\.\d{8}-\d{6}(-\d{2,})?$'
+    @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -cmatch $pattern } |
+        Sort-Object -Property Name)
+}
+
 # Delete all but the newest -Keep timestamped backups of Path (default:
-# Get-BackupKeep). 0 disables pruning. Only names New-BackupPath produces count.
+# Get-BackupKeep). 0 disables pruning. Only names New-BackupPath produces count,
+# so the pinned <file>.pre-gitconfig is never deleted.
 function Remove-OldBackups {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -263,16 +281,45 @@ function Remove-OldBackups {
     )
     if ($Keep -lt 0) { $Keep = Get-BackupKeep }
     if ($Keep -eq 0) { return }
-    $dir = Split-Path -Parent $Path
-    $name = Split-Path -Leaf $Path
-    $pattern = '^' + [regex]::Escape($name) + '\.bak\.\d{8}-\d{6}(-\d{2,})?$'
-    $backups = @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -cmatch $pattern } |
-        Sort-Object -Property Name)
+    $backups = @(Get-TimestampedBackups -Path $Path)
     if ($backups.Count -le $Keep) { return }
     $backups | Select-Object -First ($backups.Count - $Keep) | ForEach-Object {
         Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
     }
+}
+
+# Pin Path's original as <Path>.pre-gitconfig, unless that already exists. The
+# source is the oldest timestamped backup if there is one (an install from
+# before the pin), otherwise Path itself. Call it before taking a backup. A
+# symlink is pinned as a symlink to the same target. Never throws: a pin that
+# cannot be written only warns, and the timestamped backup still goes ahead.
+# Returns the pinned path if it was created now, else $null.
+function Save-OriginalBackup {
+    param([Parameter(Mandatory)][string]$Path)
+    $pinned = "$Path.pre-gitconfig"
+    if (Get-LinkAwareItem -Path $pinned) { return $null }
+    $oldest = @(Get-TimestampedBackups -Path $Path)
+    $source = if ($oldest.Count -gt 0) { $oldest[0].FullName } else { $Path }
+    $item = Get-LinkAwareItem -Path $source
+    if (-not $item) { return $null }
+    try {
+        if ($item.LinkType -eq 'SymbolicLink') {
+            $target = @($item.Target)[0]
+            if (-not [IO.Path]::IsPathRooted($target)) {
+                $target = Join-Path (Split-Path -Parent $item.FullName) $target
+            }
+            New-Item -ItemType SymbolicLink -Path $pinned -Target $target -ErrorAction Stop | Out-Null
+        }
+        else {
+            Copy-Item -LiteralPath $source -Destination $pinned -ErrorAction Stop
+        }
+    }
+    catch {
+        Write-Warning "Could not keep the original $(Split-Path -Leaf $Path) as $(Split-Path -Leaf $pinned): $_"
+        return $null
+    }
+    Write-Host "[INFO] Kept the original $(Split-Path -Leaf $Path) as $(Split-Path -Leaf $pinned) (never pruned)" -ForegroundColor Yellow
+    return $pinned
 }
 
 # True if Path is a symlink whose target lies inside Directory (e.g. a link this
@@ -313,8 +360,9 @@ function Test-LinkPointsTo {
 }
 
 # Back up Path to a timestamped file in the same directory, then prune old
-# backups. -Move moves Path away (use before replacing or removing it);
-# otherwise it is copied and stays in place (use before overwriting it). With
+# backups. The first backup of Path also pins the original (see
+# Save-OriginalBackup). -Move moves Path away (use before replacing or removing
+# it); otherwise it is copied and stays in place (use before overwriting it). With
 # -RepoRoot, a symlink into the repo is simply removed instead (-Move) or left
 # alone (copy): it is ours and backing it up would push a real backup out of the
 # retention window. Returns the backup path, or $null if nothing was backed up.
@@ -332,6 +380,7 @@ function Backup-UserFile {
         return $null
     }
 
+    $null = Save-OriginalBackup -Path $Path
     $backup = New-BackupPath -Path $Path
     if ($Move) {
         Move-Item -LiteralPath $Path -Destination $backup -Force

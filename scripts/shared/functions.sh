@@ -125,11 +125,16 @@ warn_dropped_gitconfig_keys() {
 # ---------------------------------------------------------------------------
 # Backups
 #
-# Every backup is timestamped (<file>.bak.YYYYMMDD-HHMMSS) so a second install
-# or the login auto-update can never overwrite the backup of the user's
-# original file. Only the newest GITCONFIG_BACKUP_KEEP backups of each file are
-# kept (default 5; 0 keeps them all). Older single-slot backups from previous
-# versions (Existing.<file>.bak, .gitconfig.bak) are never touched.
+# Every backup is timestamped (<file>.bak.YYYYMMDD-HHMMSS) so a later backup
+# never overwrites an earlier one. Only the newest GITCONFIG_BACKUP_KEEP
+# timestamped backups of each file are kept (default 5; 0 keeps them all), so
+# on their own they would lose the user's original file after five
+# regenerations (#253). The original is therefore also pinned: the first time
+# a file is backed up, a copy is kept as <file>.pre-gitconfig, which pruning
+# never matches and which is never overwritten afterwards. On an install that
+# predates the pin, the oldest surviving timestamped backup is pinned instead
+# (the original, unless it was already pruned). Older single-slot backups from
+# previous versions (Existing.<file>.bak, .gitconfig.bak) are never touched.
 # ---------------------------------------------------------------------------
 
 # Print a not-yet-used timestamped backup path for TARGET.
@@ -147,25 +152,56 @@ _backup_path() {
     printf '%s\n' "$candidate"
 }
 
+# Print TARGET's timestamped backups, oldest first, one per line. Only names
+# _backup_path produces are listed (never TARGET.pre-gitconfig).
+# Usage: _list_backups TARGET
+_list_backups() {
+    local f
+    for f in "$1".bak.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]*; do
+        if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\n' "$f"; fi
+    done | LC_ALL=C sort
+}
+
 # Delete all but the newest KEEP timestamped backups of TARGET.
 # KEEP defaults to $GITCONFIG_BACKUP_KEEP, then 5. 0 disables pruning.
-# Only names this file's _backup_path produces are considered.
+# Only names this file's _backup_path produces are considered, so the pinned
+# TARGET.pre-gitconfig is never deleted.
 # Usage: prune_backups TARGET [KEEP]
 prune_backups() {
     local target="$1" keep="${2:-${GITCONFIG_BACKUP_KEEP:-5}}" list count f
     case "$keep" in ''|*[!0-9]*) keep=5 ;; esac
     if [ "$keep" -eq 0 ]; then return 0; fi
-    list="$(
-        for f in "$target".bak.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]*; do
-            if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\n' "$f"; fi
-        done | LC_ALL=C sort
-    )"
+    list="$(_list_backups "$target")"
     [ -n "$list" ] || return 0
     count="$(printf '%s\n' "$list" | wc -l | tr -d ' ')"
     [ "$count" -gt "$keep" ] || return 0
     printf '%s\n' "$list" | head -n "$((count - keep))" | while IFS= read -r f; do
         rm -f -- "$f"
     done
+}
+
+# Pin TARGET's original as TARGET.pre-gitconfig, unless that already exists.
+# The source is the oldest timestamped backup if there is one (an install from
+# before the pin), otherwise TARGET itself. Call it before taking a backup. A
+# symlink is pinned as a symlink. Never fails the caller: a pin that cannot be
+# written only warns, and the timestamped backup still goes ahead.
+# Usage: _pin_original TARGET
+_pin_original() {
+    local target="$1" pinned="$1.pre-gitconfig" src ok=true
+    if [ -e "$pinned" ] || [ -L "$pinned" ]; then return 0; fi
+    src="$(_list_backups "$target" | head -n 1)"
+    [ -n "$src" ] || src="$target"
+    if [ -L "$src" ]; then
+        ln -s "$(readlink "$src")" "$pinned" 2>/dev/null || ok=false
+    else
+        cp -p "$src" "$pinned" 2>/dev/null || ok=false
+    fi
+    if [ "$ok" = true ]; then
+        echo "[INFO] Kept the original $(basename "$target") as $(basename "$pinned") (never pruned)"
+    else
+        echo "[WARN] Could not keep the original $(basename "$target") as $(basename "$pinned")"
+    fi
+    return 0
 }
 
 # Succeed if PATH is a symlink whose target lies inside DIR (e.g. a link this
@@ -185,11 +221,13 @@ _link_points_into() {
 }
 
 # Copy TARGET to a timestamped backup (TARGET stays in place), then prune.
+# The first backup of TARGET also pins the original (see _pin_original).
 # Use before overwriting a file in place.
 # Usage: backup_copy TARGET
 backup_copy() {
     local target="$1" backup
     [ -f "$target" ] || return 1
+    _pin_original "$target"
     backup="$(_backup_path "$target")"
     cp -p "$target" "$backup"
     echo "[INFO] Backed up existing $(basename "$target") to $(basename "$backup")"
@@ -197,7 +235,8 @@ backup_copy() {
     return 0
 }
 
-# Move TARGET out of the way to a timestamped backup, then prune.
+# Move TARGET out of the way to a timestamped backup, then prune. The first
+# backup of TARGET also pins the original (see _pin_original).
 # If REPO_ROOT is given and TARGET is a symlink into it, the link is just
 # removed: it is ours and holds nothing worth keeping, and backing it up would
 # push a real backup out of the retention window.
@@ -218,6 +257,7 @@ backup_file() {
         return 0
     fi
 
+    _pin_original "$target"
     backup="$(_backup_path "$target")"
     mv "$target" "$backup"
     echo "[OK] Backed up $filename to $(basename "$backup")"

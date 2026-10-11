@@ -53,7 +53,7 @@ The auto-update job is **pull + install + prune**: at each login it pulls the la
 
 ### Backups
 
-Whenever a script replaces or removes one of your files, it first saves a timestamped copy next to it, for example `~/.gitconfig.bak.20261003-142501`. The newest 5 backups of each file are kept and older ones are deleted. Set `GITCONFIG_BACKUP_KEEP` to change the limit, or set it to `0` to keep every backup. Older `*.bak` files from previous versions (`~/.gitconfig.bak`, `~/Existing.*.bak`) are never touched. Symlinks that already point into this repo aren't backed up, so running the installer again doesn't create new backups.
+Whenever a script replaces or removes one of your files, it first saves a timestamped copy next to it, for example `~/.gitconfig.bak.20261003-142501`. The newest 5 backups of each file are kept and older ones are deleted. Set `GITCONFIG_BACKUP_KEEP` to change the limit, or set it to `0` to keep every backup. Your original file is also kept for good: the first time a file is backed up, a copy is saved as `<file>.pre-gitconfig` (for example `~/.gitconfig.pre-gitconfig`). That copy is never pruned or overwritten, so you can always get back the file you had before installing. On an install from before this copy existed, the oldest backup still on disk is used instead. Older `*.bak` files from previous versions (`~/.gitconfig.bak`, `~/Existing.*.bak`) are never touched. Symlinks that already point into this repo aren't backed up, so running the installer again doesn't create new backups.
 
 ### Reinstalling
 

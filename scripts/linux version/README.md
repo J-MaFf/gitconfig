@@ -27,8 +27,9 @@ The scripts are designed to work on:
   - Verifies complete setup
 
 - **cleanup-gitconfig.sh** - Removes all gitconfig-related files and cron jobs
-  - Backs up removed files (timestamped `*.bak.YYYYMMDD-HHMMSS`); symlinks
-    into the repo are just removed
+  - Backs up removed files (timestamped `*.bak.YYYYMMDD-HHMMSS`, plus a
+    `<file>.pre-gitconfig` copy of the original); symlinks into the repo are
+    just removed
   - Useful for testing fresh setup
 
 ### Helper Scripts
@@ -158,7 +159,7 @@ To undo the installation:
 ./cleanup-gitconfig.sh --force
 ```
 
-Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks that point into the repo are just removed). To tear down and set up again in one go, run `./install.sh --reinstall`.
+Files are backed up to `~/<file>.bak.YYYYMMDD-HHMMSS` before removal (symlinks that point into the repo are just removed). The first backup of each file also leaves a copy of your original at `~/<file>.pre-gitconfig`, which is never pruned or overwritten. To tear down and set up again in one go, run `./install.sh --reinstall`.
 
 ## What Gets Installed
 
@@ -272,7 +273,7 @@ git config --list
 ## Notes
 
 - The setup scripts use no bash 4-only features and run under bash 3.2+; only the optional Ctrl-G alias widget for bash needs bash 4.0+ (`READLINE_LINE`)
-- Scripts preserve existing files by backing them up as `<file>.bak.YYYYMMDD-HHMMSS`; the newest 5 per file are kept (`GITCONFIG_BACKUP_KEEP` changes this, `0` keeps all)
+- Scripts preserve existing files by backing them up as `<file>.bak.YYYYMMDD-HHMMSS`; the newest 5 per file are kept (`GITCONFIG_BACKUP_KEEP` changes this, `0` keeps all), and the original is kept for good as `<file>.pre-gitconfig`
 - No root/sudo required unless dealing with system-wide git config
 - Cron job logs to `/tmp/gitconfig-update.log`
 - Windows-specific paths and settings are excluded

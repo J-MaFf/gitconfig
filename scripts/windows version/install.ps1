@@ -38,7 +38,8 @@ DESCRIPTION:
     dropped at the next login sync (they stay in the timestamped backup).
 
     Backups: the newest 5 per file are kept; set GITCONFIG_BACKUP_KEEP to change
-    that (0 keeps them all).
+    that (0 keeps them all). The first backup of a file also keeps your original
+    as <file>.pre-gitconfig, which is never pruned.
 
 REQUIREMENTS: Administrator privileges
 "@
