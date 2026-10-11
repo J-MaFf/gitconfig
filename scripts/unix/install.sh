@@ -206,7 +206,7 @@ ERRORS=0
 # The auto-sync job is optional (no cron, or a declined replace prompt), so a
 # missing one is a warning, not an error.
 if [ "$NO_SCHEDULER" = false ]; then
-    if scheduler_status "$TARGET_OS"; then
+    if scheduler_status "$TARGET_OS" "$REPO_ROOT"; then
         echo "[OK] $SCHEDULER_NAME verified"
     else
         echo "[WARN] $SCHEDULER_NAME not found (setup may have been skipped)"

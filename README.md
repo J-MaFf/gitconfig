@@ -87,7 +87,7 @@ Removes: `~/.gitconfig`, symlinks, `~/.gitconfig.local`, and the `GitConfig Pull
 bash scripts/unix/cleanup-gitconfig.sh
 ```
 
-Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` symlink, `~/.gitconfig.local`, and the cron job (the line tagged `# gitconfig-autoupdate`, plus an untagged one from an older install; other cron entries are kept).
+Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` symlink, `~/.gitconfig.local`, and this clone's cron job (the line tagged `# gitconfig-autoupdate`, plus an untagged one from an older install, that runs this clone's `update-gitconfig.sh`; other clones' jobs, commented-out lines and other cron entries are kept). The cron job logs to `${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log`.
 
 ## Usage
 

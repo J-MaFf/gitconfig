@@ -37,9 +37,10 @@ DESCRIPTION:
     also keeps your original as <file>.pre-gitconfig, which is never pruned.
     Symlinks into this repo are removed without a backup.
     3. Removes the auto-sync job: unloads and deletes the launchd login agent
-       on macOS; deletes the cron line on Linux (lines tagged
-       "# gitconfig-autoupdate", plus untagged ones from older installs that
-       run update-gitconfig.sh; other cron entries are kept)
+       on macOS; deletes this clone's cron line on Linux (the line tagged
+       "# gitconfig-autoupdate", plus an untagged one from an older install,
+       that runs this clone's update-gitconfig.sh; other clones' jobs,
+       commented-out lines and other cron entries are kept)
 HELP
     exit 0
 fi
@@ -102,7 +103,7 @@ else
     echo "[STEP 3] Removing cron job..."
 fi
 echo "-----"
-scheduler_remove "$TARGET_OS" && REMOVED=$((REMOVED+1)) || true
+scheduler_remove "$TARGET_OS" "$REPO_ROOT" && REMOVED=$((REMOVED+1)) || true
 echo ""
 
 # STEP 4: Verify
@@ -113,7 +114,7 @@ ERRORS=0
 for file in ".gitconfig" ".gitignore_global" "gitconfig_helper.py" ".gitconfig.local"; do
     [ ! -e "$HOME_DIR/$file" ] && echo "[OK] $file removed" || { echo "[FAIL] $file still exists!"; ERRORS=$((ERRORS+1)); }
 done
-if scheduler_status "$TARGET_OS"; then
+if scheduler_status "$TARGET_OS" "$REPO_ROOT"; then
     echo "[FAIL] $SCHEDULER_NAME still exists!"
     ERRORS=$((ERRORS+1))
 else

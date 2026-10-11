@@ -17,7 +17,7 @@ setup() {
     mkdir -p "$HOME" "$SANDBOX/bin"
     export GITCONFIG_ALLOW_CROSS_OS=1
     export GIT_CONFIG_SYSTEM="$SANDBOX/no-system-config"
-    unset GIT_CONFIG_GLOBAL GITCONFIG_BACKUP_KEEP
+    unset GIT_CONFIG_GLOBAL GITCONFIG_BACKUP_KEEP XDG_STATE_HOME
 
     # Hide Python (no pip installs from a test) and any login-agent tooling.
     local stub

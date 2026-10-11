@@ -103,31 +103,91 @@ _launchd_plist_path() {
     echo "$HOME/Library/LaunchAgents/$GITCONFIG_LAUNCHD_LABEL.plist"
 }
 
-# The cron line this installer writes (daily at 9 AM). The /tmp log catches
-# what the updater can't log itself: its own log lives inside the repo, so a
-# wrong repo path can only be reported on stderr.
+# Per-user log for the cron job: ${XDG_STATE_HOME:-~/.local/state}/gitconfig/
+# gitconfig-update.log. It used to be the shared /tmp/gitconfig-update.log:
+# once another user owned that file, the job's `>>` redirect failed and sh
+# skipped the whole job, so auto-sync silently never ran (issue #259). The XDG
+# spec ignores a relative XDG_STATE_HOME, and so does this.
+# Usage: cron_log_path
+cron_log_path() {
+    local state="${XDG_STATE_HOME:-}"
+    case "$state" in
+        /*) ;;
+        *)  state="$HOME/.local/state" ;;
+    esac
+    echo "$state/gitconfig/gitconfig-update.log"
+}
+
+# Quote a value for a crontab command line: a double-quoted sh word with \, ",
+# $ and ` escaped, then every % escaped as \% (cron turns an unescaped % into
+# a newline and strips the backslash from \%). Fails for a value with a
+# newline, which no crontab line can hold.
+# Usage: _cron_quote VALUE
+_cron_quote() {
+    case "$1" in
+        *"
+"*) return 1 ;;
+    esac
+    printf '"%s"\n' "$(printf '%s' "$1" | sed -e 's/[\\"$`]/\\&/g' -e 's/%/\\%/g')"
+}
+
+# The cron line this installer writes (daily at 9 AM). The log catches what
+# the updater can't log itself: its own log lives inside the repo, so a wrong
+# repo path can only be reported on stderr. Fails (prints nothing) for a path
+# that can't be quoted (a newline in it).
 # Usage: cron_entry REPO_ROOT
 cron_entry() {
-    local repo_root="$1"
-    printf '0 9 * * * bash "%s" "%s" >> /tmp/gitconfig-update.log 2>&1 %s\n' \
-        "$repo_root/scripts/shared/update-gitconfig.sh" "$repo_root" "$GITCONFIG_CRON_MARKER"
+    local repo_root="$1" q_updater q_repo q_log
+    q_updater="$(_cron_quote "$repo_root/scripts/shared/update-gitconfig.sh")" || return 1
+    q_repo="$(_cron_quote "$repo_root")" || return 1
+    q_log="$(_cron_quote "$(cron_log_path)")" || return 1
+    printf '0 9 * * * bash %s %s >> %s 2>&1 %s\n' \
+        "$q_updater" "$q_repo" "$q_log" "$GITCONFIG_CRON_MARKER"
 }
 
-# Succeed if a crontab line (on stdin) is ours: tagged with the marker, or an
-# untagged line from an install that predates the marker (those all ran a
-# .../update-gitconfig.sh). Prints the crontab minus our lines with -v.
-# Usage: crontab -l | _cron_ours [-v]
+# Filter a crontab (on stdin) by whether each line is this clone's job:
+#   -q  succeed if any line is ours (prints nothing)
+#   -v  print the crontab minus our lines
+# A line is ours when it isn't a comment, runs an update-gitconfig.sh, and
+# names this clone's own "<REPO_ROOT>/scripts/... path: the tagged line this
+# installer writes, or an untagged one from an install that predates the
+# marker (those ran "<REPO_ROOT>/scripts/linux version/update-gitconfig.sh").
+# Another clone's job, or a commented-out line, is never ours (issue #259).
+# The leading quote and trailing /scripts/ stop /x/gitconfig from matching
+# /x/gitconfig2. Both the escaped form we write and the raw form older
+# installs wrote are matched; they differ only for paths with \ " $ ` or %.
+# Usage: crontab -l | _cron_ours -q|-v REPO_ROOT
 _cron_ours() {
-    grep -F "$1" -e "$GITCONFIG_CRON_MARKER" -e "update-gitconfig.sh"
+    local mode="$1" repo_root="$2" escaped
+    # The quoted path minus its closing quote. A path with a newline can't be
+    # in a crontab line at all; the raw pattern below still covers it.
+    escaped="$(_cron_quote "$repo_root")" || escaped="\"$repo_root\""
+    escaped="${escaped%?}"
+    # awk -v would process backslash escapes in the patterns; ENVIRON doesn't.
+    GITCONFIG_CRON_PAT_RAW="\"$repo_root/scripts/" \
+    GITCONFIG_CRON_PAT_ESC="$escaped/scripts/" \
+    awk -v mode="$mode" '
+        function ours(line) {
+            if (line ~ /^[ \t]*#/) return 0
+            if (index(line, "update-gitconfig.sh") == 0) return 0
+            return index(line, ENVIRON["GITCONFIG_CRON_PAT_RAW"]) > 0 ||
+                   index(line, ENVIRON["GITCONFIG_CRON_PAT_ESC"]) > 0
+        }
+        ours($0) { found = 1; next }
+        mode == "-v" { print }
+        END { if (mode == "-q") exit(found ? 0 : 1) }
+    '
 }
 
+# Usage: _cron_has_entry REPO_ROOT
 _cron_has_entry() {
-    crontab -l 2>/dev/null | _cron_ours -q
+    crontab -l 2>/dev/null | _cron_ours -q "$1"
 }
 
-# Rewrite the crontab without our lines. Other users' entries are kept.
+# Rewrite the crontab without this clone's lines. Every other entry is kept.
+# Usage: _cron_remove_entries REPO_ROOT
 _cron_remove_entries() {
-    crontab -l 2>/dev/null | _cron_ours -v | crontab - 2>/dev/null
+    crontab -l 2>/dev/null | _cron_ours -v "$1" | crontab - 2>/dev/null
 }
 
 # Register the auto-sync job. Prompts before replacing an existing job unless
@@ -142,27 +202,32 @@ scheduler_install() {
 }
 
 # Remove the auto-sync job. Returns 0 if one was removed, 1 if there was none
-# (or no crontab binary to ask).
-# Usage: scheduler_remove OS
+# (or no crontab binary to ask). On Linux only REPO_ROOT's cron lines are
+# removed, so another clone's job survives; the launchd agent has one fixed
+# label per user, so macOS ignores REPO_ROOT.
+# Usage: scheduler_remove OS REPO_ROOT
 scheduler_remove() {
     case "$1" in
         macos) _launchd_remove ;;
-        *)     _cron_remove ;;
+        *)     _cron_remove "$2" ;;
     esac
 }
 
-# Succeed if the auto-sync job is registered.
-# Usage: scheduler_status OS
+# Succeed if the auto-sync job is registered: on macOS a plist that is valid
+# (checked with plutil -lint where plutil exists), on Linux a cron line for
+# REPO_ROOT.
+# Usage: scheduler_status OS REPO_ROOT
 scheduler_status() {
     case "$1" in
-        macos) [ -f "$(_launchd_plist_path)" ] ;;
-        *)     command -v crontab >/dev/null 2>&1 && _cron_has_entry ;;
+        macos) [ -f "$(_launchd_plist_path)" ] && _launchd_plist_valid "$(_launchd_plist_path)" ;;
+        *)     command -v crontab >/dev/null 2>&1 && _cron_has_entry "$2" ;;
     esac
 }
 
 _cron_install() {
-    local repo_root="$1" force="$2" updater entry
+    local repo_root="$1" force="$2" updater entry log_path
     updater="$repo_root/scripts/shared/update-gitconfig.sh"
+    log_path="$(cron_log_path)"
 
     # Without a crontab binary (common on WSL, containers, minimal
     # Fedora/Arch) the `... | crontab -` pipeline below fails; skip the step
@@ -177,7 +242,18 @@ _cron_install() {
         return 1
     fi
 
-    if _cron_has_entry; then
+    if ! entry="$(cron_entry "$repo_root")"; then
+        echo "[WARN] Repo path contains a newline; a cron line can't hold it. Skipping the cron job."
+        return 1
+    fi
+    # sh skips the whole job when the >> redirect can't open the log, so the
+    # directory must exist before the first run.
+    if ! mkdir -p "$(dirname "$log_path")" 2>/dev/null; then
+        echo "[WARN] Could not create $(dirname "$log_path"); skipping the cron job"
+        return 1
+    fi
+
+    if _cron_has_entry "$repo_root"; then
         if [ "$force" != true ]; then
             read -p "Cron job already exists. Replace? (y/n) " -n 1 -r
             echo
@@ -186,30 +262,32 @@ _cron_install() {
                 return 1
             fi
         fi
-        # Drops the old line too when it came from an install that predates
-        # the marker, so the job is migrated rather than duplicated.
-        _cron_remove_entries || true
+        # Drops this clone's old line too when it came from an install that
+        # predates the marker, so the job is migrated rather than duplicated.
+        _cron_remove_entries "$repo_root" || true
     fi
 
-    entry="$(cron_entry "$repo_root")"
     if (crontab -l 2>/dev/null || true; echo "$entry") | crontab - 2>/dev/null; then
         echo "[OK] Created cron job for daily updates at 9 AM"
+        echo "     Log: $log_path"
         return 0
     fi
     echo "[WARN] Could not create cron job (cron may not be available)"
     return 1
 }
 
+# Usage: _cron_remove REPO_ROOT
 _cron_remove() {
+    local repo_root="$1"
     if ! command -v crontab >/dev/null 2>&1; then
         echo "[SKIP] crontab not found; no cron job to remove"
         return 1
     fi
-    if ! _cron_has_entry; then
+    if ! _cron_has_entry "$repo_root"; then
         echo "[SKIP] Cron job not found"
         return 1
     fi
-    if _cron_remove_entries; then
+    if _cron_remove_entries "$repo_root"; then
         echo "[OK] Removed cron job"
         return 0
     fi
@@ -217,8 +295,24 @@ _cron_remove() {
     return 1
 }
 
+# Escape a value for a plist <string>: & < > would otherwise end the element
+# or start an entity, and the plist would not parse (issue #259).
+# Usage: _xml_escape VALUE
+_xml_escape() {
+    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+# Succeed if PLIST parses. Uses plutil -lint where it exists (macOS); without
+# plutil there is nothing to check with, so the plist is taken as valid.
+# Usage: _launchd_plist_valid PLIST
+_launchd_plist_valid() {
+    command -v plutil >/dev/null 2>&1 || return 0
+    plutil -lint -s "$1" >/dev/null 2>&1
+}
+
 _launchd_install() {
     local repo_root="$1" force="$2" updater plist_path launch_agents_dir launchd_path
+    local x_updater x_repo x_log
     updater="$repo_root/scripts/shared/update-gitconfig.sh"
     plist_path="$(_launchd_plist_path)"
     launch_agents_dir="$(dirname "$plist_path")"
@@ -248,6 +342,9 @@ _launchd_install() {
         rm -f "$plist_path"
     fi
 
+    x_updater="$(_xml_escape "$updater")"
+    x_repo="$(_xml_escape "$repo_root")"
+    x_log="$(_xml_escape "$repo_root/docs/update-gitconfig.log")"
     cat > "$plist_path" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -259,8 +356,8 @@ _launchd_install() {
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>$updater</string>
-        <string>$repo_root</string>
+        <string>$x_updater</string>
+        <string>$x_repo</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
@@ -270,12 +367,20 @@ _launchd_install() {
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>$repo_root/docs/update-gitconfig.log</string>
+    <string>$x_log</string>
     <key>StandardErrorPath</key>
-    <string>$repo_root/docs/update-gitconfig.log</string>
+    <string>$x_log</string>
 </dict>
 </plist>
 PLIST
+
+    # Don't report "registered" for a plist launchd can't read.
+    if ! _launchd_plist_valid "$plist_path"; then
+        echo "[WARN] The launchd plist failed plutil -lint; removed it."
+        echo "       Auto-sync is not set up. Sync by hand with: git selfupdate"
+        rm -f "$plist_path"
+        return 1
+    fi
 
     if launchctl load "$plist_path" 2>/dev/null; then
         echo "[OK] launchd agent registered: $GITCONFIG_LAUNCHD_LABEL"
