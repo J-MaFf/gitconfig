@@ -762,6 +762,142 @@ class TestCli:
         assert helper.list_issues(["--lable", "bug"]) == 2
         assert "--lable" in capsys.readouterr().err
 
+    def test_issues_help_exits_0_without_gh(self, helper, monkeypatch, capsys):
+        monkeypatch.setattr(helper, "_have", lambda cmd: pytest.fail("must not reach gh"))
+        assert helper.list_issues(["-h"]) == 0
+        assert "Usage: git issues" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("sub", ["publish", "sync", "list"])
+    def test_skill_rejects_unknown_flag(self, helper, tmp_path, monkeypatch, capsys, sub):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        monkeypatch.setattr(helper, "_run_skill_script", lambda *a: pytest.fail("must not run"))
+        monkeypatch.setattr(helper, "_skill_sync_or_status", lambda *a: pytest.fail("must not run"))
+        monkeypatch.setattr(helper, "list_skills", lambda: pytest.fail("must not run"))
+        assert helper.skill([sub, "--dry-run"]) == 2
+        assert "--dry-run" in capsys.readouterr().err
+        assert helper.skill([sub, "-h"]) == 0
+        assert f"Usage: git skill {sub}" in capsys.readouterr().out
+
+
+class TestCliArgValidation:
+    """Unrecognised arguments must never fall through to the real command
+    (#250: `git cleanup -h` force-deleted a gone branch)."""
+
+    @staticmethod
+    def _run(*args):
+        # Inherits cwd and the isolated GIT_CONFIG_GLOBAL from the fixtures.
+        return subprocess.run(
+            [sys.executable, HELPER_PATH, *args], capture_output=True, text=True
+        )
+
+    @staticmethod
+    def _gone_branch(repo):
+        """Give `repo` a branch whose upstream has been deleted."""
+        _git(repo, "switch", "-q", "-c", "feat/x")
+        _commit(repo, "x.txt", "x work")
+        _git(repo, "push", "-q", "-u", "origin", "feat/x")
+        _git(repo, "switch", "-q", "main")
+        _git(repo, "push", "-q", "origin", "--delete", "feat/x")
+        _git(repo, "switch", "-q", "-c", "work")  # start away from main
+
+    @pytest.mark.parametrize("flag", ["-h", "--help"])
+    def test_cleanup_help_prints_usage_and_deletes_nothing(self, repo, flag):
+        self._gone_branch(repo)
+        result = self._run("cleanup", flag)
+        assert result.returncode == 0
+        assert "Usage: git cleanup" in result.stdout
+        assert "feat/x" in _branches(repo)
+        assert _git(repo, "branch", "--show-current") == "work"
+
+    @pytest.mark.parametrize("flag", ["--dry-run", "-n", "--forse", "extra"])
+    def test_cleanup_unknown_arg_exits_2_and_deletes_nothing(self, repo, flag):
+        self._gone_branch(repo)
+        result = self._run("cleanup", flag)
+        assert result.returncode == 2
+        assert flag in result.stderr and "Usage: git cleanup" in result.stderr
+        assert result.stdout == ""
+        assert "feat/x" in _branches(repo)
+        assert _git(repo, "branch", "--show-current") == "work"
+
+    @pytest.mark.parametrize("flag", ["--force", "-f"])
+    def test_cleanup_documented_flags_still_run(self, repo, flag):
+        self._gone_branch(repo)
+        _git(repo, "branch", "local-only", "main")
+        result = self._run("cleanup", flag)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _branches(repo) == {"main"}  # gone + local-only (incl. work)
+
+    def test_cleanup_without_args_still_runs(self, repo):
+        self._gone_branch(repo)
+        assert self._run("cleanup").returncode == 0
+        assert "feat/x" not in _branches(repo)
+
+    @pytest.mark.parametrize("flag", ["-h", "--help"])
+    def test_main_help_does_not_switch(self, repo, flag):
+        _git(repo, "switch", "-q", "-c", "work")
+        result = self._run("switch_to_main", flag)
+        assert result.returncode == 0
+        assert "Usage: git main" in result.stdout
+        assert _git(repo, "branch", "--show-current") == "work"
+
+    def test_main_unknown_flag_exits_2_and_does_not_switch(self, repo):
+        _git(repo, "switch", "-q", "-c", "work")
+        result = self._run("switch_to_main", "--dry-run")
+        assert result.returncode == 2
+        assert "--dry-run" in result.stderr and "Usage: git main" in result.stderr
+        assert _git(repo, "branch", "--show-current") == "work"
+
+    def test_main_still_switches(self, repo):
+        _git(repo, "switch", "-q", "-c", "work")
+        result = self._run("switch_to_main")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _git(repo, "branch", "--show-current") == "main"
+
+    @staticmethod
+    def _run_sandboxed(git_env, *args):
+        """Run a copy of the helper whose derived Scripts root is an empty
+        sandbox. `git main --all` sweeps every repo under that root, so any
+        test that might reach it must never use the real checkout's path."""
+        helper_dir = git_env / "root" / "gitconfig"
+        helper_dir.mkdir(parents=True, exist_ok=True)
+        sandboxed = helper_dir / "gitconfig_helper.py"
+        sandboxed.write_text(open(HELPER_PATH, encoding="utf-8").read(), encoding="utf-8")
+        return subprocess.run(
+            [sys.executable, str(sandboxed), *args], capture_output=True, text=True
+        )
+
+    @pytest.mark.parametrize("flag", ["--all", "-a"])
+    def test_main_all_still_dispatches(self, git_env, monkeypatch, flag):
+        monkeypatch.chdir(git_env)
+        result = self._run_sandboxed(git_env, "switch_to_main", flag)
+        assert "Unknown argument" not in result.stderr
+        assert "No git repositories found" in result.stdout  # update_all_main ran
+
+    @pytest.mark.parametrize("args", [["--all", "--help"], ["-a", "--dry-run"]])
+    def test_main_all_with_bad_args_does_not_sweep(self, git_env, monkeypatch, args):
+        monkeypatch.chdir(git_env)
+        result = self._run_sandboxed(git_env, "switch_to_main", *args)
+        assert result.returncode in (0, 2)
+        assert "Usage: git main" in result.stdout + result.stderr
+        assert "No git repositories found" not in result.stdout
+
+    def test_start_help_and_extra_args(self, git_env, monkeypatch):
+        monkeypatch.chdir(git_env)
+        result = self._run("start", "-h")
+        assert result.returncode == 0 and "Usage: git start" in result.stdout
+        result = self._run("start", "12", "34")
+        assert result.returncode == 2 and "Unknown argument: 34" in result.stderr
+
+    def test_alias_accepts_documented_flags_and_rejects_others(self, git_env, monkeypatch, tmp_path):
+        monkeypatch.chdir(git_env)
+        out = tmp_path / "sel.txt"
+        assert self._run("print_aliases", "--plain").returncode == 0
+        assert self._run("print_aliases", "--out", str(out)).returncode == 0
+        result = self._run("print_aliases", "--bogus")
+        assert result.returncode == 2 and "Usage: git alias" in result.stderr
+        result = self._run("print_aliases", "-h")
+        assert result.returncode == 0 and "Usage: git alias" in result.stdout
+
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
