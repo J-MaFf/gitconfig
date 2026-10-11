@@ -47,6 +47,18 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
+## Testing This Repo
+
+See `CLAUDE.md` for the layout. Before a PR, run the suites that cover what you changed:
+
+```bash
+python3 -m pytest tests/shared -q        # gitconfig_helper.py, deps.py
+bats tests/shared                         # bash scripts (scripts/unix, scripts/shared)
+pwsh tests/run-tests.ps1                  # Windows scripts; skips the Integration tag unless -IncludeIntegration
+```
+
+The suites sandbox `HOME`, git config, `crontab` and `launchctl`. Don't run the install, cleanup or update scripts against your real home directory, and run `tests/Integration.Tests.ps1` only on a throwaway machine or VM.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker
 
