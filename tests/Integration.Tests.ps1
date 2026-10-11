@@ -7,6 +7,15 @@ BeforeDiscovery {
 }
 
 BeforeAll {
+    # Reads the scheduled task name a script assigns with `$taskName = "..."`.
+    # Returns $null when the script has no such assignment.
+    function Get-LoginTaskName {
+        param([string]$Path)
+        $text = Get-Content -LiteralPath $Path -Raw
+        if ($text -match '(?m)^\s*\$taskName\s*=\s*"([^"]+)"') { return $Matches[1] }
+        return $null
+    }
+
     $script:repoRoot = Split-Path -Parent $PSScriptRoot
     $script:setupScript = Join-Path $script:repoRoot "scripts\windows version\install.ps1"
     $script:cleanupScript = Join-Path $script:repoRoot "scripts\windows version\Cleanup-GitConfig.ps1"
@@ -14,6 +23,11 @@ BeforeAll {
     if (-not $script:testHome) {
         $script:testHome = $env:HOME  # Unix/Linux fallback
     }
+
+    # The login task's name, read from the script that registers it so these
+    # tests can't drift from it again (#245: they looked up "Update-GitConfig",
+    # a task no script creates, so both task tests passed vacuously).
+    $script:taskName = Get-LoginTaskName -Path (Join-Path $script:repoRoot "scripts\windows version\Register-LoginTask.ps1")
 
     # Detect platform
     if ($PSVersionTable.PSVersion.Major -ge 6) {
@@ -37,6 +51,24 @@ BeforeAll {
             $name
             break
         }
+    }
+}
+
+Describe "Integration.Tests.ps1 scheduled task name" -Tag 'Unit' {
+    # Runs in the default suite so a rename is caught without -IncludeIntegration.
+    It "reads the task name from Register-LoginTask.ps1" {
+        $script:taskName | Should -Be "GitConfig Pull at Login"
+    }
+
+    It "Cleanup-GitConfig.ps1 removes the task Register-LoginTask.ps1 creates" {
+        $cleanupName = Get-LoginTaskName -Path $script:cleanupScript
+        $cleanupName | Should -Not -BeNullOrEmpty
+        $cleanupName | Should -Be $script:taskName
+    }
+
+    It "does not look up a scheduled task by a hardcoded name" {
+        $content = Get-Content $PSCommandPath -Raw
+        $content | Should -Not -Match 'Get-ScheduledTask\s+-TaskName\s+["\x27]'
     }
 }
 
@@ -125,16 +157,12 @@ Describe "GitConfig Integration" -Tag 'Integration' {
     }
 
     Context "Scheduled Task" {
-        It "Should create Update-GitConfig scheduled task" -Skip:(-not $platformIsWindows) {
-            # Scheduled tasks are Windows-only
-            # Skip this if setup was run with -NoTask flag
-            $task = Get-ScheduledTask -TaskName "Update-GitConfig" -ErrorAction SilentlyContinue
-            if ($task) {
-                $task | Should -Not -BeNullOrEmpty
-            }
-            else {
-                Set-ItResult -Skipped -Because "Setup was run with -NoTask (scheduled task creation skipped)"
-            }
+        # The setup test above runs install.ps1 without -NoTask, so whenever it
+        # runs the task must exist; a missing task is a failed registration, not
+        # a skip. Skipped only when setup itself is skipped.
+        It "Should create the login scheduled task" -Skip:(-not $setupRuns) {
+            $task = Get-ScheduledTask -TaskName $script:taskName -ErrorAction SilentlyContinue
+            $task | Should -Not -BeNullOrEmpty -Because "install.ps1 (run without -NoTask) registers '$($script:taskName)'"
         }
     }
 
@@ -194,9 +222,10 @@ Describe "GitConfig Integration" -Tag 'Integration' {
             $gitconfigPath | Should -Not -Exist
         }
 
-        It "Should remove scheduled task on cleanup" -Skip:(-not $platformIsWindows) {
-            # Scheduled tasks are Windows-only
-            $task = Get-ScheduledTask -TaskName "Update-GitConfig" -ErrorAction SilentlyContinue
+        # Runs only when the cleanup test above ran: otherwise there is nothing
+        # to check, and a real task on a developer machine would fail it.
+        It "Should remove scheduled task on cleanup" -Skip:(-not $setupRuns) {
+            $task = Get-ScheduledTask -TaskName $script:taskName -ErrorAction SilentlyContinue
             $task | Should -BeNullOrEmpty
         }
     }
