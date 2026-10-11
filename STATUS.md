@@ -52,7 +52,8 @@ Four follow-up fixes from the #198 adversarial review landed: [#203](https://git
 | [#202](https://github.com/J-MaFf/gitconfig/issues/202) | `Integration.Tests.ps1` invoked bare `python`, bypassing the repo's resolution rule | [#206](https://github.com/J-MaFf/gitconfig/pull/206) |
 | [#214](https://github.com/J-MaFf/gitconfig/issues/214) | Adopt shared reusable claude.yml workflow from J-MaFf/.github | [#215](https://github.com/J-MaFf/gitconfig/pull/215) |
 | [#248](https://github.com/J-MaFf/gitconfig/issues/248) | `git main` failed in worktrees, fetched the current branch's remote instead of the default branch's, and failed in repos with no remote | [#249](https://github.com/J-MaFf/gitconfig/pull/249) |
-| [#250](https://github.com/J-MaFf/gitconfig/issues/250) | Helper ignored unknown arguments, so `git cleanup -h` force-deleted gone branches; per-command allow-lists, `-h` prints usage, unknown flags exit 2 | [#266](https://github.com/J-MaFf/gitconfig/pull/266) (awaiting review) |
+| [#250](https://github.com/J-MaFf/gitconfig/issues/250) | Helper ignored unknown arguments, so `git cleanup -h` force-deleted gone branches; per-command allow-lists, `-h` prints usage, unknown flags exit 2 | [#266](https://github.com/J-MaFf/gitconfig/pull/266) |
+| [#251](https://github.com/J-MaFf/gitconfig/issues/251) | `git pushf` used a bare `--force-with-lease`, which any background fetch disarms, so it could overwrite a teammate's commit; now adds `--force-if-includes` (git 2.30+) | [#264](https://github.com/J-MaFf/gitconfig/pull/264) |
 
 ### Open Issues
 

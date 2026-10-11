@@ -6,6 +6,7 @@
 # with run_git monkeypatched. The branch-cleanup, `git main` and `git start`
 # tests build throwaway repos under tmp_path with a local bare remote and an
 # isolated GIT_CONFIG_GLOBAL: no network, and the developer's config is untouched.
+# The same sandbox runs the template's `git pushf` alias against two clones.
 #
 # Run with:  pytest tests/shared/test_gitconfig_helper.py
 # Requires:  pytest and the helper's own dependency, `rich`.
@@ -897,6 +898,85 @@ class TestCliArgValidation:
         assert result.returncode == 2 and "Usage: git alias" in result.stderr
         result = self._run("print_aliases", "-h")
         assert result.returncode == 0 and "Usage: git alias" in result.stdout
+
+
+# --------------------------------------------------------------------------
+# `git pushf` alias from .gitconfig.template (#251)
+# --------------------------------------------------------------------------
+
+def _git_version():
+    out = subprocess.run(["git", "--version"], capture_output=True, text=True).stdout
+    return tuple(int(n) for n in out.split()[2].split(".")[:2])
+
+
+@pytest.mark.skipif(_git_version() < (2, 30), reason="--force-if-includes needs git 2.30+")
+class TestPushfAlias:
+    """Runs the template's real pushf alias against a bare remote shared by
+    two clones. A bare --force-with-lease trusts whatever origin/<branch> was
+    last fetched, so a background fetch (IDE autofetch, git main) silently
+    disarms it; --force-if-includes keeps it armed."""
+
+    @staticmethod
+    def _template_alias(name):
+        return subprocess.run(
+            ["git", "config", "--file", os.path.join(REPO_ROOT, ".gitconfig.template"),
+             f"alias.{name}"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    @pytest.fixture
+    def pushf_env(self, git_env, repo):
+        """`me` (the repo fixture's clone, on a pushed feature branch) and a
+        teammate clone; the template's pushf alias is installed globally."""
+        _git(git_env, "config", "--global", "alias.pushf", self._template_alias("pushf"))
+        _git(repo, "switch", "-q", "-c", "feature")
+        _commit(repo, "a.txt", "my work")
+        _git(repo, "push", "-q", "-u", "origin", "feature")
+        mate = git_env / "mate"
+        _git(git_env, "clone", "-q", "-b", "feature", str(git_env / "remote.git"), str(mate))
+        _commit(mate, "b.txt", "teammate work")
+        _git(mate, "push", "-q", "origin", "feature")
+        return repo, mate, _git(mate, "rev-parse", "HEAD")
+
+    @staticmethod
+    def _remote_feature(repo):
+        return _git(repo, "ls-remote", "origin", "refs/heads/feature").split()[0]
+
+    def test_template_alias_includes_both_flags(self):
+        args = self._template_alias("pushf").split()
+        assert args[0] == "push"
+        assert "--force-with-lease" in args
+        assert "--force-if-includes" in args
+
+    def test_bare_lease_clobbers_after_background_fetch(self, pushf_env):
+        # Control: shows the hole the alias closes.
+        me, _, mate_tip = pushf_env
+        _git(me, "fetch", "-q")
+        _git(me, "commit", "-q", "--amend", "-m", "my work, amended")
+        _git(me, "push", "-q", "--force-with-lease")
+        assert self._remote_feature(me) != mate_tip
+
+    def test_pushf_rejects_after_background_fetch(self, pushf_env):
+        me, _, mate_tip = pushf_env
+        _git(me, "fetch", "-q")
+        _git(me, "commit", "-q", "--amend", "-m", "my work, amended")
+        result = subprocess.run(["git", "pushf"], cwd=me, capture_output=True, text=True)
+        assert result.returncode != 0
+        # Rejected by the push check itself, not some unrelated failure.
+        assert "[rejected]" in result.stderr
+        assert self._remote_feature(me) == mate_tip
+
+    def test_pushf_allowed_once_remote_work_is_integrated(self, pushf_env):
+        me, _, _ = pushf_env
+        _git(me, "fetch", "-q")
+        _git(me, "rebase", "-q", "origin/feature")
+        _git(me, "commit", "-q", "--amend", "-m", "teammate work, reworded")
+        subprocess.run(["git", "pushf"], cwd=me, check=True, capture_output=True, text=True)
+        remote_tip = self._remote_feature(me)
+        assert remote_tip == _git(me, "rev-parse", "HEAD")
+        # The teammate's change survives in the rewritten history.
+        assert (me / "b.txt").exists()
+        assert _git(me, "show", "-s", "--format=%B", remote_tip) == "teammate work, reworded"
 
 
 if __name__ == "__main__":

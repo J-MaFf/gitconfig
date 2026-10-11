@@ -86,6 +86,16 @@ Describe ".gitconfig.template simple aliases" -Tag 'Unit' {
         }
     }
 
+    It "pushf pairs --force-with-lease with --force-if-includes (#251)" {
+        # A bare --force-with-lease is disarmed by any background fetch; the
+        # behavioural check lives in tests/shared/test_gitconfig_helper.py.
+        $line = $script:templateLines | Where-Object { $_ -match '^\s*pushf\s*=' } | Select-Object -First 1
+        $line | Should -Match '^\s*pushf\s*=\s*push\s'
+        $line | Should -Match '--force-with-lease'
+        $line | Should -Match '--force-if-includes'
+        $line | Should -Not -Match '--force(\s|$)'
+    }
+
     It "forwards arguments to the helper so 'git alias --plain' works" {
         $line = $script:templateLines | Where-Object { $_ -match '^\s*alias\s*=' } | Select-Object -First 1
         $line | Should -Match 'print_aliases \\"\$@\\"'
