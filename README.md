@@ -132,7 +132,10 @@ with the **`Ctrl-G`** keybinding instead.
 The installer adds a `Ctrl-G` keybinding to your shell (bash/zsh) and PowerShell profile.
 Press `Ctrl-G` at the prompt to open the browser; the alias you pick is typed onto your
 command line, ready to run or edit. A program launched by `git alias` can't type at your
-prompt itself, so this keybinding does the insertion — like fzf's `Ctrl-T`. Enable it
+prompt itself, so this keybinding does the insertion — like fzf's `Ctrl-T`. The bash
+widget needs bash 4.0+: on macOS use zsh (the default shell), or Homebrew's bash
+(`brew install bash`). Under the stock `/bin/bash` 3.2 the widget doesn't bind `Ctrl-G` and
+prints a one-line note instead; `git alias` works either way. Enable it
 manually by sourcing the matching widget:
 
 ```bash

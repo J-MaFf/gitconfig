@@ -103,6 +103,19 @@ _launchd_plist_path() {
     echo "$HOME/Library/LaunchAgents/$GITCONFIG_LAUNCHD_LABEL.plist"
 }
 
+# The launchd domain of this user's login session. `launchctl load`/`unload`
+# are deprecated; `bootstrap`/`bootout` name the domain explicitly (#234).
+_launchd_domain() {
+    echo "gui/$(id -u)"
+}
+
+# Unload the agent if it is loaded. Fails when it wasn't loaded (or launchctl
+# refused); callers that only want it gone ignore that.
+# Usage: _launchd_bootout
+_launchd_bootout() {
+    launchctl bootout "$(_launchd_domain)/$GITCONFIG_LAUNCHD_LABEL" >/dev/null 2>&1
+}
+
 # Per-user log for the cron job: ${XDG_STATE_HOME:-~/.local/state}/gitconfig/
 # gitconfig-update.log. It used to be the shared /tmp/gitconfig-update.log:
 # once another user owned that file, the job's `>>` redirect failed and sh
@@ -340,9 +353,11 @@ _launchd_install() {
                 return 1
             fi
         fi
-        launchctl unload "$plist_path" 2>/dev/null || true
         rm -f "$plist_path"
     fi
+    # Bootstrapping a label that is still loaded fails ("service already
+    # loaded"), so unload any copy first, even one whose plist is gone.
+    _launchd_bootout || true
 
     x_updater="$(_xml_escape "$updater")"
     x_repo="$(_xml_escape "$repo_root")"
@@ -384,7 +399,7 @@ PLIST
         return 1
     fi
 
-    if launchctl load "$plist_path" 2>/dev/null; then
+    if launchctl bootstrap "$(_launchd_domain)" "$plist_path" 2>/dev/null; then
         echo "[OK] launchd agent registered: $GITCONFIG_LAUNCHD_LABEL"
         echo "     Runs automatically at each login."
         echo ""
@@ -393,7 +408,8 @@ PLIST
         echo "     If auto-sync does not run, go to:"
         echo "       System Settings > Privacy & Security > Full Disk Access"
         echo "     enable your terminal app, then reload the agent with:"
-        echo "       launchctl unload $plist_path && launchctl load $plist_path"
+        echo "       launchctl bootout $(_launchd_domain)/$GITCONFIG_LAUNCHD_LABEL"
+        echo "       launchctl bootstrap $(_launchd_domain) \"$plist_path\""
     else
         echo "[WARN] Could not load launchd agent immediately."
         echo "       It will activate at next login."
@@ -406,13 +422,21 @@ _launchd_remove() {
     local plist_path
     plist_path="$(_launchd_plist_path)"
     if [ ! -f "$plist_path" ]; then
+        # A loaded agent whose plist was deleted by hand still runs until
+        # logout; unload it too.
+        if _launchd_bootout; then
+            echo "[OK] Unloaded launchd agent (its plist was already gone)"
+            return 0
+        fi
         echo "[SKIP] launchd plist not found"
         return 1
     fi
-    if launchctl unload "$plist_path" 2>/dev/null; then
+    # bootout fails when the agent isn't loaded (say, launchd never picked it
+    # up, or it was unloaded by hand); the plist is still removed.
+    if _launchd_bootout; then
         echo "[OK] Unloaded launchd agent"
     else
-        echo "[WARN] Could not unload agent (may not be running)"
+        echo "[SKIP] launchd agent was not loaded"
     fi
     rm -f "$plist_path"
     echo "[OK] Removed launchd plist: $plist_path"

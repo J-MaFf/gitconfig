@@ -17,6 +17,8 @@ setup() {
 
     TESTDIR="$(mktemp -d)"
     export HOME="$TESTDIR/home"
+    # The update lock lives under XDG_STATE_HOME when it is set; keep it in HOME.
+    unset XDG_STATE_HOME
     mkdir -p "$HOME"
     # Never read or write the developer's git config.
     export GIT_CONFIG_GLOBAL="$TESTDIR/gitconfig-global"
@@ -174,4 +176,64 @@ run_on_terminal() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"SUCCESS: repo up to date"* ]]
     [[ "$output" == *"Repository synchronization completed"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# One sync at a time (issue #234)
+# ---------------------------------------------------------------------------
+
+LOCK_REL=".local/state/gitconfig/update.lock"
+
+@test "exits 0 quietly, changing nothing, while another run holds the lock" {
+    sleep 60 3>&- &
+    holder=$!
+    mkdir -p "$HOME/$LOCK_REL"
+    echo "$holder" > "$HOME/$LOCK_REL/pid"
+
+    run bash "$UPDATER" "$REPO"
+    kill "$holder" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -e "$LOG" ]
+    [ ! -e "$HOME/.gitconfig" ]
+    # The holder's lock is left alone.
+    [ "$(cat "$HOME/$LOCK_REL/pid")" = "$holder" ]
+}
+
+@test "run from a terminal while the lock is held, it says it skipped" {
+    sleep 60 3>&- &
+    holder=$!
+    mkdir -p "$HOME/$LOCK_REL"
+    echo "$holder" > "$HOME/$LOCK_REL/pid"
+
+    run_on_terminal
+    kill "$holder" 2>/dev/null || true
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"already running; skipped"* ]]
+    [ ! -e "$LOG" ]
+}
+
+@test "takes over a stale lock left by a run that died, and releases it" {
+    sh -c 'exit 0' &
+    dead=$!
+    wait "$dead"
+    mkdir -p "$HOME/$LOCK_REL"
+    echo "$dead" > "$HOME/$LOCK_REL/pid"
+
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    grep -qF "Repository synchronization completed" "$LOG"
+    [ ! -e "$HOME/$LOCK_REL" ]
+}
+
+@test "releases the lock when it finishes, even on failure" {
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 0 ]
+    [ ! -e "$HOME/$LOCK_REL" ]
+
+    # ~/.gitconfig can't be converged: exit 1, lock still released.
+    rm -f "$REPO/.gitconfig.template"
+    run bash "$UPDATER" "$REPO"
+    [ "$status" -eq 1 ]
+    [ ! -e "$HOME/$LOCK_REL" ]
 }

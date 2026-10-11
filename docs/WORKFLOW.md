@@ -710,6 +710,15 @@ the job. Answering `y` to regenerating `.gitconfig.local` too is safe: the setti
 added are kept. `--force` says yes to both. Install and cleanup only touch this clone's
 cron line, so after moving a clone, remove the old path's line with `crontab -e`.
 
+Only one sync runs at a time per user: the updater takes a lock directory,
+`${XDG_STATE_HOME:-~/.local/state}/gitconfig/update.lock`, and exits 0 without doing
+anything while another run holds it (`git selfupdate` says it skipped). The installer
+holds it while it registers the job and installs the Python dependencies, so the sync
+launchd starts at once (`RunAtLoad`) doesn't run the same pip install alongside it. A
+lock whose owner has exited, or one older than an hour, is taken over. On macOS the
+installer and cleanup use `launchctl bootstrap gui/<uid>` and
+`launchctl bootout gui/<uid>/com.gitconfig.update`, not the deprecated `load`/`unload`.
+
 ---
 
 #### Issue: "Python error when running git alias"

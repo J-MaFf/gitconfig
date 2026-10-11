@@ -53,6 +53,25 @@ if [ ! -d "$REPO_PATH" ]; then
     exit 1
 fi
 
+# shellcheck source=functions.sh
+source "$SCRIPT_DIR/functions.sh"
+
+# One sync at a time. launchd's RunAtLoad starts this the moment install.sh
+# registers the agent, while the installer runs the same pip install itself
+# (issue #234), and a login sync can overlap `git selfupdate`. When another
+# run holds the lock, there is nothing to do: exit 0 quietly (a note on the
+# terminal when run by hand). A stale lock (owner gone, or older than an hour)
+# is taken over. No writable state directory means no lock, not no sync.
+LOCK_RC=0
+acquire_update_lock || LOCK_RC=$?
+if [ "$LOCK_RC" -eq 1 ]; then
+    if [ "$INTERACTIVE" = true ]; then
+        echo "Another gitconfig update is already running; skipped (lock: $(update_lock_path))." >&2
+    fi
+    exit 0
+fi
+trap release_update_lock EXIT
+
 EXIT_CODE=0
 
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -95,8 +114,6 @@ mkdir -p "$(dirname "$LOG_FILE")"
     # generate_gitconfig is idempotent: it writes only when the rendered template
     # differs from ~/.gitconfig, so this self-heals from any state (stale,
     # hand-edited, deleted, or a no-op pull) and is safe to run on every login.
-    # shellcheck source=functions.sh
-    source "$SCRIPT_DIR/functions.sh"
     if generate_gitconfig "$REPO_PATH" "$HOME" true; then
         log_message "SUCCESS: ~/.gitconfig converged to template"
     else

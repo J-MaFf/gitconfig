@@ -681,3 +681,126 @@ backups_of() {
     [ "$status" -eq 1 ]
     [ ! -s "$TESTDIR/kept" ]
 }
+
+# ---------------------------------------------------------------------------
+# git-alias widget under old bash (issue #234)
+# ---------------------------------------------------------------------------
+
+@test "the bash widget binds Ctrl-G only under bash 4+, and says why otherwise (#234)" {
+    # Runs the widget in an interactive bash (no rc files): bash 5 on Linux CI,
+    # the stock /bin/bash 3.2 on macOS CI. bind -X (list `bind -x` bindings)
+    # only exists since bash 4.3, so its failure under 3.2 is ignored.
+    major="$(bash -c 'echo "${BASH_VERSINFO[0]}"')"
+    run bash --norc --noprofile -i -c \
+        "source '$REPO_ROOT/scripts/shell/git-alias-widget.bash'; bind -X 2>/dev/null || true" < /dev/null
+    [ "$status" -eq 0 ]
+    if [ "$major" -ge 4 ]; then
+        [[ "$output" == *'__git_alias_insert'* ]]
+        [[ "$output" != *"needs bash 4+"* ]]
+    else
+        [[ "$output" == *"Ctrl-G needs bash 4+"* ]]
+        [[ "$output" != *'"\C-g": "__git_alias_insert"'* ]]
+    fi
+}
+
+@test "enable_git_alias_widget notes when the login shell is bash 3 (#234)" {
+    mkdir -p "$TESTDIR/oldbash"
+    printf '#!/bin/sh\necho 3\n' > "$TESTDIR/oldbash/bash"
+    chmod +x "$TESTDIR/oldbash/bash"
+    : > "$HOME_DIR/.bashrc"
+    SHELL="$TESTDIR/oldbash/bash" run enable_git_alias_widget "$REPO_ROOT" "$HOME_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[NOTE] Ctrl-G in bash needs bash 4+"* ]]
+    # The block is still added, so a later bash 4+ picks Ctrl-G up.
+    grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$HOME_DIR/.bashrc"
+
+    printf '#!/bin/sh\necho 5\n' > "$TESTDIR/oldbash/bash"
+    SHELL="$TESTDIR/oldbash/bash" run enable_git_alias_widget "$REPO_ROOT" "$HOME_DIR"
+    [[ "$output" != *"[NOTE]"* ]]
+    SHELL=/bin/zsh run enable_git_alias_widget "$REPO_ROOT" "$HOME_DIR"
+    [[ "$output" != *"[NOTE]"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Update lock (issue #234)
+# ---------------------------------------------------------------------------
+
+# Every lock test keeps the lock inside the sandbox.
+_lock_env() {
+    export XDG_STATE_HOME="$TESTDIR/state"
+    LOCK="$TESTDIR/state/gitconfig/update.lock"
+}
+
+# Try to take the lock from another process; prints its exit code.
+_other_acquire() {
+    bash -c "source '$REPO_ROOT/scripts/shared/functions.sh'; acquire_update_lock; echo \$?"
+}
+
+@test "update_lock_path is per user under XDG_STATE_HOME, ignoring a relative one" {
+    XDG_STATE_HOME="$TESTDIR/state" run update_lock_path
+    [ "$output" = "$TESTDIR/state/gitconfig/update.lock" ]
+    HOME="$TESTDIR/h" XDG_STATE_HOME="rel/state" run update_lock_path
+    [ "$output" = "$TESTDIR/h/.local/state/gitconfig/update.lock" ]
+}
+
+@test "acquire_update_lock takes the lock once; another process can't while it's held" {
+    _lock_env
+    acquire_update_lock
+    [ -d "$LOCK" ]
+    [ "$(cat "$LOCK/pid")" = "$$" ]
+
+    run _other_acquire
+    [ "$output" = 1 ]
+    [ "$(cat "$LOCK/pid")" = "$$" ]
+
+    release_update_lock
+    [ ! -e "$LOCK" ]
+    run _other_acquire
+    [ "$output" = 0 ]
+}
+
+@test "release_update_lock leaves a lock it doesn't own" {
+    _lock_env
+    mkdir -p "$LOCK"
+    echo 999999 > "$LOCK/pid"
+    release_update_lock
+    [ -d "$LOCK" ]
+}
+
+@test "a lock whose owner has exited is stale and taken over" {
+    _lock_env
+    sh -c 'exit 0' &
+    dead=$!
+    wait "$dead"
+    mkdir -p "$LOCK"
+    echo "$dead" > "$LOCK/pid"
+    run kill -0 "$dead"
+    [ "$status" -ne 0 ]
+
+    acquire_update_lock
+    [ "$(cat "$LOCK/pid")" = "$$" ]
+}
+
+@test "a lock older than the stale age is taken over even if its owner runs" {
+    _lock_env
+    sleep 60 3>&- &
+    live=$!
+    mkdir -p "$LOCK"
+    echo "$live" > "$LOCK/pid"
+
+    run _other_acquire
+    [ "$output" = 1 ]
+
+    # Two hours old: past the default of 60 minutes.
+    touch -t "$(date -d '2 hours ago' +%Y%m%d%H%M 2>/dev/null || date -v-2H +%Y%m%d%H%M)" "$LOCK"
+    run _other_acquire
+    kill "$live" 2>/dev/null || true
+    [ "$output" = 0 ]
+}
+
+@test "a fresh lock with no pid file yet counts as held" {
+    _lock_env
+    mkdir -p "$LOCK"
+    run _other_acquire
+    [ "$output" = 1 ]
+}
