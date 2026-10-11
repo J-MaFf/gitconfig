@@ -78,6 +78,7 @@ Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows Po
 | [#241](https://github.com/J-MaFf/gitconfig/issues/241) | `git main --all` swept the clone's parent folder, which is the home folder for a `~/gitconfig` clone (or its parent via the install symlink); root now from `gitconfig.scriptsRoot`, realpath-derived, and $HOME / its parent / `/` refused without `--force` | [#287](https://github.com/J-MaFf/gitconfig/pull/287) |
 | [#240](https://github.com/J-MaFf/gitconfig/issues/240) | Windows `install.ps1` printed `Setup Complete!` and exited 0 after failed steps, the elevated relaunch lost the exit code, `Initialize-Symlinks.ps1` asked about the task even with `-NoTask` and `-Reinstall -NoTask` deleted it, and elevating with another account's password set up the administrator's profile and task; now failures exit 1, `-KeepTask`, and the invoking account is configured | [#288](https://github.com/J-MaFf/gitconfig/pull/288) |
 | [#234](https://github.com/J-MaFf/gitconfig/issues/234) | macOS: the bash Ctrl-G widget bound but did nothing under `/bin/bash` 3.2, the scheduler used the deprecated `launchctl load`/`unload`, and the `RunAtLoad` sync ran the same pip install as the installer's STEP 6; now the widget binds only under bash 4+ (with a note), `bootstrap`/`bootout` are used, and a per-user lock keeps to one sync at a time | [#286](https://github.com/J-MaFf/gitconfig/pull/286) |
+| [#232](https://github.com/J-MaFf/gitconfig/issues/232) | `git skill list` ran one `git log` per skill (now one pass); the two skill-audit runners duplicated script/shell selection (now `_audit_cmd`); the skills-repo dirt warning named a nonexistent `git update` (now `git main --all`) | PRLINK |
 
 ### Open Issues
 
@@ -87,7 +88,6 @@ From an earlier review; none are being worked on.
 |-------|-------------|
 | [#230](https://github.com/J-MaFf/gitconfig/issues/230) | Windows: Ctrl-G only installed for one PowerShell edition; PS 5.1 encoding and log quirks |
 | [#231](https://github.com/J-MaFf/gitconfig/issues/231) | Template: dedupe the Python-finder alias loop (quote the repo path) and move machine-specific settings out |
-| [#232](https://github.com/J-MaFf/gitconfig/issues/232) | gitconfig_helper.py cleanups: batch skill git log, share audit command, fix stale 'git update' message |
 | [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Replace source-text tests with behavioural tests in a sandboxed HOME |
 | [#235](https://github.com/J-MaFf/gitconfig/issues/235) | Stop hardcoding machine-specific values in .gitconfig.local generation |
 | [#246](https://github.com/J-MaFf/gitconfig/issues/246) | Add a systemd user timer backend to the Unix scheduler |

@@ -600,20 +600,42 @@ def _read_skill_description(skill_md_path):
     return ""
 
 
-def _skill_last_updated(skills_dir, name, skill_md_path):
+def _skill_commit_dates(skills_dir):
+    """Return {top-level path: 'YYYY-MM-DD'}: the last commit touching each.
+
+    One `git log --name-only` pass over the skills repo, newest first, so the
+    first date seen for a top-level directory is its last-commit date -- the
+    same answer `git log -1 -- <name>` gives per skill, without one git process
+    per skill (#232). --relative keeps paths relative to skills_dir. Empty when
+    skills_dir isn't a git repo or git fails.
+    """
+    result = run_git(
+        "-C", skills_dir, "-c", "core.quotePath=false",
+        "log", "--format=%x00%cs", "--name-only", "--relative",
+    )
+    dates = {}
+    if result.returncode != 0:
+        return dates
+    for commit in result.stdout.split("\0")[1:]:
+        date, _, names = commit.partition("\n")
+        for path in names.splitlines():
+            top = path.strip().strip('"').split("/", 1)[0]
+            if top and top not in dates:
+                dates[top] = date.strip()
+    return dates
+
+
+def _skill_last_updated(commit_dates, name, skill_md_path):
     """Return the date a skill was last updated as 'YYYY-MM-DD'.
 
-    Prefers the last commit that touched the skill directory (when the skills
-    directory is a git repo); falls back to the SKILL.md modification time, or
+    Prefers the last commit that touched the skill directory (from
+    _skill_commit_dates()); falls back to the SKILL.md modification time, or
     'unknown' if neither is available.
     """
-    result = run_git("-C", skills_dir, "log", "-1", "--format=%cs", "--", name)
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
+    if commit_dates.get(name):
+        return commit_dates[name]
     try:
-        import datetime
-
-        return datetime.date.fromtimestamp(os.path.getmtime(skill_md_path)).isoformat()
+        return datetime.fromtimestamp(os.path.getmtime(skill_md_path)).date().isoformat()
     except OSError:
         return "unknown"
 
@@ -660,6 +682,7 @@ def list_skills():
         return 1
 
     rows = []
+    commit_dates = _skill_commit_dates(skills_dir)
     for name in sorted(os.listdir(skills_dir)):
         skill_md = os.path.join(skills_dir, name, "SKILL.md")
         if not os.path.isfile(skill_md):
@@ -667,7 +690,7 @@ def list_skills():
         description = _read_skill_description(skill_md)
         if len(description) > 100:
             description = description[:99].rstrip() + "..."
-        updated = _skill_last_updated(skills_dir, name, skill_md)
+        updated = _skill_last_updated(commit_dates, name, skill_md)
         rows.append((name, description, updated))
 
     if not rows:
@@ -786,6 +809,44 @@ def _last_background_sync():
     return stamp, result
 
 
+def _audit_cmd(extra_args=()):
+    """Return (script, argv) that runs skill-audit with `extra_args`.
+
+    `extra_args` are skill-audit.sh's long options (--summary, --strict,
+    --no-fetch). On Windows they become skill-audit.ps1's switches (-Summary,
+    -Strict, -NoFetch), run with pwsh, falling back to powershell: the audit
+    stays WinPS-compatible by design, so plain powershell is fine when pwsh is
+    absent. Elsewhere the script runs under bash. Shared by _audit_summary()
+    and _audit_full() (#232).
+    """
+    scripts_dir = os.path.join(SKILLS_DIR, "scripts")
+    if sys.platform == "win32":
+        script = os.path.join(scripts_dir, "skill-audit.ps1")
+        shell = shutil.which("pwsh") or "powershell"
+        switches = [
+            "-" + "".join(part.capitalize() for part in arg.lstrip("-").split("-"))
+            for arg in extra_args
+        ]
+        return script, [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                        script, *switches]
+    script = os.path.join(scripts_dir, "skill-audit.sh")
+    return script, ["bash", script, *extra_args]
+
+
+def _run_audit(extra_args):
+    """Run skill-audit (see _audit_cmd()); the CompletedProcess, or None when
+    the script is missing or won't launch."""
+    script, cmd = _audit_cmd(extra_args)
+    if not os.path.isfile(script):
+        return None
+    try:
+        return subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+    except OSError:
+        return None
+
+
 def _audit_summary(no_fetch):
     """Run skill-audit --summary --strict; return (lines, actionable, error) or None.
 
@@ -796,28 +857,8 @@ def _audit_summary(no_fetch):
     _classify_audit_exit()). None means the audit script is missing or won't
     launch.
     """
-    scripts_dir = os.path.join(SKILLS_DIR, "scripts")
-    if sys.platform == "win32":
-        script = os.path.join(scripts_dir, "skill-audit.ps1")
-        # The audit stays WinPS-compatible by design, so plain powershell is a
-        # fine fallback when pwsh is absent.
-        shell = shutil.which("pwsh") or "powershell"
-        cmd = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-               script, "-Summary", "-Strict"]
-        if no_fetch:
-            cmd.append("-NoFetch")
-    else:
-        script = os.path.join(scripts_dir, "skill-audit.sh")
-        cmd = ["bash", script, "--summary", "--strict"]
-        if no_fetch:
-            cmd.append("--no-fetch")
-    if not os.path.isfile(script):
-        return None
-    try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-        )
-    except OSError:
+    proc = _run_audit(["--summary", "--strict"] + (["--no-fetch"] if no_fetch else []))
+    if proc is None:
         return None
     lines = [line for line in proc.stdout.splitlines() if line.strip()]
     return (lines, *_classify_audit_exit(proc, lines))
@@ -862,33 +903,18 @@ _DRIFTED_ITEM_RE = re.compile(r"^\s*-\s*(?P<name>\S+)\s+-\s+uncommitted local ed
 def _audit_full():
     """Run skill-audit's full (non-summary) report; return (lines, error) or None.
 
-    Mirrors `_audit_summary()`'s script-path/shell-selection logic (prefer pwsh,
-    fall back to powershell on Windows since skill-audit.ps1 is WinPS-compatible;
-    bash elsewhere) but omits -Summary so the sectioned report - including the
+    Same script and shell selection as `_audit_summary()` (via _audit_cmd())
+    but without --summary, so the sectioned report - including the
     "[!] Drifted (N)" section skill_diff() parses - is included. Always run with
-    the no-fetch flag: diffing is a local working-tree-vs-HEAD comparison, so no
+    --no-fetch: diffing is a local working-tree-vs-HEAD comparison, so no
     network call is needed (#see skill_diff). Without --strict the audit exits
     0 whether or not anything drifted, so any other exit is its own failure:
     error is then the exit code plus its stderr, and lines must not be read
     as "nothing drifted" (#260). None means the audit script is missing or
     won't launch.
     """
-    scripts_dir = os.path.join(SKILLS_DIR, "scripts")
-    if sys.platform == "win32":
-        script = os.path.join(scripts_dir, "skill-audit.ps1")
-        shell = shutil.which("pwsh") or "powershell"
-        cmd = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-               script, "-NoFetch"]
-    else:
-        script = os.path.join(scripts_dir, "skill-audit.sh")
-        cmd = ["bash", script, "--no-fetch"]
-    if not os.path.isfile(script):
-        return None
-    try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-        )
-    except OSError:
+    proc = _run_audit(["--no-fetch"])
+    if proc is None:
         return None
     return proc.stdout.splitlines(), _audit_error(proc) if proc.returncode else None
 
@@ -941,10 +967,10 @@ def _repo_dirt_paths():
     skill-audit classifies skill *directories* only, so uncommitted changes to
     anything else in the repo (.claude-plugin/, scripts/, top-level docs, a
     directory rename) leave `git skill status` reporting "nothing to publish"
-    while `git update` skips the repo as dirty - the two commands disagree and
-    the scheduled sync silently stops fast-forwarding (#217). This is the same
-    repo-wide `git status --porcelain` that update_all_repos() gates on, minus
-    the paths the audit already accounts for. None means status couldn't run.
+    while `git main --all` skips the repo as dirty - the two commands disagree
+    (#217). This is the same repo-wide `git status --porcelain` that
+    update_all_main() gates on, minus the paths the audit already accounts
+    for. None means status couldn't run.
     """
     result = run_git("-C", SKILLS_DIR, "status", "--porcelain")
     if result.returncode != 0:
@@ -969,9 +995,11 @@ def _repo_dirt_paths():
 def _render_repo_dirt(console):
     """Report uncommitted non-skill changes in the skills repo. True if any.
 
-    Named with its consequence: this dirt is what makes `git update` print
+    Named with its consequence: this dirt is what makes `git main --all` print
     "Skipped (dirty)" for claude-skills, which is otherwise invisible from
-    here - the skill counts stay green and the repo quietly stops syncing.
+    here - the skill counts stay green and the repo quietly stops updating.
+    (The scheduled sync's `git pull --ff-only` doesn't skip dirty repos; it
+    fails only when an incoming commit touches a dirty file.)
     """
     dirt = _repo_dirt_paths()
     if dirt is None:
@@ -990,7 +1018,7 @@ def _render_repo_dirt(console):
         console.print(f"    [dim]... and {len(dirt) - 5} more[/dim]")
     # Kept to one 80-column line so it doesn't wrap mid-sentence in a terminal.
     console.print(
-        "  [yellow][!] Blocks the sync - `git update` skips this repo as dirty[/yellow]"
+        "  [yellow][!] Blocks `git main --all` - it skips this repo as dirty[/yellow]"
     )
     return True
 
