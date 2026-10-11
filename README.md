@@ -131,7 +131,10 @@ with the **`Ctrl-G`** keybinding instead.
 
 **Insert an alias at your prompt — `Ctrl-G`**
 
-The installer adds a `Ctrl-G` keybinding to your shell (bash/zsh) and PowerShell profile.
+The installer adds a `Ctrl-G` keybinding to your shell (bash/zsh) and to your PowerShell
+profile — on Windows, to both the Windows PowerShell 5.1 and the PowerShell 7 profile
+(`Documents\WindowsPowerShell\profile.ps1` and `Documents\PowerShell\profile.ps1`), and
+re-running the installer after moving the repo updates the path.
 Press `Ctrl-G` at the prompt to open the browser; the alias you pick is typed onto your
 command line, ready to run or edit. A program launched by `git alias` can't type at your
 prompt itself, so this keybinding does the insertion — like fzf's `Ctrl-T`. The bash
@@ -147,7 +150,7 @@ source /path/to/gitconfig/scripts/shell/git-alias-widget.bash   # or .zsh
 
 ```powershell
 # PowerShell ($PROFILE)
-. "C:\path\to\gitconfig\scripts\shell\git-alias-widget.ps1"
+. 'C:\path\to\gitconfig\scripts\shell\git-alias-widget.ps1'
 ```
 
 **Inspect**

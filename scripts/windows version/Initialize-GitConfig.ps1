@@ -76,17 +76,19 @@ if (Test-LinkIntoDirectory -Path $outputPath -Directory $repoRoot) {
 }
 
 try {
-    # Read template
-    $templateContent = Get-Content $templatePath -Raw
+    # Read template. Read-Utf8File / Write-Utf8File (Functions.ps1) read and
+    # write UTF-8 in both editions; Get-Content / Set-Content use ANSI under
+    # Windows PowerShell 5.1 and mangled a non-ASCII home path (#230).
+    $templateContent = Read-Utf8File $templatePath
     
     # Convert Windows paths to forward slashes for git config compatibility
     $repoPathForward = $repoRoot -replace '\\', '/'
     $homeDirForward = $homeDir -replace '\\', '/'
     
-    # Replace placeholders
-    $generatedContent = $templateContent
-    $generatedContent = $generatedContent -replace '\{\{REPO_PATH\}\}', $repoPathForward
-    $generatedContent = $generatedContent -replace '\{\{HOME_DIR\}\}', $homeDirForward
+    # Replace placeholders. String.Replace copies the path as is; -replace
+    # would expand a '$1', '$&' or '$_' in it as a regex substitution (#230).
+    $generatedContent = $templateContent.Replace('{{REPO_PATH}}', $repoPathForward).Replace('{{HOME_DIR}}', $homeDirForward)
+    if (-not $generatedContent.EndsWith("`n")) { $generatedContent += [Environment]::NewLine }
 
     # Idempotent: skip backup/write when the installed config already matches the
     # rendered template (newline-insensitive compare). Makes the auto-update
@@ -94,7 +96,7 @@ try {
     # before the overwrite prompt below, so re-running install on an up-to-date
     # machine doesn't ask to overwrite a file it would leave alone (#256).
     if (Test-Path $outputPath) {
-        $normExisting = ((Get-Content $outputPath -Raw) -replace "`r`n", "`n").TrimEnd("`n")
+        $normExisting = ((Read-Utf8File $outputPath) -replace "`r`n", "`n").TrimEnd("`n")
         $normGenerated = ($generatedContent -replace "`r`n", "`n").TrimEnd("`n")
         if ($normExisting -eq $normGenerated) {
             Write-Host "[OK] .gitconfig already up to date (matches template); no changes made" -ForegroundColor Green
@@ -129,7 +131,7 @@ try {
     }
     
     # Write generated config
-    Set-Content -Path $outputPath -Value $generatedContent -Force
+    Write-Utf8File -Path $outputPath -Text $generatedContent
     Write-Host "[OK] Generated .gitconfig" -ForegroundColor Green
     Write-Host ""
     

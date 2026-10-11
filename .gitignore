@@ -7,6 +7,7 @@
 # Test output and logs
 test_output.txt
 docs/update-gitconfig.log
+docs/update-gitconfig.log.1
 
 # Pester generated reports (config/pester.config.ps1 enables code coverage)
 coverage.xml

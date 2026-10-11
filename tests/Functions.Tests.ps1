@@ -390,7 +390,8 @@ Describe "Elevating as a different account (Functions.ps1, #240)" -Tag 'Unit' {
         $r = Use-InvokingUser -InvokingUser "corp\ADMIN" -InvokingUserProfile "C:\Users\other" -InvokingDocuments "D:\Docs" 6> $null
         $r.Switched | Should -BeFalse
         $r.User | Should -Be "CORP\admin"
-        $r.Documents | Should -BeNullOrEmpty
+        # The Documents folder passed is still used for the profiles (#230).
+        $r.Documents | Should -Be "D:\Docs"
         $env:USERPROFILE | Should -Be "C:\Users\admin"
     }
 
@@ -398,6 +399,7 @@ Describe "Elevating as a different account (Functions.ps1, #240)" -Tag 'Unit' {
         $r = Use-InvokingUser -InvokingUser "" 6> $null
         $r.Switched | Should -BeFalse
         $r.User | Should -Be "CORP\admin"
+        $r.Documents | Should -BeNullOrEmpty
     }
 
     It "Use-InvokingUser switches USERPROFILE and HOME to the invoking account and warns" {
@@ -412,13 +414,159 @@ Describe "Elevating as a different account (Functions.ps1, #240)" -Tag 'Unit' {
         $text | Should -Match '\[WARN\] Elevated as CORP\\admin, but started by CORP\\alice'
     }
 
-    It "Get-ProfileScriptPath uses the given Documents folder and this edition's folder name" {
-        $edition = if ($PSVersionTable.PSEdition -eq 'Core') { 'PowerShell' } else { 'WindowsPowerShell' }
-        $p = Get-ProfileScriptPath -Documents (Join-Path $TestDrive "Docs")
-        $p | Should -Be (Join-Path (Join-Path (Join-Path $TestDrive "Docs") $edition) "profile.ps1")
+    It "Get-ProfileScriptPath returns both editions' profiles under the given Documents folder (#230)" {
+        $docs = Join-Path $TestDrive "Docs"
+        $p = @(Get-ProfileScriptPath -Documents $docs)
+        $p | Should -Be @(
+            (Join-Path (Join-Path $docs "WindowsPowerShell") "profile.ps1"),
+            (Join-Path (Join-Path $docs "PowerShell") "profile.ps1")
+        )
     }
 
-    It "Get-ProfileScriptPath falls back to `$PROFILE.CurrentUserAllHosts" {
-        Get-ProfileScriptPath | Should -Be $PROFILE.CurrentUserAllHosts
+    It "Get-ProfileScriptPath defaults to this account's Documents folder, not `$PROFILE" {
+        $docs = [Environment]::GetFolderPath('MyDocuments')
+        $expected = if ($docs) { @(Get-ProfileScriptPath -Documents $docs) } else { @($PROFILE.CurrentUserAllHosts) }
+        @(Get-ProfileScriptPath) | Should -Be $expected
+    }
+}
+
+Describe "UTF-8 file helpers (Functions.ps1, #230)" -Tag 'Unit' {
+    # Windows PowerShell 5.1's Get-Content / Set-Content / Add-Content use ANSI.
+
+    BeforeAll {
+        . $script:functionsPath
+        # Spelled with char codes so this file stays ASCII: e-acute, CJK, emoji.
+        $script:fancy = "Jos" + [char]0xE9 + " " + [char]0x4E2D + " " + [char]::ConvertFromUtf32(0x1F600)
+        $script:utf8 = New-Object System.Text.UTF8Encoding($false)
+    }
+
+    BeforeEach {
+        $script:file = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + ".txt")
+    }
+
+    It "Write-Utf8File writes UTF-8 without a BOM and Read-Utf8File reads it back" {
+        Write-Utf8File -Path $script:file -Text "$script:fancy`n"
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $script:utf8.GetBytes("$script:fancy`n")
+        Read-Utf8File $script:file | Should -BeExactly "$script:fancy`n"
+    }
+
+    It "Write-Utf8File replaces a longer file completely" {
+        [System.IO.File]::WriteAllText($script:file, ("x" * 100))
+        Write-Utf8File -Path $script:file -Text "short"
+        [System.IO.File]::ReadAllText($script:file) | Should -BeExactly "short"
+    }
+
+    It "Read-Utf8File honours a BOM" {
+        [System.IO.File]::WriteAllBytes($script:file, [byte[]](0xFF, 0xFE) + [System.Text.Encoding]::Unicode.GetBytes($script:fancy))
+        Read-Utf8File $script:file | Should -BeExactly $script:fancy
+    }
+
+    It "Add-Utf8Text appends UTF-8 and creates the file" {
+        Add-Utf8Text -Path $script:file -Text "a`n"
+        Add-Utf8Text -Path $script:file -Text "$script:fancy`n"
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $script:utf8.GetBytes("a`n$script:fancy`n")
+    }
+
+    It "resolves a relative path against the PowerShell location" {
+        Push-Location $TestDrive
+        try { Write-Utf8File -Path "relative.txt" -Text "here" }
+        finally { Pop-Location }
+        Join-Path $TestDrive "relative.txt" | Should -Exist
+    }
+}
+
+Describe "Set-MarkedBlock (Functions.ps1, #230)" -Tag 'Unit' {
+
+    BeforeAll {
+        . $script:functionsPath
+        $script:begin = "# >>> begin >>>"
+        $script:end = "# <<< end <<<"
+        $script:utf8 = New-Object System.Text.UTF8Encoding($false)
+        $script:latin1 = [System.Text.Encoding]::GetEncoding(28591)
+        $script:fancy = "Write-Host 'caf" + [char]0xE9 + " " + [char]0xE0B0 + " " + [char]::ConvertFromUtf32(0x1F600) + "'"
+        function Set-Block([string]$Body) {
+            Set-MarkedBlock -Path $script:file -BeginMarker $script:begin -EndMarker $script:end -Body $Body
+        }
+    }
+
+    BeforeEach {
+        $script:file = Join-Path (Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))) "profile.ps1"
+    }
+
+    It "creates the folder and a UTF-8 file with a BOM and CRLF endings" {
+        Set-Block ". 'new.ps1'" | Should -Be 'Added'
+        $expected = [byte[]](0xEF, 0xBB, 0xBF) + $script:utf8.GetBytes("$script:begin`r`n. 'new.ps1'`r`n$script:end`r`n")
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $expected
+    }
+
+    It "appends after a blank line, keeping a UTF-8 BOM, CRLF endings and non-ASCII text" {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $script:file) | Out-Null
+        $bom = [byte[]](0xEF, 0xBB, 0xBF)
+        [System.IO.File]::WriteAllBytes($script:file, $bom + $script:utf8.GetBytes("# mine`r`n$script:fancy`r`n"))
+        Set-Block ". 'w.ps1'" | Should -Be 'Added'
+        $expected = $bom + $script:utf8.GetBytes("# mine`r`n$script:fancy`r`n`r`n$script:begin`r`n. 'w.ps1'`r`n$script:end`r`n")
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $expected
+    }
+
+    It "uses LF in an LF-only file and ends an unterminated last line first" {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $script:file) | Out-Null
+        [System.IO.File]::WriteAllBytes($script:file, $script:utf8.GetBytes("# mine`n$script:fancy"))
+        Set-Block ". 'w.ps1'" | Should -Be 'Added'
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $script:utf8.GetBytes("# mine`n$script:fancy`n`n$script:begin`n. 'w.ps1'`n$script:end`n")
+    }
+
+    It "rewrites an existing block in place and keeps the lines around it" {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $script:file) | Out-Null
+        $before = "# mine`r`n"
+        $after = "Set-Alias g git"
+        [System.IO.File]::WriteAllBytes($script:file, $script:utf8.GetBytes("$before$script:begin`r`n. 'C:\old\w.ps1'`r`n$script:end`r`n$after"))
+        Set-Block ". 'C:\new\w.ps1'" | Should -Be 'Updated'
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $script:utf8.GetBytes("$before$script:begin`r`n. 'C:\new\w.ps1'`r`n$script:end`r`n$after")
+    }
+
+    It "drops later copies of the block" {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $script:file) | Out-Null
+        $block = "$script:begin`n. 'w.ps1'`n$script:end`n"
+        [System.IO.File]::WriteAllBytes($script:file, $script:utf8.GetBytes("a`n$block" + "b`n$block" + "c`n"))
+        Set-Block ". 'w.ps1'" | Should -Be 'Updated'
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $script:utf8.GetBytes("a`n$block" + "b`nc`n")
+    }
+
+    It "leaves an up-to-date file alone (no write)" {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $script:file) | Out-Null
+        $bytes = $script:utf8.GetBytes("# mine`r`n$script:begin`r`n. 'w.ps1'`r`n$script:end`r`n")
+        [System.IO.File]::WriteAllBytes($script:file, $bytes)
+        $stamp = [datetime]'2001-02-03'
+        (Get-Item -LiteralPath $script:file).LastWriteTime = $stamp
+        Set-Block ". 'w.ps1'" | Should -Be 'Unchanged'
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $bytes
+        (Get-Item -LiteralPath $script:file).LastWriteTime | Should -Be $stamp
+    }
+
+    It "keeps a UTF-16 LE file UTF-16 LE" {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $script:file) | Out-Null
+        $enc = New-Object System.Text.UnicodeEncoding($false, $false)
+        $bom = [byte[]](0xFF, 0xFE)
+        [System.IO.File]::WriteAllBytes($script:file, $bom + $enc.GetBytes("$script:fancy`r`n"))
+        Set-Block ". 'w.ps1'" | Should -Be 'Added'
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be ($bom + $enc.GetBytes("$script:fancy`r`n`r`n$script:begin`r`n. 'w.ps1'`r`n$script:end`r`n"))
+    }
+
+    It "keeps ANSI bytes that are not valid UTF-8, and writes a non-ASCII body as UTF-8" {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $script:file) | Out-Null
+        $before = "# caf" + [char]0xE9 + "`r`n"
+        [System.IO.File]::WriteAllBytes($script:file, $script:latin1.GetBytes($before))
+        $body = ". 'C:\Users\Jos" + [char]0xE9 + "\w.ps1'"
+        Set-Block $body | Should -Be 'Added'
+        $expected = $script:latin1.GetBytes("$before`r`n") + $script:utf8.GetBytes("$script:begin`r`n$body`r`n$script:end`r`n")
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $expected
+    }
+
+    It "leaves the file alone when the end marker is missing" {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $script:file) | Out-Null
+        $bytes = $script:utf8.GetBytes("# mine`n$script:begin`n. 'w.ps1'`n# user line after`n")
+        [System.IO.File]::WriteAllBytes($script:file, $bytes)
+        Set-Block ". 'w.ps1'" | Should -Be 'Unterminated'
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $bytes
     }
 }

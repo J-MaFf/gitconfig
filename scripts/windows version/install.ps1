@@ -128,8 +128,8 @@ function Exit-Install([int]$Code) {
 
 # Elevated with a different account's password: set up the account that started
 # the install, not the administrator's (#240). $installUser.Documents is that
-# account's Documents folder (for the PowerShell profile), or $null when no
-# switch was needed.
+# account's Documents folder (for the PowerShell profiles), or $null when none
+# was passed (use this account's).
 $installUser = Use-InvokingUser -InvokingUser $InvokingUser -InvokingUserProfile $InvokingUserProfile -InvokingDocuments $InvokingDocuments
 
 $repoRoot    = Split-Path -Parent (Split-Path -Parent $scriptDir)
@@ -322,17 +322,29 @@ try {
     $widgetPath = Join-Path $repoRoot "scripts\shell\git-alias-widget.ps1"
     $beginMarker = "# >>> gitconfig git-alias browser (Ctrl-G) >>>"
     $endMarker = "# <<< gitconfig git-alias browser <<<"
-    # The invoking account's profile after an account switch, else this one's.
-    $profilePath = Get-ProfileScriptPath -Documents $installUser.Documents
-    $profileDir = Split-Path -Parent $profilePath
-    if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force | Out-Null }
-    $profileText = if (Test-Path $profilePath) { Get-Content -Raw $profilePath } else { "" }
-    if ($profileText -and $profileText.Contains($beginMarker)) {
-        Write-Host "[OK] git-alias keybinding already enabled in profile" -ForegroundColor Green
-    }
-    else {
-        Add-Content -Path $profilePath -Value "`r`n$beginMarker`r`n. `"$widgetPath`"`r`n$endMarker"
-        Write-Host "[OK] Enabled git-alias keybinding (Ctrl-G) in $profilePath" -ForegroundColor Green
+    # Single quotes so a '$' or '`' in the repo path is not expanded.
+    $loadLine = ". '{0}'" -f $widgetPath.Replace("'", "''")
+    # Both editions' profiles (#230): the elevated relaunch runs Windows
+    # PowerShell 5.1, but the user may work in PowerShell 7, or the reverse. Set
+    # them under the invoking account's Documents after an account switch, else
+    # this account's (OneDrive-aware, not $PROFILE).
+    foreach ($profilePath in @(Get-ProfileScriptPath -Documents $installUser.Documents)) {
+        # One profile failing (locked, no access) should not skip the other.
+        try {
+            # Set-MarkedBlock rewrites an existing block in place (a moved repo
+            # updates the path) and keeps the profile's encoding and BOM.
+            switch (Set-MarkedBlock -Path $profilePath -BeginMarker $beginMarker -EndMarker $endMarker -Body $loadLine) {
+                'Added' { Write-Host "[OK] Enabled git-alias keybinding (Ctrl-G) in $profilePath" -ForegroundColor Green }
+                'Updated' { Write-Host "[OK] Updated git-alias keybinding in $profilePath" -ForegroundColor Green }
+                'Unchanged' { Write-Host "[OK] git-alias keybinding already enabled in $profilePath" -ForegroundColor Green }
+                'Unterminated' {
+                    Write-Host "[WARN] Found '$beginMarker' in $profilePath but no end marker; left the profile unchanged" -ForegroundColor Yellow
+                }
+            }
+        }
+        catch {
+            Write-Host "[WARN] Could not enable git-alias keybinding in ${profilePath}: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
     }
 }
 catch {

@@ -371,6 +371,10 @@ Automatic repository synchronization and maintenance.
 C:\Users\{username}\Documents\Scripts\gitconfig\docs\update-gitconfig.log
 ```
 
+The log is UTF-8. When it passes 1 MB, the next run moves it to `update-gitconfig.log.1`
+(replacing the previous one) and starts a new log; a UTF-16 log left by an older version
+is moved aside the same way.
+
 **Log format**:
 
 ```

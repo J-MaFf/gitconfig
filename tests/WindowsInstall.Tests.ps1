@@ -5,9 +5,11 @@
 # still configures the account that started the script.
 #
 # Every script runs in a child pwsh with the elevation check stubbed to "admin",
-# a sandboxed USERPROFILE/HOME/git config and $PROFILE, and the ScheduledTasks
-# cmdlets stubbed, so nothing touches the real machine and the tests run on any
-# platform. install.ps1 runs from a copy whose step scripts are stubs that log
+# a sandboxed USERPROFILE/HOME/git config and $PROFILE, a sandboxed Documents
+# folder passed as -InvokingDocuments (the PowerShell profiles go under it; on
+# Windows the real one comes from the registry, not USERPROFILE), and the
+# ScheduledTasks cmdlets stubbed, so nothing touches the real machine and the
+# tests run on any platform. install.ps1 runs from a copy whose step scripts are stubs that log
 # how they were called and exit with a code the test picks.
 
 BeforeAll {
@@ -47,6 +49,7 @@ function Read-Host { param([string]`$Prompt) Add-Content -LiteralPath '$PromptLo
             Root      = $root
             Home      = $sandboxHome
             Profile   = Join-Path (Join-Path $root "own-profile") "profile.ps1"
+            Documents = Join-Path $root "Documents"
             PromptLog = Join-Path $root "prompts.txt"
             # 'git alias' must work for install.ps1's STEP 7.
             GitConfig = Join-Path $root "global.gitconfig"
@@ -94,6 +97,7 @@ function Install-PythonDeps { param(`$RepoRoot) }
     function Invoke-Install {
         param([string[]]$ScriptArgs = @(), [hashtable]$Exit = @{}, [string[]]$Missing = @(), $Sandbox, [string]$FilesHome)
         $sb = if ($Sandbox) { $Sandbox } else { New-Sandbox }
+        $ScriptArgs = Add-SandboxDocuments $ScriptArgs $sb
         $install = New-InstallCopy -Root $sb.Root
         $filesDir = if ($FilesHome) { $FilesHome } else { $sb.Home }
         foreach ($f in ".gitconfig", ".gitignore_global", "gitconfig_helper.py", ".gitconfig.local") {
@@ -119,6 +123,17 @@ exit `$LASTEXITCODE
         }
     }
 
+    # ScriptArgs plus the sandbox's Documents folder, unless the test passes its own.
+    function Add-SandboxDocuments([string[]]$ScriptArgs, $Sandbox) {
+        if ($ScriptArgs -contains '-InvokingDocuments') { return $ScriptArgs }
+        @($ScriptArgs) + @('-InvokingDocuments', "`"$($Sandbox.Documents)`"")
+    }
+
+    # The Ctrl-G profile scripts of both editions under a Documents folder.
+    function Get-EditionProfiles([string]$Documents) {
+        foreach ($edition in 'WindowsPowerShell', 'PowerShell') { Join-Path (Join-Path $Documents $edition) "profile.ps1" }
+    }
+
     function Get-StepCall($Result, [string]$Name) {
         $Result.Steps | Where-Object { $_ -like "$Name|*" }
     }
@@ -130,6 +145,7 @@ exit `$LASTEXITCODE
     function Invoke-Cleanup {
         param([string[]]$ScriptArgs = @('-Force'), [switch]$TaskExists, [switch]$TaskStuck, $Sandbox)
         $sb = if ($Sandbox) { $Sandbox } else { New-Sandbox }
+        $ScriptArgs = Add-SandboxDocuments $ScriptArgs $sb
         $marker = Join-Path $sb.Root "task-exists"
         $calls = Join-Path $sb.Root "task-calls.txt"
         if ($TaskExists) { Set-Content -LiteralPath $marker -Value "" }
@@ -277,7 +293,73 @@ Describe "install.ps1 elevated as another account (#240)" -Tag 'Unit' {
         $r.ExitCode | Should -Be 0
         $r.Output | Should -Not -Match 'Elevated as'
         Get-StepCall $r 'Register-LoginTask.ps1' | Should -Match 'TaskUser=CORP\\alice'
-        $script:sb.Profile | Should -Exist
+        foreach ($p in Get-EditionProfiles $script:sb.Documents) { $p | Should -Exist }
+        $script:sb.Profile | Should -Not -Exist
+    }
+}
+
+Describe "install.ps1 and Cleanup-GitConfig.ps1 Ctrl-G profile block (#230)" -Tag 'Unit' {
+
+    BeforeEach {
+        $script:sb = New-Sandbox
+        $script:profiles = @(Get-EditionProfiles $script:sb.Documents)
+    }
+
+    It "install writes the block to both the Windows PowerShell and the PowerShell 7 profile" {
+        $r = Invoke-Install -Sandbox $script:sb -ScriptArgs @('-Force')
+        $r.ExitCode | Should -Be 0
+        foreach ($p in $script:profiles) {
+            $p | Should -Exist
+            $bytes = [System.IO.File]::ReadAllBytes($p)
+            # UTF-8 with a BOM: Windows PowerShell 5.1 reads a BOM-less file as ANSI.
+            $bytes[0..2] | Should -Be @(0xEF, 0xBB, 0xBF)
+            $text = [System.Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3)
+            $text | Should -Match ([regex]::Escape($script:beginMarker))
+            $text | Should -Match "\. '[^']*git-alias-widget\.ps1'"
+            $r.Output | Should -Match ([regex]::Escape("Enabled git-alias keybinding (Ctrl-G) in $p"))
+        }
+        $script:sb.Profile | Should -Not -Exist
+    }
+
+    It "a second install leaves both profiles alone" {
+        Invoke-Install -Sandbox $script:sb -ScriptArgs @('-Force') | Out-Null
+        $before = foreach ($p in $script:profiles) { , [System.IO.File]::ReadAllBytes($p) }
+        $r = Invoke-Install -Sandbox $script:sb -ScriptArgs @('-Force')
+        $r.Output | Should -Match 'git-alias keybinding already enabled'
+        for ($i = 0; $i -lt 2; $i++) { [System.IO.File]::ReadAllBytes($script:profiles[$i]) | Should -Be $before[$i] }
+    }
+
+    It "install rewrites a block that loads the widget from an old repo path" {
+        $p = $script:profiles[1]
+        New-Item -ItemType Directory -Path (Split-Path -Parent $p) -Force | Out-Null
+        Set-Content -LiteralPath $p -Value "# mine`r`n$script:beginMarker`r`n. `"C:\old\gitconfig\scripts\shell\git-alias-widget.ps1`"`r`n$script:endMarker`r`n# after" -NoNewline
+        $r = Invoke-Install -Sandbox $script:sb -ScriptArgs @('-Force')
+        $r.Output | Should -Match 'Updated git-alias keybinding'
+        $text = Get-Content -LiteralPath $p -Raw
+        $text | Should -Not -Match 'old'
+        $text | Should -Match '^# mine'
+        $text | Should -Match '# after$'
+        ([regex]::Matches($text, [regex]::Escape($script:beginMarker))).Count | Should -Be 1
+    }
+
+    It "cleanup removes the block from both profiles and keeps the rest" {
+        foreach ($p in $script:profiles) {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $p) -Force | Out-Null
+            Set-Content -LiteralPath $p -Value "# mine`n$script:beginMarker`n. 'widget'`n$script:endMarker"
+        }
+        $r = Invoke-Cleanup -Sandbox $script:sb
+        foreach ($p in $script:profiles) {
+            $content = Get-Content -LiteralPath $p -Raw
+            $content | Should -Not -Match ([regex]::Escape($script:beginMarker))
+            $content | Should -Match '# mine'
+            $r.Output | Should -Match ([regex]::Escape("Removed git-alias keybinding from $p"))
+        }
+    }
+
+    It "cleanup says the block is not present when neither profile has it" {
+        $r = Invoke-Cleanup -Sandbox $script:sb
+        $r.Output | Should -Match 'git-alias keybinding not present'
+        foreach ($p in $script:profiles) { $p | Should -Not -Exist }
     }
 }
 

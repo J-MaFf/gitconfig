@@ -448,6 +448,94 @@ function Get-DroppedGitConfigKeys {
     return @($dropped | Sort-Object -Unique)
 }
 
+# --- UTF-8 text files (#230) ---------------------------------------------------
+# Under Windows PowerShell 5.1 (the elevated relaunch and the login task),
+# Get-Content reads a BOM-less UTF-8 file as ANSI, and Set-Content / Add-Content
+# write ANSI, so a non-ASCII user name or path in a generated config came out
+# mangled. These read and write UTF-8 in both editions: reading honours a BOM if
+# there is one, writing never adds one (git and the Unix scripts expect plain
+# UTF-8). A relative Path resolves against the current PowerShell location, as
+# the cmdlets do, not the process's working directory.
+
+function Resolve-FullPath {
+    param([Parameter(Mandatory)][string]$Path)
+    $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+}
+
+function Read-Utf8File {
+    param([Parameter(Mandatory)][string]$Path)
+    [System.IO.File]::ReadAllText((Resolve-FullPath $Path), [System.Text.Encoding]::UTF8)
+}
+
+# Replace the file's contents with Text. An existing file is truncated rather
+# than recreated, so its attributes (such as Hidden, which File.WriteAllText
+# refuses to overwrite) are kept.
+function Write-Utf8File {
+    param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$Text)
+    $fullPath = Resolve-FullPath $Path
+    $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($Text)
+    $mode = if ([System.IO.File]::Exists($fullPath)) { [System.IO.FileMode]::Truncate } else { [System.IO.FileMode]::CreateNew }
+    $stream = [System.IO.File]::Open($fullPath, $mode, [System.IO.FileAccess]::Write)
+    try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+}
+
+# Append Text (add your own line ending) to the file, creating it if needed.
+function Add-Utf8Text {
+    param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$Text)
+    [System.IO.File]::AppendAllText((Resolve-FullPath $Path), $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# Read the text file at FullPath for an in-place edit that keeps every other
+# byte as it was. UTF-16/32 (Windows PowerShell's '>' writes UTF-16 LE) need
+# decoding to find the lines. Anything else is ASCII-compatible (UTF-8, ANSI),
+# so it is read as Latin-1, which maps each byte to one char and back
+# unchanged: ASCII markers still match and non-ASCII bytes survive as they
+# were. Returns Bytes, BomLength, Encoding, Latin1 ($true for the byte-per-char
+# mode) and Text; Write-MarkedText writes Text back the same way.
+function Read-MarkedText {
+    param([Parameter(Mandatory)][string]$FullPath)
+    $bytes = [System.IO.File]::ReadAllBytes($FullPath)
+    $bomLength = 0
+    $latin1 = $true
+    $encoding = [System.Text.Encoding]::GetEncoding(28591)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        $bomLength = 3
+    }
+    elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0 -and $bytes[3] -eq 0) {
+        $bomLength = 4
+        $latin1 = $false
+        $encoding = New-Object System.Text.UTF32Encoding($false, $false)
+    }
+    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+        $bomLength = 2
+        $latin1 = $false
+        $encoding = New-Object System.Text.UnicodeEncoding($false, $false)
+    }
+    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {
+        $bomLength = 2
+        $latin1 = $false
+        $encoding = New-Object System.Text.UnicodeEncoding($true, $false)
+    }
+    [pscustomobject]@{
+        Bytes     = $bytes
+        BomLength = $bomLength
+        Encoding  = $encoding
+        Latin1    = $latin1
+        Text      = $encoding.GetString($bytes, $bomLength, $bytes.Length - $bomLength)
+    }
+}
+
+# Write Text to FullPath in the encoding Read-MarkedText found, with the
+# original BOM (if any) in front.
+function Write-MarkedText {
+    param([Parameter(Mandatory)][string]$FullPath, [Parameter(Mandatory)]$File, [AllowEmptyString()][string]$Text)
+    $body = $File.Encoding.GetBytes($Text)
+    $out = New-Object byte[] ($File.BomLength + $body.Length)
+    [System.Array]::Copy($File.Bytes, 0, $out, 0, $File.BomLength)
+    [System.Array]::Copy($body, 0, $out, $File.BomLength, $body.Length)
+    [System.IO.File]::WriteAllBytes($FullPath, $out)
+}
+
 # Remove the lines from BeginMarker through EndMarker (inclusive) from the text
 # file at Path, keeping every other byte as it was: the encoding, any BOM, the
 # line endings, and characters the ANSI code page can't hold (#255). Cleanup
@@ -464,37 +552,13 @@ function Remove-MarkedBlock {
     )
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if (-not $item -or $item.PSIsContainer) { return 'NotFound' }
-    $fullPath = $item.FullName
-    $bytes = [System.IO.File]::ReadAllBytes($fullPath)
-
-    # UTF-16/32 (Windows PowerShell's '>' writes UTF-16 LE) need decoding to
-    # find the lines. Anything else is ASCII-compatible (UTF-8, ANSI), so it is
-    # read as Latin-1, which maps each byte to one char and back unchanged: the
-    # ASCII markers still match and non-ASCII bytes survive as they were.
-    $bomLength = 0
-    $encoding = [System.Text.Encoding]::GetEncoding(28591)
-    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-        $bomLength = 3
-    }
-    elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0 -and $bytes[3] -eq 0) {
-        $bomLength = 4
-        $encoding = New-Object System.Text.UTF32Encoding($false, $false)
-    }
-    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
-        $bomLength = 2
-        $encoding = New-Object System.Text.UnicodeEncoding($false, $false)
-    }
-    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {
-        $bomLength = 2
-        $encoding = New-Object System.Text.UnicodeEncoding($true, $false)
-    }
-    $text = $encoding.GetString($bytes, $bomLength, $bytes.Length - $bomLength)
+    $file = Read-MarkedText -FullPath $item.FullName
 
     # Split after each newline so every piece keeps its own line ending.
     $kept = New-Object System.Text.StringBuilder
     $inBlock = $false
     $found = $false
-    foreach ($line in [regex]::Split($text, '(?<=\n)')) {
+    foreach ($line in [regex]::Split($file.Text, '(?<=\n)')) {
         $content = $line.TrimEnd([char[]]"`r`n")
         if ($inBlock) {
             if ($content -eq $EndMarker) { $inBlock = $false; $found = $true }
@@ -508,12 +572,84 @@ function Remove-MarkedBlock {
     if ($inBlock) { return 'Unterminated' }
     if (-not $found) { return 'NotFound' }
 
-    $body = $encoding.GetBytes($kept.ToString())
-    $out = New-Object byte[] ($bomLength + $body.Length)
-    [System.Array]::Copy($bytes, 0, $out, 0, $bomLength)
-    [System.Array]::Copy($body, 0, $out, $bomLength, $body.Length)
-    [System.IO.File]::WriteAllBytes($fullPath, $out)
+    Write-MarkedText -FullPath $item.FullName -File $file -Text $kept.ToString()
     return 'Removed'
+}
+
+# Make the text file at Path contain BeginMarker, the Body lines and EndMarker
+# exactly once (#230). An existing block is rewritten in place, so a moved repo
+# no longer leaves a stale path behind; any later copies of the block are
+# dropped. Otherwise the block is appended after a blank line. Like
+# Remove-MarkedBlock it keeps the file's encoding, BOM and line endings; the
+# block uses the file's line ending (CRLF unless the file only has LF). A new
+# file is written as UTF-8 with a BOM, which both Windows PowerShell 5.1 (it
+# reads a BOM-less file as ANSI) and PowerShell 7 read as UTF-8; in an existing
+# BOM-less file a non-ASCII Body is written as UTF-8. Returns 'Added',
+# 'Updated', 'Unchanged' (nothing written) or 'Unterminated' (a begin marker
+# with no end marker after it; the file is left alone).
+function Set-MarkedBlock {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$BeginMarker,
+        [Parameter(Mandatory)][string]$EndMarker,
+        [Parameter(Mandatory)][string[]]$Body
+    )
+    $lines = @($BeginMarker) + $Body + @($EndMarker)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($item -and $item.PSIsContainer) { throw "'$Path' is a directory" }
+    if (-not $item) {
+        $fullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+        $dir = Split-Path -Parent $fullPath
+        if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $text = ($lines -join "`r`n") + "`r`n"
+        [System.IO.File]::WriteAllText($fullPath, $text, (New-Object System.Text.UTF8Encoding($true)))
+        return 'Added'
+    }
+
+    $file = Read-MarkedText -FullPath $item.FullName
+    $text = $file.Text
+    $newline = if ($text.Contains("`r`n") -or -not $text.Contains("`n")) { "`r`n" } else { "`n" }
+    $block = $lines -join $newline
+    if ($file.Latin1) {
+        # One char per byte: store the block's UTF-8 bytes.
+        $block = $file.Encoding.GetString([System.Text.Encoding]::UTF8.GetBytes($block))
+    }
+
+    $out = New-Object System.Text.StringBuilder
+    $inBlock = $false
+    $found = $false
+    foreach ($line in [regex]::Split($text, '(?<=\n)')) {
+        $content = $line.TrimEnd([char[]]"`r`n")
+        if ($inBlock) {
+            if ($content -eq $EndMarker) {
+                $inBlock = $false
+                if (-not $found) {
+                    # Keep the end marker line's own ending (none at end of file).
+                    [void]$out.Append($block).Append($line.Substring($content.Length))
+                    $found = $true
+                }
+            }
+            continue
+        }
+        if ($content -eq $BeginMarker) { $inBlock = $true; continue }
+        [void]$out.Append($line)
+    }
+    if ($inBlock) { return 'Unterminated' }
+
+    if ($found) {
+        $newText = $out.ToString()
+        if ($newText -ceq $text) { return 'Unchanged' }
+        Write-MarkedText -FullPath $item.FullName -File $file -Text $newText
+        return 'Updated'
+    }
+
+    $prefix = $text
+    if ($prefix.Length -gt 0) {
+        if (-not $prefix.EndsWith("`n")) { $prefix += $newline }
+        $prefix += $newline
+    }
+    Write-MarkedText -FullPath $item.FullName -File $file -Text ($prefix + $block + $newline)
+    return 'Added'
 }
 
 # --- Elevating as a different account (#240) ---------------------------------
@@ -546,15 +682,17 @@ function Get-InvokingUserArguments {
 # USERPROFILE and HOME at the invoking user's profile (the child scripts, git
 # and Python read them) and warns. Returns:
 #   User      - DOMAIN\user to configure (the login task's user)
-#   Documents - the invoking user's Documents folder when the account differs,
-#               else $null (use this process's own $PROFILE)
+#   Documents - the invoking user's Documents folder as passed (the
+#               PowerShell profiles go under it), or $null when none was passed
+#               (use this process's own Documents folder)
 #   Switched  - $true when the account differs
 function Use-InvokingUser {
     param([string]$InvokingUser, [string]$InvokingUserProfile, [string]$InvokingDocuments)
     $current = Get-CurrentUserName
     # -eq on strings is case-insensitive, like Windows account names.
     if (-not $InvokingUser -or $InvokingUser -eq $current) {
-        return [pscustomobject]@{ User = $current; Documents = $null; Switched = $false }
+        $documents = if ($InvokingDocuments) { $InvokingDocuments } else { $null }
+        return [pscustomobject]@{ User = $current; Documents = $documents; Switched = $false }
     }
 
     Write-Host "[WARN] Elevated as $current, but started by $InvokingUser." -ForegroundColor Yellow
@@ -571,12 +709,18 @@ function Use-InvokingUser {
     return [pscustomobject]@{ User = $InvokingUser; Documents = $InvokingDocuments; Switched = $true }
 }
 
-# The profile script that loads in every host of this PowerShell edition
-# ($PROFILE.CurrentUserAllHosts). After Use-InvokingUser switched accounts,
-# pass its Documents: $PROFILE still names the elevated account's folder.
+# The profile scripts that load in every host of Windows PowerShell 5.1 and of
+# PowerShell 7 (each edition's $PROFILE.CurrentUserAllHosts), so the Ctrl-G
+# widget works in both whichever edition runs the install (#230). Documents
+# defaults to this account's Documents folder as Windows reports it, which
+# follows a OneDrive redirect; after Use-InvokingUser switched accounts, pass
+# its Documents. Falls back to $PROFILE.CurrentUserAllHosts only when there is
+# no Documents folder at all.
 function Get-ProfileScriptPath {
     param([string]$Documents)
-    if (-not $Documents) { return $PROFILE.CurrentUserAllHosts }
-    $edition = if ($PSVersionTable.PSEdition -eq 'Core') { 'PowerShell' } else { 'WindowsPowerShell' }
-    Join-Path (Join-Path $Documents $edition) 'profile.ps1'
+    if (-not $Documents) { $Documents = [Environment]::GetFolderPath('MyDocuments') }
+    if (-not $Documents) { return @($PROFILE.CurrentUserAllHosts) }
+    foreach ($edition in 'WindowsPowerShell', 'PowerShell') {
+        Join-Path (Join-Path $Documents $edition) 'profile.ps1'
+    }
 }

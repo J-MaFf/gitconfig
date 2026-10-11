@@ -200,21 +200,32 @@ Write-Host "-----" -ForegroundColor Cyan
 try {
     $beginMarker = "# >>> gitconfig git-alias browser (Ctrl-G) >>>"
     $endMarker = "# <<< gitconfig git-alias browser <<<"
-    # The invoking account's profile after an account switch, else this one's.
-    $profilePath = Get-ProfileScriptPath -Documents $cleanupUser.Documents
-    # Remove-MarkedBlock keeps the profile's encoding, BOM and line endings
-    # (Set-Content under Windows PowerShell 5.1 rewrote it as ANSI).
-    switch (Remove-MarkedBlock -Path $profilePath -BeginMarker $beginMarker -EndMarker $endMarker) {
-        'Removed' {
-            Write-Host "[OK] Removed git-alias keybinding from profile" -ForegroundColor Green
-            $removed++
+    # Both editions' profiles (#230), under the invoking account's Documents
+    # after an account switch, else this account's.
+    $widgetSeen = $false
+    foreach ($profilePath in @(Get-ProfileScriptPath -Documents $cleanupUser.Documents)) {
+        try {
+            # Remove-MarkedBlock keeps the profile's encoding, BOM and line
+            # endings (Set-Content under Windows PowerShell 5.1 rewrote it as ANSI).
+            switch (Remove-MarkedBlock -Path $profilePath -BeginMarker $beginMarker -EndMarker $endMarker) {
+                'Removed' {
+                    Write-Host "[OK] Removed git-alias keybinding from $profilePath" -ForegroundColor Green
+                    $removed++
+                    $widgetSeen = $true
+                }
+                'Unterminated' {
+                    Write-Host "[WARN] Found '$beginMarker' in $profilePath but no end marker; left the profile unchanged" -ForegroundColor Yellow
+                    $widgetSeen = $true
+                }
+            }
         }
-        'Unterminated' {
-            Write-Host "[WARN] Found '$beginMarker' in $profilePath but no end marker; left the profile unchanged" -ForegroundColor Yellow
+        catch {
+            Write-Host "[WARN] Could not remove git-alias keybinding from ${profilePath}: $($_.Exception.Message)" -ForegroundColor Yellow
+            $widgetSeen = $true
         }
-        default {
-            Write-Host "[SKIP] git-alias keybinding not present" -ForegroundColor Yellow
-        }
+    }
+    if (-not $widgetSeen) {
+        Write-Host "[SKIP] git-alias keybinding not present" -ForegroundColor Yellow
     }
 }
 catch {

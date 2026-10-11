@@ -123,15 +123,16 @@ Describe "Cleanup-GitConfig.ps1 profile and verification steps (#255)" -Tag 'Uni
             $node.Extent.Text
         }
 
-        # Run STEP 2b with $PROFILE pointing at ProfilePath.
+        # Run STEP 2b for the Documents folder holding ProfilePath
+        # (<Documents>\<edition>\profile.ps1). Returns the $removed count.
         function Invoke-ProfileStep([string]$ProfilePath) {
             $step = Get-StepText ([System.Management.Automation.Language.TryStatementAst]) 'Remove-MarkedBlock'
             & {
-                $PROFILE = [pscustomobject]@{ CurrentUserAllHosts = $ProfilePath }
                 $removed = 0
-                $cleanupUser = $null
+                $cleanupUser = [pscustomobject]@{ Documents = (Split-Path -Parent (Split-Path -Parent $ProfilePath)) }
                 . $script:functionsPath
                 . ([scriptblock]::Create($step)) 6>$null
+                $removed
             }
         }
 
@@ -151,7 +152,10 @@ Describe "Cleanup-GitConfig.ps1 profile and verification steps (#255)" -Tag 'Uni
     BeforeEach {
         $script:dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $script:dir | Out-Null
-        $script:profilePath = Join-Path $script:dir "profile.ps1"
+        # A Documents folder: STEP 2b cleans both editions' profiles under it.
+        New-Item -ItemType Directory -Path (Join-Path $script:dir "WindowsPowerShell") | Out-Null
+        $script:profilePath = Join-Path (Join-Path $script:dir "WindowsPowerShell") "profile.ps1"
+        $script:pwshProfilePath = Join-Path (Join-Path $script:dir "PowerShell") "profile.ps1"
     }
 
     Context "STEP 2b keeps the profile's bytes" {
@@ -224,8 +228,22 @@ Describe "Cleanup-GitConfig.ps1 profile and verification steps (#255)" -Tag 'Uni
         }
 
         It "does nothing when there is no profile" {
-            Invoke-ProfileStep $script:profilePath
+            Invoke-ProfileStep $script:profilePath | Should -Be 0
             $script:profilePath | Should -Not -Exist
+            $script:pwshProfilePath | Should -Not -Exist
+        }
+
+        It "removes the block from the PowerShell 7 profile too (#230)" {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $script:pwshProfilePath) | Out-Null
+            foreach ($p in $script:profilePath, $script:pwshProfilePath) {
+                [System.IO.File]::WriteAllBytes($p, $script:utf8.GetBytes("# mine`n$script:begin`n. 'w.ps1'`n$script:end`n"))
+            }
+
+            Invoke-ProfileStep $script:profilePath | Should -Be 2
+
+            foreach ($p in $script:profilePath, $script:pwshProfilePath) {
+                [System.IO.File]::ReadAllBytes($p) | Should -Be $script:utf8.GetBytes("# mine`n")
+            }
         }
     }
 
