@@ -142,14 +142,25 @@ warn_dropped_gitconfig_keys() {
 # collision gets a zero-padded counter, which still sorts after the bare stamp.
 # Usage: _backup_path TARGET
 _backup_path() {
-    local target="$1" stamp candidate n=1
+    local target="$1" stamp base f n max=-1
     stamp="$(date '+%Y%m%d-%H%M%S')"
-    candidate="$target.bak.$stamp"
-    while [ -e "$candidate" ] || [ -L "$candidate" ]; do
-        candidate="$target.bak.$stamp-$(printf '%02d' "$n")"
-        n=$((n + 1))
+    base="$target.bak.$stamp"
+    # Go one past the highest name taken this second, never into a gap that
+    # pruning left: a reused lower name sorts as the oldest and would be
+    # pruned straight away (#268). The bare stamp counts as 0.
+    if [ -e "$base" ] || [ -L "$base" ]; then max=0; fi
+    for f in "$base"-[0-9][0-9]*; do
+        if [ ! -e "$f" ] && [ ! -L "$f" ]; then continue; fi
+        n="${f##*-}"
+        case "$n" in *[!0-9]*) continue ;; esac
+        n=$((10#$n))
+        if [ "$n" -gt "$max" ]; then max=$n; fi
     done
-    printf '%s\n' "$candidate"
+    if [ "$max" -lt 0 ]; then
+        printf '%s\n' "$base"
+    else
+        printf '%s-%02d\n' "$base" "$((max + 1))"
+    fi
 }
 
 # Print TARGET's timestamped backups, oldest first, one per line. Only names
