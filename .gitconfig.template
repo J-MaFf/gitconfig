@@ -81,8 +81,9 @@
 	pushf = push --force-with-lease --force-if-includes
 	# Update the current branch with rebase, stashing/restoring local changes
 	sync = pull --rebase --autostash
-	# Start work on a GitHub issue: create a conventionally named branch from its
-	# title (git start <issue-number>). Dispatches to the Python helper.
+	# Start work on a GitHub issue (git start <issue-number>): switch to its
+	# <type>/<number>-<title-slug> branch, tracking it if it is only on a remote,
+	# or create it from the default branch. Dispatches to the Python helper.
 	start = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py start \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 	# --- GitHub ---
 	# Open the current branch's pull request in the browser

@@ -12,6 +12,7 @@
 # Requires:  pytest and the helper's own dependency, `rich`.
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -719,24 +720,107 @@ class TestFastForwardConflictReport:
 
 
 class TestStartBranch:
-    def test_new_branch_has_no_upstream(self, helper, repo, monkeypatch):
+    @staticmethod
+    def _issues(helper, monkeypatch, issues):
+        """Stub `gh issue view <n>` with issues = {number: (title, [labels])}."""
         real_run = subprocess.run
 
         def fake_run(cmd, *args, **kwargs):
             if cmd[0] == "gh":
-                return subprocess.CompletedProcess(
-                    cmd, 0, stdout='{"title": "Fix the thing", "labels": [{"name": "bug"}]}', stderr=""
-                )
+                title, labels = issues[cmd[3]]
+                body = json.dumps({"title": title, "labels": [{"name": n} for n in labels]})
+                return subprocess.CompletedProcess(cmd, 0, stdout=body, stderr="")
             return real_run(cmd, *args, **kwargs)
 
         monkeypatch.setattr(helper, "_have", lambda cmd: True)
         monkeypatch.setattr(helper.subprocess, "run", fake_run)
-        assert helper.start_branch("7") == 0
-        assert _git(repo, "branch", "--show-current") == "fix/fix-the-thing"
-        upstream = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "@{upstream}"], cwd=repo, capture_output=True
+
+    @staticmethod
+    def _upstream(repo):
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "@{upstream}"],
+            cwd=repo, capture_output=True, text=True,
         )
-        assert upstream.returncode != 0  # untracked: first push sets it
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def test_new_branch_has_issue_number_and_no_upstream(self, helper, repo, monkeypatch):
+        self._issues(helper, monkeypatch, {"7": ("Fix the thing", ["bug"])})
+        assert helper.start_branch("7") == 0
+        assert _git(repo, "branch", "--show-current") == "fix/7-fix-the-thing"
+        assert _git(repo, "rev-parse", "HEAD") == _git(repo, "rev-parse", "origin/main")
+        assert self._upstream(repo) is None  # untracked: first push sets it
+
+    def test_tracks_branch_started_on_another_machine(self, helper, repo, git_env, monkeypatch):
+        other = git_env / "other"
+        _git(git_env, "clone", "-q", str(git_env / "remote.git"), str(other))
+        _git(other, "switch", "-q", "-c", "fix/7-fix-the-thing")
+        _commit(other, "o.txt", "work from the other machine")
+        _git(other, "push", "-q", "-u", "origin", "fix/7-fix-the-thing")
+        remote_tip = _git(other, "rev-parse", "HEAD")
+
+        self._issues(helper, monkeypatch, {"7": ("Fix the thing", ["bug"])})
+        assert helper.start_branch("7") == 0
+        assert _git(repo, "branch", "--show-current") == "fix/7-fix-the-thing"
+        assert _git(repo, "rev-parse", "HEAD") == remote_tip  # not a fresh branch from main
+        assert self._upstream(repo) == "origin/fix/7-fix-the-thing"
+
+    def test_issues_with_the_same_slug_get_different_branches(self, helper, repo, monkeypatch):
+        self._issues(helper, monkeypatch, {
+            "7": ("Fix the thing", ["bug"]),
+            "8": ("Fix: the thing!", ["bug"]),
+        })
+        assert helper.start_branch("7") == 0
+        _commit(repo, "seven.txt", "issue 7 work")
+        seven_tip = _git(repo, "rev-parse", "HEAD")
+        assert helper.start_branch("8") == 0
+        assert _git(repo, "branch", "--show-current") == "fix/8-fix-the-thing"
+        assert _git(repo, "rev-parse", "HEAD") != seven_tip  # not issue 7's branch
+        assert _git(repo, "rev-parse", "fix/7-fix-the-thing") == seven_tip
+
+    def test_non_ascii_titles_get_unique_branches(self, helper, repo, monkeypatch):
+        self._issues(helper, monkeypatch, {
+            # Japanese and Russian titles: no ASCII letters, so both slug to "issue".
+            "7": ("\u65e5\u672c\u8a9e\u306e\u30bf\u30a4\u30c8\u30eb", []),
+            "8": ("\u041e\u0448\u0438\u0431\u043a\u0430 \u0432 \u0441\u043a\u0440\u0438\u043f\u0442\u0435", []),
+        })
+        assert helper.start_branch("7") == 0
+        assert _git(repo, "branch", "--show-current") == "feat/7-issue"
+        assert helper.start_branch("8") == 0
+        assert _git(repo, "branch", "--show-current") == "feat/8-issue"
+
+    def test_existing_branch_found_by_number_after_relabel(self, helper, repo, monkeypatch):
+        _git(repo, "branch", "feat/7-old-title")
+        _git(repo, "branch", "fix/70-other-issue")
+        self._issues(helper, monkeypatch, {"7": ("New title", ["bug"])})
+        assert helper.start_branch("7") == 0
+        assert _git(repo, "branch", "--show-current") == "feat/7-old-title"
+        assert "fix/7-new-title" not in _branches(repo)
+
+    def test_fetch_failure_warns_and_bases_on_local_default(self, helper, repo, git_env, monkeypatch, capsys):
+        _git(repo, "switch", "-q", "-c", "feat/other-work")
+        _commit(repo, "f.txt", "unrelated feature work")
+        _git(repo, "remote", "set-url", "origin", str(git_env / "missing.git"))
+        _git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+
+        self._issues(helper, monkeypatch, {"7": ("Fix the thing", ["bug"])})
+        assert helper.start_branch("7") == 0
+        out = capsys.readouterr().out
+        assert "Warning: fetch failed" in out
+        assert _git(repo, "branch", "--show-current") == "fix/7-fix-the-thing"
+        assert _git(repo, "rev-parse", "HEAD") == _git(repo, "rev-parse", "main")
+
+    def test_old_style_branch_is_noted_not_reused(self, helper, repo, monkeypatch, capsys):
+        _git(repo, "branch", "fix/fix-the-thing")
+        self._issues(helper, monkeypatch, {"7": ("Fix the thing", ["bug"])})
+        assert helper.start_branch("7") == 0
+        assert _git(repo, "branch", "--show-current") == "fix/7-fix-the-thing"
+        assert "old naming" in capsys.readouterr().out
+
+
+class TestIssueBranches:
+    def test_matches_on_issue_number_only(self, helper):
+        refs = ["fix/7-a", "feat/7", "docs/7-b", "fix/70-c", "fix/a-7", "chore/7-d", "fix/7x"]
+        assert helper._issue_branches("7", refs) == ["fix/7-a", "feat/7", "docs/7-b"]
 
 
 class TestCli:

@@ -458,7 +458,7 @@ ALIAS_METADATA = {
     "nb": ("Branch & Sync", "Create and switch to a new branch (git nb <name>)"),
     "pushf": ("Branch & Sync", "Force-push safely: refuses if the remote has commits you haven't integrated (--force-with-lease --force-if-includes)"),
     "sync": ("Branch & Sync", "Update the current branch with rebase and autostash"),
-    "start": ("Branch & Sync", "Start a GitHub issue: make a conventionally named branch from its title"),
+    "start": ("Branch & Sync", "Start or resume a GitHub issue's branch: <type>/<issue#>-<title-slug>"),
     # GitHub
     "pr": ("GitHub", "Open the current branch's pull request in the browser"),
     "prs": ("GitHub", "Show the status of your pull requests"),
@@ -1201,12 +1201,80 @@ def _slugify(text, max_length=50):
     return slug or "issue"
 
 
-def start_branch(issue):
-    """Create a conventionally named branch for a GitHub issue.
+def _issue_branches(number, refs):
+    """Return the names in `refs` that are `git start` branches for issue `number`.
 
-    Reads the issue's title and labels via the GitHub CLI, derives a branch name
-    (fix/, feat/, or docs/ prefix + slugified title), and creates it from the
-    up-to-date default branch. Switches to it on success.
+    A `git start` branch is `<prefix>/<number>` or `<prefix>/<number>-<slug>`
+    with a LABEL_PREFIX prefix. Keyed on the number, not the slug, so another
+    issue whose title slugs the same (or a relabelled issue whose prefix
+    changed) can never match.
+    """
+    prefixes = "|".join(sorted(set(LABEL_PREFIX.values())))
+    pattern = re.compile(rf"(?:{prefixes})/{number}(?:-|$)")
+    return [ref for ref in refs if pattern.match(ref)]
+
+
+def _remote_issue_branches(number):
+    """Return (remote, branch) pairs for issue `number`'s branches on any remote, origin first."""
+    remotes = run_git("remote").stdout.split()
+    listed = run_git("for-each-ref", "--format=%(refname)", "refs/remotes/")
+    found = []
+    for ref in listed.stdout.splitlines():
+        for remote in remotes:
+            head = f"refs/remotes/{remote}/"
+            if ref.startswith(head):
+                found += [(remote, b) for b in _issue_branches(number, [ref[len(head):]])]
+                break
+    return sorted(found, key=lambda rb: (rb[0] != "origin", rb[0], rb[1]))
+
+
+def _start_base(console):
+    """Fetch, then return (base, default_branch); base is None if there's nothing to branch from.
+
+    base is the default branch's remote-tracking ref when it exists, else the
+    *local* default branch -- never HEAD, which may be another feature branch.
+    A failed fetch is reported, not ignored: the base may then be stale.
+    """
+    fetch_args = _fetch_args(_default_branch())
+    if fetch_args is None:
+        console.print("[dim]No remote configured; skipping fetch[/dim]")
+    else:
+        console.print(f"[cyan]Running git {escape(' '.join(fetch_args))}...[/cyan]")
+        fetched = run_git(*fetch_args)
+        if fetched.returncode != 0:
+            console.print(
+                "[yellow]Warning: fetch failed; using the last known remote state, "
+                f"which may be stale: {escape(fetched.stderr.strip())}[/yellow]"
+            )
+    default_branch = _default_branch()  # after the fetch, which can create origin/HEAD
+    remote = run_git("config", "--get", f"branch.{default_branch}.remote").stdout.strip()
+    if not remote or remote == ".":
+        remote = "origin"
+    tracking = f"refs/remotes/{remote}/{default_branch}"
+    if run_git("rev-parse", "--verify", "--quiet", tracking).returncode == 0:
+        return f"{remote}/{default_branch}", default_branch
+    if run_git("rev-parse", "--verify", "--quiet", f"refs/heads/{default_branch}").returncode == 0:
+        if fetch_args is not None:
+            console.print(
+                f"[yellow]Warning: {escape(remote)}/{escape(default_branch)} not found; "
+                f"branching from the local {escape(default_branch)} instead[/yellow]"
+            )
+        return default_branch, default_branch
+    return None, default_branch
+
+
+def start_branch(issue):
+    """Create (or resume) a conventionally named branch for a GitHub issue.
+
+    Reads the issue's title and labels via the GitHub CLI and derives the
+    branch name `<prefix>/<number>-<slug>` (fix/, feat/ or docs/ + issue number
+    + slugified title). Existing work is found by issue number:
+
+    1. A local branch for the issue: switch to it.
+    2. A branch for the issue on a remote (started on another machine): create
+       a local branch tracking it, so a later push doesn't overwrite it.
+    3. Otherwise create a new, untracked branch from the up-to-date default
+       branch (its remote-tracking ref, else the local default branch).
     """
     console = Console()
 
@@ -1214,6 +1282,7 @@ def start_branch(issue):
     if not number.isdigit():
         console.print("[red]Usage: git start <issue-number>[/red]")
         return 1
+    number = str(int(number))  # "007" and "7" are the same issue (and branch)
 
     if not _have("gh"):
         console.print("[red]Error: the GitHub CLI ('gh') is required for git start[/red]")
@@ -1232,7 +1301,7 @@ def start_branch(issue):
     )
     if view.returncode != 0:
         console.print(f"[red]Error: could not load issue #{number}[/red]")
-        console.print(f"[red]{view.stderr.strip()}[/red]")
+        console.print(f"[red]{escape(view.stderr.strip())}[/red]")
         return 1
 
     try:
@@ -1244,36 +1313,75 @@ def start_branch(issue):
     title = (data.get("title") or "").strip()
     labels = [str(label.get("name", "")).lower() for label in data.get("labels", [])]
     prefix = next((LABEL_PREFIX[label] for label in labels if label in LABEL_PREFIX), "feat")
-    branch = f"{prefix}/{_slugify(title)}"
+    slug = _slugify(title)
+    # The number makes the name unique per issue (two titles can slug the same,
+    # and a title with no ASCII letters or digits slugs to "issue"); the slug
+    # is just a readable reminder.
+    branch = f"{prefix}/{number}-{slug}"
+    legacy = f"{prefix}/{slug}"  # pre-#252 name: no number, so it may be another issue's
 
-    console.print(f"[cyan]Issue #{number}:[/cyan] {title or '(no title)'}")
+    console.print(f"[cyan]Issue #{number}:[/cyan] {escape(title) or '(no title)'}")
 
-    # Base the new branch on an up-to-date default branch when we can reach it.
-    default_branch = _default_branch()
-    console.print("[cyan]Fetching origin...[/cyan]")
-    run_git("fetch", "origin")
-    base = f"origin/{default_branch}"
-    if run_git("rev-parse", "--verify", "--quiet", base).returncode != 0:
-        base = "HEAD"
+    base, default_branch = _start_base(console)
 
-    if run_git("rev-parse", "--verify", "--quiet", branch).returncode == 0:
-        console.print(f"[yellow]Branch '{branch}' already exists; switching to it.[/yellow]")
-        switch = run_git("switch", branch)
+    local = _issue_branches(number, [b["name"] for b in (_local_branches() or [])])
+    on_remote = _remote_issue_branches(number)
+
+    if local:
+        target = branch if branch in local else local[0]
+        if len(local) > 1 and target != branch:
+            console.print(
+                f"[red]Error: several branches exist for issue #{number}: "
+                f"{escape(', '.join(local))}. Switch to one with git switch <branch>.[/red]"
+            )
+            return 1
+        console.print(f"[yellow]Branch '{escape(target)}' already exists; switching to it.[/yellow]")
+        switch = run_git("switch", target)
+    elif on_remote:
+        names = {b for _, b in on_remote}
+        if len(names) > 1 and branch not in names:
+            console.print(
+                f"[red]Error: several remote branches exist for issue #{number}: "
+                f"{escape(', '.join(f'{r}/{b}' for r, b in on_remote))}. "
+                "Pick one with git switch --track <remote>/<branch>.[/red]"
+            )
+            return 1
+        remote_name, target = next(((r, b) for r, b in on_remote if b == branch), on_remote[0])
+        console.print(
+            f"[yellow]Branch '{escape(target)}' already exists on {escape(remote_name)}; "
+            "creating a local branch that tracks it.[/yellow]"
+        )
+        switch = run_git("switch", "--track", f"{remote_name}/{target}")
+    elif base is None:
+        console.print(
+            f"[red]Error: no '{escape(default_branch)}' branch to start from "
+            "(neither a remote-tracking nor a local one)[/red]"
+        )
+        return 1
     else:
-        console.print(f"[green]Creating branch[/green] [bold]{branch}[/bold] [green]from {base}[/green]")
+        if run_git("rev-parse", "--verify", "--quiet", f"refs/heads/{legacy}").returncode == 0:
+            console.print(
+                f"[yellow]Note: '{escape(legacy)}' exists (old naming, no issue number). "
+                f"If it holds this issue's work, use it instead: git switch {escape(legacy)}[/yellow]"
+            )
+        console.print(
+            f"[green]Creating branch[/green] [bold]{escape(branch)}[/bold] "
+            f"[green]from {escape(base)}[/green]"
+        )
         # --no-track: without it the branch tracks origin/<default>, so the
         # first `git push` fails (push.default=simple refuses a differently
         # named upstream; push.autoSetupRemote only acts when there is none)
         # and the branch never reads as gone, so cleanup never prunes it.
         switch = run_git("switch", "--no-track", "-c", branch, base)
+        target = branch
 
     if switch.returncode != 0:
         console.print("[red]Error: failed to create or switch to the branch[/red]")
-        console.print(f"[red]{switch.stderr.strip()}[/red]")
+        console.print(f"[red]{escape(switch.stderr.strip())}[/red]")
         return 1
 
     console.print(
-        f"[green]OK On {branch}.[/green] "
+        f"[green]OK On {escape(target)}.[/green] "
         f"[dim]Commit your work, then: gh pr create --assignee J-MaFf --body \"Fixes #{number}\"[/dim]"
     )
     return 0
