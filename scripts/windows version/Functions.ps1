@@ -581,8 +581,8 @@ function Remove-MarkedBlock {
 # no longer leaves a stale path behind; any later copies of the block are
 # dropped. Otherwise the block is appended after a blank line. Like
 # Remove-MarkedBlock it keeps the file's encoding, BOM and line endings; the
-# block uses the file's line ending (CRLF unless the file only has LF). A new
-# file is written as UTF-8 with a BOM, which both Windows PowerShell 5.1 (it
+# block uses the file's line ending (CRLF unless the file only has LF). A new (or
+# empty) file is written as UTF-8 with a BOM, which both Windows PowerShell 5.1 (it
 # reads a BOM-less file as ANSI) and PowerShell 7 read as UTF-8; in an existing
 # BOM-less file a non-ASCII Body is written as UTF-8. Returns 'Added',
 # 'Updated', 'Unchanged' (nothing written) or 'Unterminated' (a begin marker
@@ -597,7 +597,8 @@ function Set-MarkedBlock {
     $lines = @($BeginMarker) + $Body + @($EndMarker)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if ($item -and $item.PSIsContainer) { throw "'$Path' is a directory" }
-    if (-not $item) {
+    # A missing or empty (0-byte) file gets a fresh UTF-8 file with a BOM.
+    if (-not $item -or $item.Length -eq 0) {
         $fullPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
         $dir = Split-Path -Parent $fullPath
         if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }

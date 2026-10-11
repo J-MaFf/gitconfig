@@ -499,6 +499,14 @@ Describe "Set-MarkedBlock (Functions.ps1, #230)" -Tag 'Unit' {
         [System.IO.File]::ReadAllBytes($script:file) | Should -Be $expected
     }
 
+    It "writes an empty existing file like a new one (UTF-8 with a BOM)" {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $script:file) | Out-Null
+        [System.IO.File]::WriteAllBytes($script:file, [byte[]]@())
+        Set-Block ". '$script:fancy.ps1'" | Should -Be 'Added'
+        $expected = [byte[]](0xEF, 0xBB, 0xBF) + $script:utf8.GetBytes("$script:begin`r`n. '$script:fancy.ps1'`r`n$script:end`r`n")
+        [System.IO.File]::ReadAllBytes($script:file) | Should -Be $expected
+    }
+
     It "appends after a blank line, keeping a UTF-8 BOM, CRLF endings and non-ASCII text" {
         New-Item -ItemType Directory -Path (Split-Path -Parent $script:file) | Out-Null
         $bom = [byte[]](0xEF, 0xBB, 0xBF)
