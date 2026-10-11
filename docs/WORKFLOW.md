@@ -615,6 +615,10 @@ settings in `~/.gitconfig.local` (`git localconfig`), never in `~/.gitconfig`. O
 `~/.gitignore_global` and `~/gitconfig_helper.py` are symlinks into the repo. Commit
 signing (`user.signingkey`, `commit.gpgsign`) and `core.editor` are set in
 `~/.gitconfig.local` too, not in the template ([#231](https://github.com/J-MaFf/gitconfig/issues/231)).
+If they vanished after the first macOS/Linux auto-sync that followed #231, run
+`git selfupdate` once more: it restores them from the newest `~/.gitconfig.bak.*`
+that has them, once per machine, and then sets `gitconfig.templateKeysMigrated` in
+`~/.gitconfig.local` ([#297](https://github.com/J-MaFf/gitconfig/issues/297)).
 
 **Pick up template changes**:
 

@@ -57,6 +57,10 @@ generate_gitconfig() {
     # safe to run on every login regardless of whether a pull happened.
     if [ -f "$output_path" ] && [ "$(cat "$output_path")" = "$generated_content" ]; then
         echo "[OK] .gitconfig already up to date (matches template)"
+        # The settings an older sync dropped unmigrated (#297) are recovered
+        # here too: that sync already wrote the new template, so this is the
+        # path every later sync on such a machine takes.
+        recover_template_settings "$home_dir" "$generated_content" || return 1
         return 0
     fi
 
@@ -106,6 +110,11 @@ generate_gitconfig() {
             return 1
         fi
         rm -f "$previous"
+    fi
+    # Then, once per machine, from the backups (#297), and set the marker.
+    if ! recover_template_settings "$home_dir" "$generated_content"; then
+        echo "[ERROR] Could not move settings into ~/.gitconfig.local; ~/.gitconfig left unchanged"
+        return 1
     fi
 
     if [ -f "$output_path" ]; then
@@ -214,13 +223,16 @@ commit.gpgsign"
 # session the update runs in (cron has no `code` on PATH). A key LOCAL already
 # sets is left alone: it already won over the template's value. gpgsign is
 # carried only when LOCAL ends up with a signing key, so signing is never
-# switched on without one. Nothing happens once the old ~/.gitconfig is gone,
-# so this runs once per machine. LOCAL is created if missing.
+# switched on without one. LOCAL is created if missing. SOURCE names PREVIOUS
+# in the messages (default ~/.gitconfig). recover_template_settings runs this
+# against a backup once per machine, for a sync that dropped the settings.
 # Returns 1 (after reporting why) if LOCAL can't be read or written.
-# Usage: migrate_template_settings_to_local PREVIOUS NEW_CONTENT LOCAL
+# Usage: migrate_template_settings_to_local PREVIOUS NEW_CONTENT LOCAL [SOURCE]
 migrate_template_settings_to_local() {
-    local previous="$1" new_content="$2" local_cfg="$3"
+    local previous="$1" new_content="$2" local_cfg="$3" from="${4:-}"
     local tmp key value rc
+    # shellcheck disable=SC2088  # a label for messages, not a path to expand
+    [ -n "$from" ] || from='~/.gitconfig'
     command -v git >/dev/null 2>&1 || return 0
     # An unreadable old ~/.gitconfig has nothing git could have applied.
     git config --file "$previous" --list >/dev/null 2>&1 || return 0
@@ -256,9 +268,67 @@ migrate_template_settings_to_local() {
             echo "[ERROR] Could not write $key to $local_cfg"
             return 1
         fi
-        echo "[INFO] Moved $key from ~/.gitconfig to ~/.gitconfig.local (the template no longer sets it)"
+        echo "[INFO] Moved $key from $from to ~/.gitconfig.local (the template no longer sets it)"
     done <<< "$TEMPLATE_MOVED_KEYS"
     rm -f "$tmp"
+    return 0
+}
+
+# Set in ~/.gitconfig.local once the move above has been done on this machine
+# (or there was nothing to move), so recover_template_settings runs only once
+# (#297). Unset it to make the next sync look through the backups again.
+TEMPLATE_KEYS_MIGRATED_MARKER="gitconfig.templateKeysMigrated"
+
+# Print the newest backup of HOME_DIR/.gitconfig that sets one of
+# TEMPLATE_MOVED_KEYS: the timestamped backups, newest first, then the pinned
+# original (.gitconfig.pre-gitconfig). Returns 1 if none does.
+# Usage: _newest_backup_with_moved_keys HOME_DIR
+_newest_backup_with_moved_keys() {
+    local target="$1/.gitconfig" f key
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        while IFS= read -r key; do
+            if [ -n "$(git config --file "$f" --get "$key" 2>/dev/null)" ]; then
+                printf '%s\n' "$f"
+                return 0
+            fi
+        done <<< "$TEMPLATE_MOVED_KEYS"
+    done < <(_list_backups "$target" | LC_ALL=C sort -r; printf '%s\n' "$target.pre-gitconfig")
+    return 1
+}
+
+# Once per machine, move the settings in TEMPLATE_MOVED_KEYS into
+# HOME_DIR/.gitconfig.local from the newest backup of ~/.gitconfig that still
+# has one, then set TEMPLATE_KEYS_MIGRATED_MARKER there.
+#
+# Why (#297): update-gitconfig.sh used to load this file before pulling, so the
+# first sync after #231 ran the old generate_gitconfig, which knew nothing of
+# the move, against the new template. It dropped the settings from
+# ~/.gitconfig without moving them; only the backup it took still has them.
+#
+# The same rules as migrate_template_settings_to_local apply (a key the
+# template or ~/.gitconfig.local already sets is left alone; gpgsign needs a
+# signing key). The marker is also set when nothing needs moving, so a setting
+# the user later removes from ~/.gitconfig.local on purpose is never brought
+# back. It isn't written into a ~/.gitconfig.local that doesn't exist (nothing
+# was moved): the installer creates that file, and the next sync sets it.
+# Prints nothing unless a setting moves. Returns 1 (after reporting why) if a
+# setting could not be moved.
+# Usage: recover_template_settings HOME_DIR NEW_CONTENT
+recover_template_settings() {
+    local home_dir="$1" new_content="$2" local_cfg="$1/.gitconfig.local" backup
+    command -v git >/dev/null 2>&1 || return 0
+    if [ "$(git config --file "$local_cfg" --type=bool --get "$TEMPLATE_KEYS_MIGRATED_MARKER" 2>/dev/null)" = true ]; then
+        return 0
+    fi
+    if backup="$(_newest_backup_with_moved_keys "$home_dir")"; then
+        migrate_template_settings_to_local "$backup" "$new_content" "$local_cfg" "the backup ~/$(basename "$backup")" || return 1
+    fi
+    [ -e "$local_cfg" ] || return 0
+    # Not fatal: the next sync looks again and finds nothing left to move.
+    if ! git config --file "$local_cfg" "$TEMPLATE_KEYS_MIGRATED_MARKER" true 2>/dev/null; then
+        echo "[WARN] Could not set $TEMPLATE_KEYS_MIGRATED_MARKER in $local_cfg"
+    fi
     return 0
 }
 
