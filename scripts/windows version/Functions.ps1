@@ -447,3 +447,71 @@ function Get-DroppedGitConfigKeys {
     }
     return @($dropped | Sort-Object -Unique)
 }
+
+# Remove the lines from BeginMarker through EndMarker (inclusive) from the text
+# file at Path, keeping every other byte as it was: the encoding, any BOM, the
+# line endings, and characters the ANSI code page can't hold (#255). Cleanup
+# used Set-Content, which re-encodes the file; under Windows PowerShell 5.1
+# (the elevated relaunch) it wrote ANSI, so the profile lost its BOM and Nerd
+# Font glyphs or emoji became '?'. Returns 'Removed', 'NotFound' (no begin
+# marker, or no file) or 'Unterminated' (a begin marker with no end marker after
+# it). The file is written only for 'Removed'.
+function Remove-MarkedBlock {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$BeginMarker,
+        [Parameter(Mandatory)][string]$EndMarker
+    )
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item -or $item.PSIsContainer) { return 'NotFound' }
+    $fullPath = $item.FullName
+    $bytes = [System.IO.File]::ReadAllBytes($fullPath)
+
+    # UTF-16/32 (Windows PowerShell's '>' writes UTF-16 LE) need decoding to
+    # find the lines. Anything else is ASCII-compatible (UTF-8, ANSI), so it is
+    # read as Latin-1, which maps each byte to one char and back unchanged: the
+    # ASCII markers still match and non-ASCII bytes survive as they were.
+    $bomLength = 0
+    $encoding = [System.Text.Encoding]::GetEncoding(28591)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        $bomLength = 3
+    }
+    elseif ($bytes.Length -ge 4 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0 -and $bytes[3] -eq 0) {
+        $bomLength = 4
+        $encoding = New-Object System.Text.UTF32Encoding($false, $false)
+    }
+    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+        $bomLength = 2
+        $encoding = New-Object System.Text.UnicodeEncoding($false, $false)
+    }
+    elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {
+        $bomLength = 2
+        $encoding = New-Object System.Text.UnicodeEncoding($true, $false)
+    }
+    $text = $encoding.GetString($bytes, $bomLength, $bytes.Length - $bomLength)
+
+    # Split after each newline so every piece keeps its own line ending.
+    $kept = New-Object System.Text.StringBuilder
+    $inBlock = $false
+    $found = $false
+    foreach ($line in [regex]::Split($text, '(?<=\n)')) {
+        $content = $line.TrimEnd([char[]]"`r`n")
+        if ($inBlock) {
+            if ($content -eq $EndMarker) { $inBlock = $false; $found = $true }
+            continue
+        }
+        if ($content -eq $BeginMarker) { $inBlock = $true; continue }
+        [void]$kept.Append($line)
+    }
+    # No end marker: removing to the end of the file could take the user's own
+    # lines with it, so leave the file alone.
+    if ($inBlock) { return 'Unterminated' }
+    if (-not $found) { return 'NotFound' }
+
+    $body = $encoding.GetBytes($kept.ToString())
+    $out = New-Object byte[] ($bomLength + $body.Length)
+    [System.Array]::Copy($bytes, 0, $out, 0, $bomLength)
+    [System.Array]::Copy($body, 0, $out, $bomLength, $body.Length)
+    [System.IO.File]::WriteAllBytes($fullPath, $out)
+    return 'Removed'
+}

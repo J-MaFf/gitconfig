@@ -401,6 +401,113 @@ function Read-Host { param([string]`$Prompt) if (`$Prompt -like '*scheduled task
     }
 }
 
+Describe "Initialize-Symlinks.ps1 keeps the existing file when linking fails (#255)" -Tag 'Unit' {
+    # Runs the real script -Force in a child process with a sandboxed
+    # USERPROFILE, Read-Host stubbed, and New-Item or Move-Item shimmed to fail
+    # the way they do on Windows without admin or Developer Mode. The first
+    # test never creates a symlink, so it runs everywhere; the others need
+    # real symlinks and skip without them (see the probe in BeforeDiscovery).
+
+    BeforeAll {
+        $script:symlinksScript = Join-Path $script:winDir "Initialize-Symlinks.ps1"
+
+        # New-Item that refuses symlinks with a non-terminating error, like
+        # the real one without the privilege. Everything else passes through.
+        $script:failNewItemShim = @'
+function New-Item {
+    [CmdletBinding()]
+    param([string]$ItemType, [string]$Path, [object]$Target, [object]$Value, [switch]$Force)
+    if ($ItemType -eq 'SymbolicLink') { Write-Error 'Administrator privilege required for this operation.'; return }
+    Microsoft.PowerShell.Management\New-Item @PSBoundParameters
+}
+'@
+        # Move-Item that fails only for the script's temporary link, so the
+        # swap fails after the existing file has been moved to its backup.
+        $script:failSwapShim = @'
+function Move-Item {
+    [CmdletBinding()]
+    param([string]$LiteralPath, [string]$Destination, [switch]$Force)
+    if ($LiteralPath -like '*.tmp-*') { Write-Error 'The process cannot access the file because it is being used by another process.'; return }
+    Microsoft.PowerShell.Management\Move-Item @PSBoundParameters
+}
+'@
+
+        function Invoke-SymlinksWithShim([string]$HomeDir, [string]$Shim) {
+            $cmd = @"
+function Read-Host { param([string]`$Prompt) 'n' }
+$Shim
+`$env:USERPROFILE = '$HomeDir'; `$env:HOME = '$HomeDir'
+`$env:GIT_CONFIG_GLOBAL = '$HomeDir/.gitconfig'; `$env:GIT_CONFIG_SYSTEM = '$HomeDir/none'
+& '$script:symlinksScript' -Force
+exit `$LASTEXITCODE
+"@
+            $out = & $script:pwshPath -NoProfile -NonInteractive -Command $cmd 2>&1 | Out-String
+            [pscustomobject]@{ Output = $out; ExitCode = $LASTEXITCODE }
+        }
+
+        # Anything the script left under a temporary name.
+        function Get-TempLinks([string]$HomeDir) {
+            @(Get-ChildItem -LiteralPath $HomeDir -Force | Where-Object { $_.Name -match '\.tmp-[0-9a-f]{8}$' })
+        }
+    }
+
+    BeforeEach {
+        $script:sbHome = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:sbHome | Out-Null
+        $script:gi = Join-Path $script:sbHome ".gitignore_global"
+    }
+
+    It "leaves a real file in place, takes no backup, and exits 1 when the link can't be made" {
+        Set-Content -LiteralPath $script:gi -Value "MY-OWN-IGNORES"
+        $r = Invoke-SymlinksWithShim -HomeDir $script:sbHome -Shim $script:failNewItemShim
+
+        $item = Get-Item -LiteralPath $script:gi -Force
+        $item.LinkType | Should -BeNullOrEmpty
+        (Get-Content -LiteralPath $script:gi -Raw) | Should -Match "MY-OWN-IGNORES"
+        (Get-Backups $script:gi).Count | Should -Be 0
+        (Get-TempLinks $script:sbHome).Count | Should -Be 0
+        $r.ExitCode | Should -Be 1
+        $r.Output | Should -Match '\[FAIL\] Failed to create symlink'
+        $r.Output | Should -Not -Match 'Created symlink'
+        $r.Output | Should -Not -Match 'now symlinked'
+    }
+
+    It "keeps an old link into the repo when the new link can't be made" -Skip:(-not $canSymlink) {
+        $oldTarget = Join-Path $script:repoRoot "README.md"
+        New-Item -ItemType SymbolicLink -Path $script:gi -Target $oldTarget | Out-Null
+        $r = Invoke-SymlinksWithShim -HomeDir $script:sbHome -Shim $script:failNewItemShim
+
+        Test-LinkPointsTo -Path $script:gi -Target $oldTarget | Should -BeTrue
+        (Get-TempLinks $script:sbHome).Count | Should -Be 0
+        $r.ExitCode | Should -Be 1
+    }
+
+    It "restores the backup when the new link can't be swapped in" -Skip:(-not $canSymlink) {
+        Set-Content -LiteralPath $script:gi -Value "MY-OWN-IGNORES"
+        $r = Invoke-SymlinksWithShim -HomeDir $script:sbHome -Shim $script:failSwapShim
+
+        $item = Get-Item -LiteralPath $script:gi -Force
+        $item.LinkType | Should -BeNullOrEmpty
+        (Get-Content -LiteralPath $script:gi -Raw) | Should -Match "MY-OWN-IGNORES"
+        (Get-Backups $script:gi).Count | Should -Be 0
+        (Get-TempLinks $script:sbHome).Count | Should -Be 0
+        $r.ExitCode | Should -Be 1
+        $r.Output | Should -Match 'Restored the existing \.gitignore_global'
+    }
+
+    It "links both files, leaves nothing temporary behind, and exits 0 when linking works" -Skip:(-not $canSymlink) {
+        Set-Content -LiteralPath $script:gi -Value "MY-OWN-IGNORES"
+        $r = Invoke-SymlinksWithShim -HomeDir $script:sbHome -Shim ''
+
+        Test-LinkPointsTo -Path $script:gi -Target (Join-Path $script:repoRoot ".gitignore_global") | Should -BeTrue
+        Test-LinkPointsTo -Path (Join-Path $script:sbHome "gitconfig_helper.py") -Target (Join-Path $script:repoRoot "gitconfig_helper.py") | Should -BeTrue
+        (Get-Backups $script:gi).Count | Should -Be 1
+        (Get-TempLinks $script:sbHome).Count | Should -Be 0
+        $r.ExitCode | Should -Be 0
+        $r.Output | Should -Match 'now symlinked'
+    }
+}
+
 Describe "Elevated relaunch keeps the caller's switches" -Tag 'Unit' {
     # Get-RelaunchArgs stubs the elevation check, so these run elevated too.
 
