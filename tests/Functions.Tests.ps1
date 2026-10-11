@@ -667,11 +667,21 @@ Describe "Machine-specific value helpers (Functions.ps1, #235)" -Tag 'Unit' {
             Get-OpSshSignPath -HomeDir $script:probeHome | Should -BeExactly $stub
         }
 
-        It "GITCONFIG_OP_SSH_SIGN overrides the probe; set but empty means not installed" {
+        It "GITCONFIG_OP_SSH_SIGN overrides the probe" {
             $null = New-Stub @('AppData', 'Local', 'Microsoft', 'WindowsApps', 'op-ssh-sign.exe')
             $env:GITCONFIG_OP_SSH_SIGN = 'C:\custom\op-ssh-sign.exe'
             Get-OpSshSignPath -HomeDir $script:probeHome | Should -BeExactly 'C:/custom/op-ssh-sign.exe'
+        }
+
+        It "GITCONFIG_OP_SSH_SIGN set but empty means not installed" {
+            $null = New-Stub @('AppData', 'Local', 'Microsoft', 'WindowsApps', 'op-ssh-sign.exe')
             $env:GITCONFIG_OP_SSH_SIGN = ''
+            # Windows PowerShell 5.1 deletes an environment variable assigned an
+            # empty string, so "set but empty" can't be expressed there.
+            if (-not (Test-Path Env:GITCONFIG_OP_SSH_SIGN)) {
+                Set-ItResult -Skipped -Because "this PowerShell can't hold an empty environment variable"
+                return
+            }
             Get-OpSshSignPath -HomeDir $script:probeHome | Should -BeNullOrEmpty
         }
     }

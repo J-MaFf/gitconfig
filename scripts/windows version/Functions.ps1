@@ -603,6 +603,8 @@ function Read-SafeDirectoryList {
 # Microsoft Store build puts it under WindowsApps; the standard installer
 # under AppData\Local\1Password\app\8. GITCONFIG_OP_SSH_SIGN overrides the
 # probe (tests): set to a path to use it, set but empty for "not installed".
+# (Windows PowerShell 5.1 can't hold an empty variable; there an empty one is
+# simply unset, so the probe runs.)
 function Get-OpSshSignPath {
     param([Parameter(Mandatory)][string]$HomeDir)
     if (Test-Path Env:GITCONFIG_OP_SSH_SIGN) {
