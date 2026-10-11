@@ -32,9 +32,14 @@ BeforeAll {
         $global:rltCalls.Settings = $PSBoundParameters
         [pscustomobject]@{}
     }
+    function global:New-ScheduledTaskPrincipal {
+        [CmdletBinding()] param([string]$UserId, [string]$LogonType)
+        $global:rltCalls.PrincipalParams = $PSBoundParameters
+        [pscustomobject]@{ UserId = $UserId; LogonType = $LogonType }
+    }
     function global:Register-ScheduledTask {
         [CmdletBinding()] param(
-            [string]$TaskName, $Action, $Trigger, $Settings, [string]$Description, [switch]$Force
+            [string]$TaskName, $Action, $Trigger, $Settings, $Principal, [string]$Description, [switch]$Force
         )
         $global:rltCalls.Register = $PSBoundParameters
     }
@@ -52,15 +57,15 @@ BeforeAll {
     $script:expectedArgs = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script:updaterPath`" -RepoPath `"$script:repoRoot`""
 
     function Invoke-Register {
-        param([switch]$Force)
-        & $script:scriptPath -Force:$Force *> $null
+        param([switch]$Force, [string]$TaskUser = "")
+        & $script:scriptPath -Force:$Force -TaskUser $TaskUser *> $null
         $LASTEXITCODE
     }
 }
 
 AfterAll {
     foreach ($f in 'Get-ScheduledTask', 'New-ScheduledTaskAction', 'New-ScheduledTaskTrigger',
-        'New-ScheduledTaskSettingsSet', 'Register-ScheduledTask', 'Unregister-ScheduledTask') {
+        'New-ScheduledTaskSettingsSet', 'New-ScheduledTaskPrincipal', 'Register-ScheduledTask', 'Unregister-ScheduledTask') {
         Remove-Item "Function:\$f" -ErrorAction SilentlyContinue
     }
     Remove-Variable rltCalls, rltExistingTask -Scope Global -ErrorAction SilentlyContinue
@@ -114,7 +119,7 @@ Describe "Register-LoginTask.ps1" {
 
         It "Should exit 1 when registration fails" {
             function global:Register-ScheduledTask {
-                [CmdletBinding()] param($TaskName, $Action, $Trigger, $Settings, $Description, [switch]$Force)
+                [CmdletBinding()] param($TaskName, $Action, $Trigger, $Settings, $Principal, $Description, [switch]$Force)
                 throw "Access is denied"
             }
             try {
@@ -123,11 +128,27 @@ Describe "Register-LoginTask.ps1" {
             finally {
                 function global:Register-ScheduledTask {
                     [CmdletBinding()] param(
-                        [string]$TaskName, $Action, $Trigger, $Settings, [string]$Description, [switch]$Force
+                        [string]$TaskName, $Action, $Trigger, $Settings, $Principal, [string]$Description, [switch]$Force
                     )
                     $global:rltCalls.Register = $PSBoundParameters
                 }
             }
+        }
+
+        It "Should run as this user, only while they are logged on (#240)" {
+            Invoke-Register | Out-Null
+            $global:rltCalls.PrincipalParams.UserId | Should -Be "TESTDOM\tester"
+            $global:rltCalls.PrincipalParams.LogonType | Should -Be "Interactive"
+            $global:rltCalls.Register.Principal.UserId | Should -Be "TESTDOM\tester"
+        }
+
+        It "Should register for -TaskUser instead of the current account (#240)" {
+            # install.ps1 passes the account that started it: after an elevation
+            # with an administrator's password, the current account is the
+            # administrator's.
+            Invoke-Register -TaskUser "CORP\alice" | Should -Be 0
+            $global:rltCalls.TriggerParams.User | Should -Be "CORP\alice"
+            $global:rltCalls.PrincipalParams.UserId | Should -Be "CORP\alice"
         }
     }
 
@@ -175,6 +196,28 @@ Describe "Register-LoginTask.ps1" {
             Invoke-Register -Force | Should -Be 0
             $global:rltCalls.ContainsKey('Unregister') | Should -BeTrue
             $global:rltCalls.ContainsKey('Register') | Should -BeTrue
+        }
+
+        It "Should keep an up-to-date task whose user is reported without the domain" {
+            $global:rltExistingTask = [pscustomobject]@{
+                Actions   = @([pscustomobject]@{ Execute = "PowerShell.exe"; Arguments = $script:expectedArgs })
+                Settings  = [pscustomobject]@{ RunOnlyIfNetworkAvailable = $false }
+                Principal = [pscustomobject]@{ UserId = "tester" }
+            }
+            Invoke-Register | Should -Be 0
+            $global:rltCalls.ContainsKey('Register') | Should -BeFalse
+        }
+
+        It "Should replace a task that runs as another account even without -Force (#240)" {
+            # What an install elevated with an administrator's password left.
+            $global:rltExistingTask = [pscustomobject]@{
+                Actions   = @([pscustomobject]@{ Execute = "PowerShell.exe"; Arguments = $script:expectedArgs })
+                Settings  = [pscustomobject]@{ RunOnlyIfNetworkAvailable = $false }
+                Principal = [pscustomobject]@{ UserId = "TESTDOM\admin" }
+            }
+            Invoke-Register | Should -Be 0
+            $global:rltCalls.Unregister.TaskName | Should -Be "GitConfig Pull at Login"
+            $global:rltCalls.Register.Principal.UserId | Should -Be "TESTDOM\tester"
         }
     }
 }

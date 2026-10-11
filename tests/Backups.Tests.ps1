@@ -41,7 +41,7 @@ BeforeAll {
     # "not elevated" with an alias, which PowerShell resolves before the
     # script's own function of that name. That makes the script take its
     # relaunch branch even on an elevated session such as the CI runner (#262).
-    function Get-RelaunchArgs([string]$Script, [string[]]$ScriptArgs) {
+    function Invoke-Relaunch([string]$Script, [string[]]$ScriptArgs, [int]$ChildExitCode = 0) {
         # Refuse to run a script whose elevation check the stub can't reach:
         # on an elevated session it would do its real work instead.
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($Script, [ref]$null, [ref]$null)
@@ -56,17 +56,28 @@ BeforeAll {
         $capture = Join-Path $TestDrive ("relaunch-" + [guid]::NewGuid().ToString('N') + ".txt")
         $sandbox = Join-Path $TestDrive ("relaunch-home-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $sandbox | Out-Null
+        # The Start-Process stub stands in for the elevated window: it records
+        # the arguments and, with -PassThru, returns a process whose ExitCode is
+        # $ChildExitCode.
         $cmd = @"
-function Start-Process { param([string]`$FilePath, [string[]]`$ArgumentList, [string]`$Verb, [switch]`$Wait) Set-Content -LiteralPath '$capture' -Value (`$ArgumentList -join ' ') }
+function Start-Process { param([string]`$FilePath, [string[]]`$ArgumentList, [string]`$Verb, [switch]`$Wait, [switch]`$PassThru) Set-Content -LiteralPath '$capture' -Value (`$ArgumentList -join ' '); if (`$PassThru) { [pscustomobject]@{ ExitCode = $ChildExitCode } } }
 function Test-NotAdministrator { `$false }
 Set-Alias -Name Test-IsAdministrator -Value Test-NotAdministrator
 `$env:USERPROFILE = '$sandbox'; `$env:HOME = '$sandbox'
+`$env:USERDOMAIN = 'CORP'; `$env:USERNAME = 'alice'
 `$env:GIT_CONFIG_GLOBAL = '$sandbox/.gitconfig'; `$env:GIT_CONFIG_SYSTEM = '$sandbox/none'
 & '$Script' $($ScriptArgs -join ' ')
+exit `$LASTEXITCODE
 "@
         & $script:pwshPath -NoProfile -NonInteractive -Command $cmd *> $null
-        if (Test-Path $capture) { return (Get-Content -LiteralPath $capture -Raw).Trim() }
-        return $null
+        $code = $LASTEXITCODE
+        $relaunchArgs = if (Test-Path $capture) { (Get-Content -LiteralPath $capture -Raw).Trim() } else { $null }
+        [pscustomobject]@{ Args = $relaunchArgs; ExitCode = $code; Home = $sandbox }
+    }
+
+    # The argument list the script tried to relaunch itself with.
+    function Get-RelaunchArgs([string]$Script, [string[]]$ScriptArgs) {
+        (Invoke-Relaunch -Script $Script -ScriptArgs $ScriptArgs).Args
     }
 }
 
@@ -527,6 +538,38 @@ Describe "Elevated relaunch keeps the caller's switches" -Tag 'Unit' {
         $relaunch | Should -Match '(^| )-Reinstall( |$)'
         $relaunch | Should -Match '(^| )-NoTask( |$)'
     }
+
+    It "Cleanup-GitConfig.ps1 passes -KeepTask through (#240)" {
+        $relaunch = Get-RelaunchArgs -Script (Join-Path $script:winDir "Cleanup-GitConfig.ps1") -ScriptArgs @('-Force', '-KeepTask')
+        $relaunch | Should -Match '(^| )-KeepTask( |$)'
+    }
+}
+
+Describe "Elevated relaunch hands over the invoking user and the result (#240)" -Tag 'Unit' {
+    # Over-the-shoulder UAC runs the elevated copy as the administrator, so the
+    # relaunch tells it who started it. The parent waits for the elevated window
+    # and exits with its exit code.
+
+    It "<Name> passes the invoking user and profile, and -Elevated instead of -NoExit" -ForEach @(
+        @{ Name = "install.ps1" }, @{ Name = "Cleanup-GitConfig.ps1" }
+    ) {
+        $r = Invoke-Relaunch -Script (Join-Path $script:winDir $Name) -ScriptArgs @('-Force')
+        $r.Args | Should -Match '(^| )-InvokingUser "CORP\\alice"( |$)'
+        $r.Args | Should -Match ('(^| )-InvokingUserProfile "' + [regex]::Escape($r.Home) + '"( |$)')
+        $r.Args | Should -Match '(^| )-Elevated( |$)'
+        # -NoExit kept the window open after the script, so the exit code never
+        # reached the parent.
+        $r.Args | Should -Not -Match '-NoExit'
+    }
+
+    It "<Name> exits with the elevated run's exit code (<Code>)" -ForEach @(
+        @{ Name = "install.ps1"; Code = 1 }, @{ Name = "install.ps1"; Code = 0 },
+        @{ Name = "Cleanup-GitConfig.ps1"; Code = 1 }, @{ Name = "Cleanup-GitConfig.ps1"; Code = 0 }
+    ) {
+        $r = Invoke-Relaunch -Script (Join-Path $script:winDir $Name) -ScriptArgs @('-Force') -ChildExitCode $Code
+        $r.Args | Should -Not -BeNullOrEmpty
+        $r.ExitCode | Should -Be $Code
+    }
 }
 
 Describe "install.ps1 structure" -Tag 'Unit' {
@@ -541,8 +584,9 @@ Describe "install.ps1 structure" -Tag 'Unit' {
     It "runs the cleanup script only inside 'if (`$Reinstall)'" {
         $calls = $script:ast.FindAll({
                 param($n)
+                # "& $cleanupScript ..." or "Invoke-Step -Path $cleanupScript ..."
                 $n -is [System.Management.Automation.Language.CommandAst] -and
-                $n.CommandElements[0].Extent.Text -eq '$cleanupScript'
+                ($n.CommandElements | Where-Object { $_.Extent.Text -eq '$cleanupScript' })
             }, $true)
         @($calls).Count | Should -BeGreaterThan 0
         foreach ($call in $calls) {

@@ -6,6 +6,10 @@ param(
     # Repo the task syncs. Defaults to the repo this script lives in, so a clone
     # outside ~/Documents/Scripts/gitconfig is synced too.
     [string]$RepoPath = "",
+    # Account the task runs for (DOMAIN\user). Defaults to the current account;
+    # install.ps1 passes the account that started it, which differs after an
+    # elevation with another account's password (#240).
+    [string]$TaskUser = "",
     [switch]$Force
 )
 
@@ -20,7 +24,7 @@ if (-not $RepoPath) {
 # Task configuration
 $taskName = "GitConfig Pull at Login"
 $taskDescription = "Automatically pull latest changes from gitconfig repository at user login"
-$taskUser = if ($env:USERDOMAIN) { "$env:USERDOMAIN\$env:USERNAME" } else { $env:USERNAME }
+$taskUser = if ($TaskUser) { $TaskUser } elseif ($env:USERDOMAIN) { "$env:USERDOMAIN\$env:USERNAME" } else { $env:USERNAME }
 
 # -ExecutionPolicy Bypass: Windows client editions default to Restricted, under
 # which -File refuses to run the script at all. -RepoPath: pass the repo
@@ -44,14 +48,20 @@ if ($existingTask -and -not $Force) {
     # A task registered with "Start only if the network is available" (every
     # install before #256) is replaced too: that condition skipped the whole run
     # when the network came up late, including the offline-safe convergence.
+    # A task that runs as another account is replaced too: one registered from
+    # an elevation with an administrator's password ran as the administrator
+    # (#240). Task Scheduler may report the user with or without the domain, so
+    # compare the names after the last backslash.
     $existingAction = @($existingTask.Actions)[0]
     $needsNetwork = $existingTask.Settings -and $existingTask.Settings.RunOnlyIfNetworkAvailable
-    if ($existingAction -and $existingAction.Execute -eq $taskExecute -and $existingAction.Arguments -eq $taskArguments -and -not $needsNetwork) {
+    $existingUser = if ($existingTask.Principal) { "$($existingTask.Principal.UserId)" } else { "" }
+    $otherUser = $existingUser -and (($existingUser -split '\\')[-1] -ne ($taskUser -split '\\')[-1])
+    if ($existingAction -and $existingAction.Execute -eq $taskExecute -and $existingAction.Arguments -eq $taskArguments -and -not $needsNetwork -and -not $otherUser) {
         Write-Host "Scheduled task '$taskName' already exists and is up to date." -ForegroundColor Yellow
         Write-Host "Use -Force flag to replace the existing task."
         exit 0
     }
-    Write-Host "Scheduled task '$taskName' points at an old path or uses old arguments or settings; replacing it." -ForegroundColor Yellow
+    Write-Host "Scheduled task '$taskName' points at an old path, uses old arguments or settings, or runs as another account; replacing it." -ForegroundColor Yellow
 }
 
 try {
@@ -64,6 +74,11 @@ try {
     # user's logon), one minute late so the network is usually up for the pull.
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
     $trigger.Delay = 'PT1M'
+
+    # Run as that user, only while they are logged on (no stored password).
+    # Without -Principal the task ran as whoever registered it, which after an
+    # elevation with another account's password is the administrator (#240).
+    $principal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive
 
     # Create task settings. A run is a pull plus a config render: stop it after
     # 10 minutes instead of the 72-hour default. No -RunOnlyIfNetworkAvailable:
@@ -87,6 +102,7 @@ try {
         -Action $action `
         -Trigger $trigger `
         -Settings $settings `
+        -Principal $principal `
         -Description $taskDescription `
         -Force -ErrorAction Stop | Out-Null
 

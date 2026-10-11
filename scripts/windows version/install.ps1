@@ -6,7 +6,15 @@ param(
     [switch]$Force = $false,
     [switch]$NoTask = $false,
     [switch]$Reinstall = $false,
-    [switch]$Help = $false
+    [switch]$Help = $false,
+    # Set by the elevated relaunch, not by hand (#240): the account that started
+    # the install and its profile and Documents folders, so elevating with an
+    # administrator's password still sets up the account that ran the script.
+    [string]$InvokingUser = "",
+    [string]$InvokingUserProfile = "",
+    [string]$InvokingDocuments = "",
+    # Also set by the relaunch: pause before the elevated window closes.
+    [switch]$Elevated = $false
 )
 
 if ($Help) {
@@ -17,9 +25,11 @@ USAGE: .\install.ps1 [OPTIONS]
 
 OPTIONS:
     -Force      Overwrite existing files without prompting
-    -NoTask     Skip Windows scheduled task creation
+    -NoTask     Skip Windows scheduled task creation (and, with -Reinstall,
+                keep the task that is already registered)
     -Reinstall  Tear down the existing install first (Cleanup-GitConfig.ps1
-                -Force -KeepLocal), which also removes the scheduled task.
+                -Force -KeepLocal), which also removes the scheduled task
+                unless -NoTask is given.
                 Without it, existing files are kept and only replaced after a
                 timestamped backup (<file>.bak.yyyyMMdd-HHmmss).
     -Help       Display this help message
@@ -41,6 +51,10 @@ DESCRIPTION:
     that (0 keeps them all). The first backup of a file also keeps your original
     as <file>.pre-gitconfig, which is never pruned.
 
+    Exit status: 0 when every step succeeded, 1 when a step failed (they are
+    listed at the end). Run without elevation, the script relaunches itself as
+    administrator and exits with the elevated run's status.
+
 REQUIREMENTS: Administrator privileges
 "@
     exit 0
@@ -59,6 +73,12 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 function Test-IsAdministrator {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
+
+# Shared helpers (Resolve-Python, backups, and the invoking-user handoff the
+# relaunch below needs).
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $scriptDir 'Functions.ps1')
+
 $isAdmin = Test-IsAdministrator
 if (-not $isAdmin) {
     Write-Host "GitConfig Setup - Elevation Required" -ForegroundColor Yellow
@@ -67,26 +87,51 @@ if (-not $isAdmin) {
     Write-Host "This script requires administrator privileges to create symlinks and scheduled task." -ForegroundColor Yellow
     Write-Host ""
 
+    # No -NoExit: the elevated window would then outlive the script and its
+    # exit code would be lost. -Elevated makes it pause at the end instead.
     $scriptPath = $MyInvocation.MyCommand.Path
-    $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", "`"$scriptPath`"")
+    $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$scriptPath`"", "-Elevated")
     if ($Force)  { $scriptArgs += "-Force" }
     if ($NoTask) { $scriptArgs += "-NoTask" }
     if ($Reinstall) { $scriptArgs += "-Reinstall" }
+    # Who is running this, so an elevation with another account's password
+    # still configures this account (#240).
+    $scriptArgs += Get-InvokingUserArguments
 
     Write-Host "Relaunching with administrator privileges..." -ForegroundColor Cyan
     Write-Host ""
 
     try {
-        Start-Process powershell -ArgumentList $scriptArgs -Verb RunAs -Wait -ErrorAction Stop
-        exit 0
+        $elevatedRun = Start-Process powershell -ArgumentList $scriptArgs -Verb RunAs -Wait -PassThru -ErrorAction Stop
     }
     catch {
-        Write-Host "Error: Could not elevate privileges." -ForegroundColor Red
+        Write-Host "Error: Could not elevate privileges: $($_.Exception.Message)" -ForegroundColor Red
         exit 1
     }
+    # Pass the elevated run's result on, so a caller sees a failed install (#240).
+    if ($null -eq $elevatedRun -or $null -eq $elevatedRun.ExitCode) {
+        Write-Host "Error: Could not read the elevated setup's exit code." -ForegroundColor Red
+        exit 1
+    }
+    exit $elevatedRun.ExitCode
 }
 
-$scriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Every exit from here on: the elevated relaunch runs in its own window, which
+# closes as soon as the script ends, so pause first to keep the output readable.
+function Exit-Install([int]$Code) {
+    if ($Elevated) {
+        Write-Host ""
+        Read-Host "Press Enter to close this window" | Out-Null
+    }
+    exit $Code
+}
+
+# Elevated with a different account's password: set up the account that started
+# the install, not the administrator's (#240). $installUser.Documents is that
+# account's Documents folder (for the PowerShell profile), or $null when no
+# switch was needed.
+$installUser = Use-InvokingUser -InvokingUser $InvokingUser -InvokingUserProfile $InvokingUserProfile -InvokingDocuments $InvokingDocuments
+
 $repoRoot    = Split-Path -Parent (Split-Path -Parent $scriptDir)
 $homeDir     = $env:USERPROFILE
 $scriptsDir  = $scriptDir
@@ -100,10 +145,7 @@ $registerTaskScript = Join-Path $scriptsDir "Register-LoginTask.ps1"
 # dependencies); the core gitconfig install works fine without it. Detect
 # it once, up front, before touching any files, so a missing interpreter is
 # a single clear choice instead of scattered warnings later in the run.
-# Dot-source Functions.ps1 here to reuse Resolve-Python (STEP 6 dot-sources
-# it again before Install-PythonDeps - harmless, not worth threading a
-# guard through).
-. (Join-Path $scriptDir 'Functions.ps1')
+# Resolve-Python comes from Functions.ps1, dot-sourced above.
 if (-not (Resolve-Python)) {
     Write-Host "[WARN] Python not found - it powers the 'git alias' browser (rich/textual); the core gitconfig install works fine without it." -ForegroundColor Yellow
     if ($Force) {
@@ -113,7 +155,7 @@ if (-not (Resolve-Python)) {
         $pythonResponse = Read-Host "Continue anyway? (y/n)"
         if ($pythonResponse -ne "y") {
             Write-Host "Setup cancelled." -ForegroundColor Yellow
-            exit 0
+            Exit-Install 0
         }
     }
     Write-Host ""
@@ -124,6 +166,29 @@ Write-Host "=====================================" -ForegroundColor Cyan
 Write-Host "Repository: $repoRoot" -ForegroundColor Green
 Write-Host "Home Directory: $homeDir" -ForegroundColor Green
 Write-Host ""
+
+# Each step that fails is recorded here; the summary lists them and the script
+# exits 1 (#240). It used to print "Setup Complete!" and exit 0 whatever happened.
+$failures = New-Object System.Collections.Generic.List[string]
+
+# Run a step's script and return its exit code. The scripts report failure with
+# "exit 1", which & does not turn into an error, so the code is the only signal.
+# $LASTEXITCODE is reset first: a script that ends without "exit" leaves it as
+# the last native command set it. -Quiet drops the script's pipeline output
+# (its Write-Host lines still show).
+function Invoke-Step {
+    param([string]$Path, [hashtable]$Arguments = @{}, [switch]$Quiet)
+    $global:LASTEXITCODE = 0
+    if ($Quiet) { & $Path @Arguments | Out-Null } else { & $Path @Arguments | Out-Host }
+    return $global:LASTEXITCODE
+}
+
+# After an account switch the child scripts are told about it too, so they use
+# the invoking account's PowerShell profile.
+$invokingArgs = @{}
+if ($installUser.Switched) {
+    $invokingArgs = @{ InvokingUser = $installUser.User; InvokingUserProfile = $homeDir; InvokingDocuments = $installUser.Documents }
+}
 
 # STEP 0: Clean up the existing installation, only when asked (-Reinstall). An
 # unconditional teardown used to run here; it moved every file away before the
@@ -136,8 +201,18 @@ if ($Reinstall) {
         # -KeepLocal: the teardown must not delete ~/.gitconfig.local, which holds
         # user-owned machine state (safe.directory entries, etc.). A full reset is
         # available via the standalone Cleanup-GitConfig.ps1 (without -KeepLocal).
-        & $cleanupScript -Force -KeepLocal -ErrorAction Stop | Out-Null
-        Write-Host "[OK] Previous installation cleaned up" -ForegroundColor Green
+        # -KeepTask with -NoTask: STEP 5 won't register the task again, so
+        # removing it here would turn the login sync off (#240).
+        $cleanupArgs = @{ Force = $true; KeepLocal = $true; KeepTask = [bool]$NoTask } + $invokingArgs
+        $code = Invoke-Step -Path $cleanupScript -Arguments $cleanupArgs -Quiet
+        if ($code -eq 0) {
+            Write-Host "[OK] Previous installation cleaned up" -ForegroundColor Green
+        }
+        else {
+            # Not a failure of the install: the steps below back up and replace
+            # whatever the cleanup left.
+            Write-Host "[WARN] Cleanup did not remove everything (exit code $code); the steps below replace what is left" -ForegroundColor Yellow
+        }
     }
     catch {
         Write-Host "[WARN] No previous installation found or cleanup failed (this is OK)" -ForegroundColor Yellow
@@ -149,11 +224,18 @@ if ($Reinstall) {
 Write-Host "[STEP 1] Generating .gitconfig from template..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 try {
-    if ($Force) { & $initGitScript -Force | Out-Null } else { & $initGitScript | Out-Null }
-    Write-Host "[OK] Generated .gitconfig" -ForegroundColor Green
+    $code = Invoke-Step -Path $initGitScript -Arguments @{ Force = [bool]$Force } -Quiet
+    if ($code -eq 0) {
+        Write-Host "[OK] Generated .gitconfig" -ForegroundColor Green
+    }
+    else {
+        Write-Host "[FAIL] Could not generate .gitconfig (exit code $code)" -ForegroundColor Red
+        $failures.Add("STEP 1: generate .gitconfig")
+    }
 }
 catch {
     Write-Host "[FAIL] Could not generate .gitconfig: $($_.Exception.Message)" -ForegroundColor Red
+    $failures.Add("STEP 1: generate .gitconfig")
 }
 Write-Host ""
 
@@ -161,10 +243,15 @@ Write-Host ""
 Write-Host "[STEP 2] Creating symlinks..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 try {
-    if ($Force) { & $initSymlinksScript -Force } else { & $initSymlinksScript }
+    $code = Invoke-Step -Path $initSymlinksScript -Arguments @{ Force = [bool]$Force }
+    if ($code -ne 0) {
+        Write-Host "[FAIL] Symlink setup failed (exit code $code)" -ForegroundColor Red
+        $failures.Add("STEP 2: create symlinks")
+    }
 }
 catch {
     Write-Host "[FAIL] Symlink setup failed: $($_.Exception.Message)" -ForegroundColor Red
+    $failures.Add("STEP 2: create symlinks")
 }
 Write-Host ""
 
@@ -176,8 +263,12 @@ Write-Host "[STEP 3] Generating machine-specific configuration..." -ForegroundCo
 Write-Host "-----" -ForegroundColor Cyan
 try {
     $localExisted = Test-Path (Join-Path $homeDir ".gitconfig.local")
-    & $initLocalScript | Out-Null
-    if ($localExisted) {
+    $code = Invoke-Step -Path $initLocalScript -Quiet
+    if ($code -ne 0) {
+        Write-Host "[FAIL] Could not set up .gitconfig.local (exit code $code)" -ForegroundColor Red
+        $failures.Add("STEP 3: set up .gitconfig.local")
+    }
+    elseif ($localExisted) {
         Write-Host "[OK] Preserved existing .gitconfig.local" -ForegroundColor Green
     }
     else {
@@ -186,6 +277,7 @@ try {
 }
 catch {
     Write-Host "[FAIL] Could not set up .gitconfig.local: $($_.Exception.Message)" -ForegroundColor Red
+    $failures.Add("STEP 3: set up .gitconfig.local")
 }
 Write-Host ""
 
@@ -193,15 +285,22 @@ Write-Host ""
 # with git config --global made ~/.gitconfig differ from the template, so the
 # next login sync regenerated it.)
 
-# STEP 5: Create scheduled task (delegates to Register-LoginTask.ps1)
+# STEP 5: Create scheduled task (delegates to Register-LoginTask.ps1, the only
+# place the task is registered). -TaskUser: the account being set up, which is
+# not this process's account after an over-the-shoulder elevation (#240).
 if (-not $NoTask) {
     Write-Host "[STEP 5] Setting up scheduled task..." -ForegroundColor Cyan
     Write-Host "-----" -ForegroundColor Cyan
     try {
-        if ($Force) { & $registerTaskScript -Force } else { & $registerTaskScript }
+        $code = Invoke-Step -Path $registerTaskScript -Arguments @{ TaskUser = $installUser.User; Force = [bool]$Force }
+        if ($code -ne 0) {
+            Write-Host "[FAIL] Scheduled task setup failed (exit code $code)" -ForegroundColor Red
+            $failures.Add("STEP 5: register the login task")
+        }
     }
     catch {
         Write-Host "[FAIL] Scheduled task setup failed: $($_.Exception.Message)" -ForegroundColor Red
+        $failures.Add("STEP 5: register the login task")
     }
     Write-Host ""
 }
@@ -209,10 +308,10 @@ if (-not $NoTask) {
 # STEP 6: Install Python dependencies (rich required; textual optional, for the
 # interactive 'git alias' browser). Declared in pyproject.toml and installed by
 # the shared Install-PythonDeps routine (single source of truth across Windows
-# install + the login auto-update).
+# install + the login auto-update). Best effort: it warns, and the login sync
+# retries, so it never fails the install.
 Write-Host "[STEP 6] Installing Python dependencies..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
-. (Join-Path $scriptDir 'Functions.ps1')
 Install-PythonDeps -RepoRoot $repoRoot
 Write-Host ""
 
@@ -223,7 +322,8 @@ try {
     $widgetPath = Join-Path $repoRoot "scripts\shell\git-alias-widget.ps1"
     $beginMarker = "# >>> gitconfig git-alias browser (Ctrl-G) >>>"
     $endMarker = "# <<< gitconfig git-alias browser <<<"
-    $profilePath = $PROFILE.CurrentUserAllHosts
+    # The invoking account's profile after an account switch, else this one's.
+    $profilePath = Get-ProfileScriptPath -Documents $installUser.Documents
     $profileDir = Split-Path -Parent $profilePath
     if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force | Out-Null }
     $profileText = if (Test-Path $profilePath) { Get-Content -Raw $profilePath } else { "" }
@@ -248,21 +348,26 @@ $verifyFiles = @(".gitconfig", ".gitignore_global", "gitconfig_helper.py", ".git
 foreach ($file in $verifyFiles) {
     $path = Join-Path $homeDir $file
     if (Test-Path $path) { Write-Host "[OK] $file verified" -ForegroundColor Green }
-    else                  { Write-Host "[FAIL] $file missing" -ForegroundColor Red }
+    else {
+        Write-Host "[FAIL] $file missing" -ForegroundColor Red
+        $failures.Add("STEP 7: $file missing")
+    }
 }
 
-# Resolve-Python (Functions.ps1, dot-sourced in STEP 6) treats 0-byte
+# Resolve-Python (Functions.ps1) treats 0-byte
 # WindowsApps app-execution-alias stubs specially (deprioritized or skipped
 # depending on what else is available), unlike a plain first-hit Get-Command
 # chain, which would happily return one. Reuse it here instead of
 # re-resolving with weaker logic, so verification can't fail against a
 # candidate STEP 6 already knew to avoid (#200).
 $pyCmd = Resolve-Python
+$richImportable = $false
 
 if ($pyCmd) {
     try {
         & $pyCmd -c "import rich" 2>$null
-        if ($LASTEXITCODE -eq 0) { Write-Host "[OK] Python 'rich' importable" -ForegroundColor Green }
+        $richImportable = ($LASTEXITCODE -eq 0)
+        if ($richImportable) { Write-Host "[OK] Python 'rich' importable" -ForegroundColor Green }
         else                     { Write-Host "[WARN] Python 'rich' not importable" -ForegroundColor Yellow }
         & $pyCmd -c "import textual" 2>$null
         if ($LASTEXITCODE -eq 0) { Write-Host "[OK] Python 'textual' importable" -ForegroundColor Green }
@@ -276,15 +381,33 @@ else {
     Write-Host "[WARN] Python not found - cannot verify 'rich'" -ForegroundColor Yellow
 }
 
+# 'git alias' runs the Python helper, which needs 'rich'. Without them it can
+# only fail, and that is already reported above (Python is optional, and the
+# login sync retries the packages), so only a failure with both present counts.
 try {
-    & git alias | Out-Null
-    if ($LASTEXITCODE -eq 0) { Write-Host "[OK] Git aliases working" -ForegroundColor Green }
+    & git alias *> $null
+    $aliasCode = $LASTEXITCODE
+    if ($aliasCode -eq 0) { Write-Host "[OK] Git aliases working" -ForegroundColor Green }
+    elseif ($richImportable) {
+        Write-Host "[FAIL] 'git alias' failed (exit code $aliasCode)" -ForegroundColor Red
+        $failures.Add("STEP 7: 'git alias' failed")
+    }
+    else { Write-Host "[WARN] 'git alias' needs Python with 'rich', which is not available yet" -ForegroundColor Yellow }
 }
 catch {
     Write-Host "[WARN] Could not verify git aliases" -ForegroundColor Yellow
 }
 
 Write-Host ""
-Write-Host "Setup Complete!" -ForegroundColor Cyan
-Write-Host "=====================================" -ForegroundColor Cyan
+if ($failures.Count -eq 0) {
+    Write-Host "Setup Complete!" -ForegroundColor Cyan
+    Write-Host "=====================================" -ForegroundColor Cyan
+    Write-Host ""
+    Exit-Install 0
+}
+Write-Host "Setup finished with errors:" -ForegroundColor Red
+foreach ($failure in $failures) { Write-Host "  [FAIL] $failure" -ForegroundColor Red }
+Write-Host "=====================================" -ForegroundColor Red
+Write-Host "Fix the [FAIL] lines above and run install.ps1 again." -ForegroundColor Red
 Write-Host ""
+Exit-Install 1

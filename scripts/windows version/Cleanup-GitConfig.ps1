@@ -5,7 +5,16 @@
 param(
     [switch]$Help = $false,
     [switch]$Force = $false,
-    [switch]$KeepLocal = $false
+    [switch]$KeepLocal = $false,
+    [switch]$KeepTask = $false,
+    # Set by the elevated relaunch, not by hand (#240): the account that started
+    # the cleanup and its profile and Documents folders, so elevating with an
+    # administrator's password still cleans up the account that ran the script.
+    [string]$InvokingUser = "",
+    [string]$InvokingUserProfile = "",
+    [string]$InvokingDocuments = "",
+    # Also set by the relaunch: pause before the elevated window closes.
+    [switch]$Elevated = $false
 )
 
 if ($Help) {
@@ -19,6 +28,9 @@ OPTIONS:
     -KeepLocal  Preserve ~/.gitconfig.local (machine-specific user config).
                 Used by install.ps1 -Reinstall so re-running setup never wipes
                 hand-tuned safe.directory entries, etc.
+    -KeepTask   Leave the "GitConfig Pull at Login" scheduled task registered.
+                Used by install.ps1 -Reinstall -NoTask, which does not register
+                the task again.
     -Help       Display this help message
 
 DESCRIPTION:
@@ -26,7 +38,8 @@ DESCRIPTION:
     1. Moves .gitconfig, .gitignore_global and gitconfig_helper.py away
     2. Moves .gitconfig.local away (unless -KeepLocal)
     3. Removes the Ctrl-G git-alias browser keybinding from your profile
-    4. Deletes the "GitConfig Pull at Login" scheduled task (if it exists)
+    4. Deletes the "GitConfig Pull at Login" scheduled task (if it exists,
+       and unless -KeepTask)
     5. Verifies the cleanup
 
     Removed files are kept as timestamped backups (<file>.bak.yyyyMMdd-HHmmss,
@@ -34,6 +47,10 @@ DESCRIPTION:
     The first backup of a file also keeps your original as
     <file>.pre-gitconfig, which is never pruned.
     Symlinks into this repo are removed without a backup.
+
+    Exit status: 0 when everything was removed, 1 when the verification found
+    something left behind. Run without elevation, the script relaunches itself
+    as administrator and exits with the elevated run's status.
 
 NOTE: Requires administrator privileges
 "@
@@ -45,6 +62,12 @@ NOTE: Requires administrator privileges
 function Test-IsAdministrator {
     ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
+
+# Shared helpers: timestamped backups (Backup-UserFile), and the invoking-user
+# handoff the relaunch below needs.
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $scriptDir "Functions.ps1")
+
 $isAdmin = Test-IsAdministrator
 if (-not $isAdmin) {
     Write-Host "GitConfig Cleanup - Elevation Required" -ForegroundColor Yellow
@@ -53,24 +76,49 @@ if (-not $isAdmin) {
     Write-Host "This script requires administrator privileges to remove scheduled task." -ForegroundColor Yellow
     Write-Host ""
 
+    # No -NoExit: the elevated window would then outlive the script and its
+    # exit code would be lost. -Elevated makes it pause at the end instead.
     $scriptPath = $MyInvocation.MyCommand.Path
-    $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", "`"$scriptPath`"")
+    $scriptArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$scriptPath`"", "-Elevated")
 
     if ($Force) { $scriptArgs += "-Force" }
     if ($KeepLocal) { $scriptArgs += "-KeepLocal" }
+    if ($KeepTask) { $scriptArgs += "-KeepTask" }
+    # Who is running this, so an elevation with another account's password
+    # still cleans up this account (#240).
+    $scriptArgs += Get-InvokingUserArguments
 
     Write-Host "Relaunching with administrator privileges..." -ForegroundColor Cyan
     Write-Host ""
 
     try {
-        Start-Process powershell -ArgumentList $scriptArgs -Verb RunAs -Wait -ErrorAction Stop
-        exit 0
+        $elevatedRun = Start-Process powershell -ArgumentList $scriptArgs -Verb RunAs -Wait -PassThru -ErrorAction Stop
     }
     catch {
-        Write-Host "Error: Could not elevate privileges." -ForegroundColor Red
+        Write-Host "Error: Could not elevate privileges: $($_.Exception.Message)" -ForegroundColor Red
         exit 1
     }
+    # Pass the elevated run's result on, so a caller sees an incomplete cleanup.
+    if ($null -eq $elevatedRun -or $null -eq $elevatedRun.ExitCode) {
+        Write-Host "Error: Could not read the elevated cleanup's exit code." -ForegroundColor Red
+        exit 1
+    }
+    exit $elevatedRun.ExitCode
 }
+
+# Every exit from here on: the elevated relaunch runs in its own window, which
+# closes as soon as the script ends, so pause first to keep the output readable.
+function Exit-Cleanup([int]$Code) {
+    if ($Elevated) {
+        Write-Host ""
+        Read-Host "Press Enter to close this window" | Out-Null
+    }
+    exit $Code
+}
+
+# Elevated with a different account's password: clean up the account that
+# started the cleanup, not the administrator's (#240).
+$cleanupUser = Use-InvokingUser -InvokingUser $InvokingUser -InvokingUserProfile $InvokingUserProfile -InvokingDocuments $InvokingDocuments
 
 Write-Host "GitConfig Cleanup" -ForegroundColor Cyan
 Write-Host "=====================================" -ForegroundColor Cyan
@@ -81,17 +129,13 @@ if (-not $Force) {
     $confirm = Read-Host "Continue? (y/n)"
     if ($confirm -ne "y") {
         Write-Host "Cancelled." -ForegroundColor Yellow
-        exit 0
+        Exit-Cleanup 0
     }
 }
 
 $homeDir = $env:USERPROFILE
 $removed = 0
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
-
-# Shared helpers: timestamped backups (Backup-UserFile).
-. (Join-Path $scriptDir "Functions.ps1")
 
 # Move Path to a timestamped backup (or just remove it if it is a symlink into
 # the repo) and report what happened. Returns $true if Path is gone.
@@ -156,7 +200,8 @@ Write-Host "-----" -ForegroundColor Cyan
 try {
     $beginMarker = "# >>> gitconfig git-alias browser (Ctrl-G) >>>"
     $endMarker = "# <<< gitconfig git-alias browser <<<"
-    $profilePath = $PROFILE.CurrentUserAllHosts
+    # The invoking account's profile after an account switch, else this one's.
+    $profilePath = Get-ProfileScriptPath -Documents $cleanupUser.Documents
     # Remove-MarkedBlock keeps the profile's encoding, BOM and line endings
     # (Set-Content under Windows PowerShell 5.1 rewrote it as ANSI).
     switch (Remove-MarkedBlock -Path $profilePath -BeginMarker $beginMarker -EndMarker $endMarker) {
@@ -182,9 +227,12 @@ Write-Host "[STEP 3] Removing scheduled task..." -ForegroundColor Cyan
 Write-Host "-----" -ForegroundColor Cyan
 
 $taskName = "GitConfig Pull at Login"
-$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+$task = if ($KeepTask) { $null } else { Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue }
 
-if ($task) {
+if ($KeepTask) {
+    Write-Host "[SKIP] Keeping the scheduled task (-KeepTask)" -ForegroundColor Yellow
+}
+elseif ($task) {
     try {
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false | Out-Null
         Write-Host "[OK] Removed scheduled task" -ForegroundColor Green
@@ -234,9 +282,11 @@ else {
     Write-Host "[OK] .gitconfig.local removed" -ForegroundColor Green
 }
 
-# Check scheduled task was removed
-$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if ($task) {
+# Check scheduled task was removed (skipped when intentionally kept)
+if ($KeepTask) {
+    Write-Host "[OK] Scheduled task kept (-KeepTask)" -ForegroundColor Green
+}
+elseif (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
     Write-Host "[FAIL] Scheduled task still exists!" -ForegroundColor Red
     $verifyErrors++
 }
@@ -276,7 +326,8 @@ Write-Host "=====================================" -ForegroundColor Cyan
 
 if ($verifyErrors -eq 0) {
     Write-Host "Cleanup SUCCESSFUL!" -ForegroundColor Green
-    Write-Host "All gitconfig-related files and tasks removed." -ForegroundColor Green
+    if ($KeepTask) { Write-Host "All gitconfig-related files removed; the scheduled task was kept." -ForegroundColor Green }
+    else { Write-Host "All gitconfig-related files and tasks removed." -ForegroundColor Green }
     Write-Host ""
     Write-Host "Ready to test fresh setup:" -ForegroundColor Cyan
     Write-Host "  .\install.ps1 -Force" -ForegroundColor Cyan
@@ -285,3 +336,8 @@ else {
     Write-Host "Cleanup INCOMPLETE - $verifyErrors items still present" -ForegroundColor Red
 }
 Write-Host ""
+
+# Exit 1 when something was left behind, so a caller (install.ps1 -Reinstall,
+# or a script) can tell (#240). It used to exit 0 either way.
+if ($verifyErrors -gt 0) { Exit-Cleanup 1 }
+Exit-Cleanup 0
