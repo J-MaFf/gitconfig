@@ -8,6 +8,16 @@
 # bin/, lib/, ...) belong in each project's own .gitignore, where they are
 # visible and versioned. Globally ignoring them silently hides files that some
 # projects must commit (package-lock.json, a bin/ of scripts, a lib/ package).
+#
+# One deliberate exception: the secret patterns at the bottom (*.pem, *.key, ...)
+# also match some files that are safe to commit, such as a public CA bundle
+# (ca-bundle.pem), a test certificate, or a Keynote deck (deck.key). They are
+# kept broad on purpose: a missed private key is a leak, a missed CA bundle is
+# only an extra step. Git says nothing about ignored files, so if one of those
+# is missing from `git status`, check with `git check-ignore -v <file>`, then
+# either add it once with `git add -f <file>` (git keeps tracking it after
+# that), or un-ignore it for everyone in the project's own .gitignore with a
+# negation such as `!ca-bundle.pem` (project rules override this file).
 
 # ============================================================================
 # Editors
@@ -86,6 +96,9 @@ __pycache__/
 # ============================================================================
 # Secrets and local credentials
 # ============================================================================
+# Broad on purpose; see the header for how to commit a public .pem or a .key
+# that is not a secret. A pattern with a slash in the middle (a/b) only matches
+# at the repository root, so nested paths need a leading **/.
 
 .env
 .env.local
@@ -95,6 +108,6 @@ __pycache__/
 *.key
 credentials.json
 oauth_token
-.aws/credentials
+**/.aws/credentials
 .ssh/
 .pgpass

@@ -1433,6 +1433,41 @@ class TestReadSkillDescription:
 
 
 # --------------------------------------------------------------------------
+# `git localconfig` alias from .gitconfig.template (#263)
+# --------------------------------------------------------------------------
+
+class TestLocalconfigAlias:
+    """Runs the template's real localconfig alias with HOME pointed at a temp
+    dir, so ~/.gitconfig.local is a scratch file. Bare `git config --file X`
+    exits 129 ("no action specified"); the alias defaults to --edit."""
+
+    @pytest.fixture
+    def home(self, git_env, monkeypatch):
+        alias = TestPushfAlias._template_alias("localconfig")
+        _git(git_env, "config", "--global", "alias.localconfig", alias)
+        monkeypatch.setenv("HOME", str(git_env))
+        # Stand-in editor: git passes the file path as the last argument.
+        editor = git_env / "editor.sh"
+        editor.write_text('#!/bin/sh\nprintf "[user]\\n\\temail = ed@example.com\\n" > "$1"\n')
+        editor.chmod(0o755)
+        monkeypatch.setenv("GIT_EDITOR", str(editor))
+        return git_env
+
+    def test_no_args_opens_the_file_in_the_editor(self, home):
+        result = subprocess.run(["git", "localconfig"], cwd=home, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert "ed@example.com" in (home / ".gitconfig.local").read_text()
+
+    def test_args_pass_through_to_git_config(self, home):
+        subprocess.run(["git", "localconfig", "user.name", "Jane Doe"],
+                       cwd=home, check=True, capture_output=True, text=True)
+        assert _git(home, "config", "--file", str(home / ".gitconfig.local"), "user.name") == "Jane Doe"
+        assert _git(home, "localconfig", "--get", "user.name") == "Jane Doe"
+        # Only the scratch file was written, not the (isolated) global config.
+        assert "Jane Doe" not in (home / "gitconfig").read_text()
+
+
+# --------------------------------------------------------------------------
 # print_aliases: selection mode (`git alias --out`, the Ctrl-G widgets)
 # --------------------------------------------------------------------------
 
