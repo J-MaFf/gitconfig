@@ -92,6 +92,7 @@ mkdir -p "$(dirname "$LOG_FILE")"
     # and never touches the working tree); the template rendered below is still
     # the one in the checked-out branch.
     CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    HEAD_BEFORE="$(git rev-parse HEAD 2>/dev/null)"
     if [ "$CURRENT_BRANCH" != "main" ]; then
         log_message "On '$CURRENT_BRANCH', not main; leaving it checked out and fast-forwarding main in place..."
         if git fetch origin main:main; then
@@ -108,6 +109,20 @@ mkdir -p "$(dirname "$LOG_FILE")"
         else
             pull_failed "pull failed (offline or diverged); continuing with the local template"
         fi
+    fi
+
+    # functions.sh was loaded before the pull, so after a pull that moved HEAD
+    # the functions in memory are the old ones while the template on disk is
+    # the new one. The first sync after #231 converged with an old
+    # generate_gitconfig that knew nothing of the settings the new template
+    # had moved to ~/.gitconfig.local, and dropped them (#297). Load the pulled
+    # functions.sh again so the template and the code that renders it match.
+    # (This script itself still runs as it was read; only functions reload.)
+    HEAD_AFTER="$(git rev-parse HEAD 2>/dev/null)"
+    if [ -n "$HEAD_BEFORE" ] && [ "$HEAD_AFTER" != "$HEAD_BEFORE" ]; then
+        log_message "Repo moved from ${HEAD_BEFORE:0:7} to ${HEAD_AFTER:0:7}; reloading functions.sh"
+        # shellcheck source=functions.sh
+        source "$SCRIPT_DIR/functions.sh"
     fi
 
     # --- Converge ~/.gitconfig to the template (always) --------------------

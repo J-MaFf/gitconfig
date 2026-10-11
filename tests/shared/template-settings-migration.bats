@@ -10,6 +10,11 @@
 # template, run the updater, and check that the machine still ends up with a
 # signing key, gpgsign and an editor, whatever its ~/.gitconfig.local held.
 #
+# The first sync after #231 ran the old generate_gitconfig against the new
+# template and dropped the settings unmigrated (#297). The recovery tests
+# reproduce that state and check that the next sync restores the settings from
+# the backup, once per machine (the gitconfig.templateKeysMigrated marker).
+#
 # Run with:  bats tests/shared/template-settings-migration.bats
 # Requires:  bats-core (https://github.com/bats-core/bats-core) and git.
 
@@ -63,11 +68,32 @@ teardown() {
     rm -rf "$TESTDIR"
 }
 
+MARKER=gitconfig.templateKeysMigrated
+
 # Install ~/.gitconfig from the old template, as an existing machine has it.
+# Machines installed then have no migration marker in ~/.gitconfig.local.
 install_old() {
     bash -c 'source "$1/scripts/shared/functions.sh"; generate_gitconfig "$2" "$HOME" true' _ \
         "$REPO_ROOT" "$REPO" > /dev/null
     grep -qF "signingkey = $OLD_KEY" "$HOME/.gitconfig"
+    git config --file "$HOME/.gitconfig.local" --unset "$MARKER" 2>/dev/null || :
+}
+
+# What the first sync after #231 did (#297): the updater had loaded the old
+# generate_gitconfig before pulling, so it backed up ~/.gitconfig and wrote
+# the new template without moving anything into ~/.gitconfig.local.
+old_code_sync() {
+    local content
+    git -C "$REPO" pull -q --ff-only
+    cp -p "$HOME/.gitconfig" "$HOME/.gitconfig.bak.${1:-20260901-120000}"
+    content="$(cat "$REPO/.gitconfig.template")"
+    content=${content//\{\{REPO_PATH\}\}/"$REPO"}
+    content=${content//\{\{HOME_DIR\}\}/"$HOME"}
+    printf '%s\n' "$content" > "$HOME/.gitconfig"
+}
+
+marker() {
+    git config --file "$HOME/.gitconfig.local" --get "$MARKER"
 }
 
 # Publish the current template, as a merge to main does.
@@ -143,6 +169,8 @@ auto_update() {
     [ "$(effective user.signingkey)" = "$OLD_KEY" ]
     [ "$(effective commit.gpgsign)" = true ]
     [ "$(effective core.editor)" = "code --wait" ]
+    # The move happened, so the backups are never looked through (#297).
+    [ "$(marker)" = true ]
 }
 
 @test "local values are left alone and still win" {
@@ -201,6 +229,116 @@ auto_update() {
     auto_update
     [ "$status" -eq 1 ]
     cmp "$HOME/.gitconfig" "$TESTDIR/before"
+}
+
+# --- Recovery after a sync that dropped the settings (#297) -------------------
+
+@test "a sync after one that dropped the settings recovers them from its backup" {
+    printf '[gpg "ssh"]\n\tprogram = /opt/1Password/op-ssh-sign\n' > "$HOME/.gitconfig.local"
+    install_old
+    push_new_template
+    old_code_sync
+    run ! effective core.editor
+    run ! effective user.signingkey
+
+    auto_update
+    [ "$status" -eq 0 ]
+    [ "$(effective user.signingkey)" = "$OLD_KEY" ]
+    [ "$(effective commit.gpgsign)" = true ]
+    [ "$(effective core.editor)" = "code --wait" ]
+    [ "$(effective gpg.ssh.program)" = /opt/1Password/op-ssh-sign ]
+    [ "$(marker)" = true ]
+    grep -qF "Moved user.signingkey from the backup ~/.gitconfig.bak.20260901-120000" "$REPO/docs/update-gitconfig.log"
+    # ~/.gitconfig already matched the template: recovered without a rewrite.
+    grep -qF "[OK] .gitconfig already up to date (matches template)" "$REPO/docs/update-gitconfig.log"
+
+    # Done once: the next sync changes nothing.
+    before="$(cat "$HOME/.gitconfig.local")"
+    auto_update
+    [ "$status" -eq 0 ]
+    [ "$(cat "$HOME/.gitconfig.local")" = "$before" ]
+}
+
+@test "recovery uses the newest backup that has the settings" {
+    install_old
+    push_new_template
+    # An older backup with another editor, the one the dropping sync took,
+    # and a newer one (of the new template) without any of the settings.
+    sed 's/editor = code --wait/editor = vim/' "$HOME/.gitconfig" > "$HOME/.gitconfig.bak.20260801-120000"
+    old_code_sync 20260901-120000
+    cp "$HOME/.gitconfig" "$HOME/.gitconfig.bak.20261001-120000"
+
+    auto_update
+    [ "$status" -eq 0 ]
+    [ "$(effective core.editor)" = "code --wait" ]
+    [ "$(effective user.signingkey)" = "$OLD_KEY" ]
+}
+
+@test "recovery falls back to the pinned original ~/.gitconfig.pre-gitconfig" {
+    install_old
+    push_new_template
+    old_code_sync
+    mv "$HOME/.gitconfig.bak.20260901-120000" "$HOME/.gitconfig.pre-gitconfig"
+
+    auto_update
+    [ "$status" -eq 0 ]
+    [ "$(effective core.editor)" = "code --wait" ]
+    [ "$(effective user.signingkey)" = "$OLD_KEY" ]
+    [ "$(effective commit.gpgsign)" = true ]
+}
+
+@test "the marker stops recovery: a setting removed afterwards stays removed" {
+    install_old
+    push_new_template
+    old_code_sync
+    auto_update
+    [ "$status" -eq 0 ]
+    [ "$(effective core.editor)" = "code --wait" ]
+
+    # The user drops the editor on purpose; the backup still has it.
+    git config --file "$HOME/.gitconfig.local" --unset core.editor
+    auto_update
+    [ "$status" -eq 0 ]
+    run ! effective core.editor
+
+    # Nor does a sync that rewrites ~/.gitconfig bring it back.
+    printf '[foo]\n\tbar = 1\n' >> "$HOME/.gitconfig"
+    auto_update
+    [ "$status" -eq 0 ]
+    run ! grep -q 'bar = 1' "$HOME/.gitconfig"
+    run ! effective core.editor
+    [ "$(effective user.signingkey)" = "$OLD_KEY" ]
+}
+
+@test "recovery does not carry gpgsign over without a signing key" {
+    printf '[core]\n\tpager = less\n' > "$HOME/.gitconfig.local"
+    install_old
+    push_new_template
+    old_code_sync
+    git config --file "$HOME/.gitconfig.bak.20260901-120000" --unset user.signingkey
+
+    auto_update
+    [ "$status" -eq 0 ]
+    run ! effective commit.gpgsign
+    run ! effective user.signingkey
+    [ "$(effective core.editor)" = "code --wait" ]
+    [ "$(marker)" = true ]
+    grep -qF "no signing key is configured; not carrying it over" "$REPO/docs/update-gitconfig.log"
+}
+
+@test "with nothing to move the marker is set, but ~/.gitconfig.local isn't created for it" {
+    push_new_template
+    git -C "$REPO" pull -q --ff-only
+    auto_update
+    [ "$status" -eq 0 ]
+    [ ! -e "$HOME/.gitconfig.local" ]
+
+    printf '[core]\n\tpager = less\n' > "$HOME/.gitconfig.local"
+    auto_update
+    [ "$status" -eq 0 ]
+    [ "$(marker)" = true ]
+    [ "$(git config --file "$HOME/.gitconfig.local" --get core.pager)" = less ]
+    run ! git config --file "$HOME/.gitconfig.local" --get core.editor
 }
 
 # --- migrate_template_settings_to_local, directly -----------------------------

@@ -9,8 +9,9 @@
 # Also covers the pull-then-converge step (issue #233): a template change
 # pulled from origin reaches ~/.gitconfig, a dirty tree skips the pull but
 # still converges, a hand-edited or deleted ~/.gitconfig self-heals, and the
-# updater never touches crontab, launchd or systemd. Everything runs in a
-# sandboxed $HOME against a local bare remote.
+# updater never touches crontab, launchd or systemd. After a pull that moves
+# HEAD, the pulled functions.sh is loaded before converging (issue #297).
+# Everything runs in a sandboxed $HOME against a local bare remote.
 #
 # Run with:  bats tests/shared/update-gitconfig.bats
 # Requires:  bats-core (https://github.com/bats-core/bats-core) and git.
@@ -349,4 +350,55 @@ LOCK_REL=".local/state/gitconfig/update.lock"
     # Python was hidden too: the deps step skipped instead of installing.
     grep -qF "No Python interpreter found" "$LOG"
     [ ! -e "$SCHED_CALLS" ]
+}
+
+# The updater as installed: a copy inside the synced repo, so a pull replaces
+# the functions.sh it loads, as on a real machine.
+install_updater_in_repo() {
+    mkdir -p "$REPO/scripts/shared"
+    cp "$REPO_ROOT/scripts/shared/update-gitconfig.sh" "$REPO_ROOT/scripts/shared/functions.sh" "$REPO/scripts/shared/"
+    git -C "$REPO" add -A
+    git -C "$REPO" commit -q -m "Add the updater"
+    git -C "$REPO" push -q origin main
+}
+
+# Publish a functions.sh whose generate_gitconfig only says it ran.
+publish_new_functions() {
+    local other="$TESTDIR/other"
+    [ -d "$other" ] || git clone -q "$REMOTE" "$other" 2>/dev/null
+    git -C "$other" pull -q --ff-only
+    printf '\ngenerate_gitconfig() { echo "NEW generate_gitconfig ran"; }\n' >> "$other/scripts/shared/functions.sh"
+    git -C "$other" commit -q -am "Change generate_gitconfig"
+    git -C "$other" push -q origin main
+}
+
+@test "after a pull that moves HEAD, the pulled functions.sh renders the template" {
+    install_updater_in_repo
+    publish_new_functions
+
+    run bash "$REPO/scripts/shared/update-gitconfig.sh" "$REPO"
+    [ "$status" -eq 0 ]
+    [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$REMOTE" rev-parse main)" ]
+    # The old generate_gitconfig, loaded before the pull, would have written
+    # ~/.gitconfig instead (#297).
+    grep -qF "NEW generate_gitconfig ran" "$LOG"
+    [ ! -e "$HOME/.gitconfig" ]
+    grep -qF "reloading functions.sh" "$LOG"
+}
+
+@test "without a pull that moves HEAD, functions.sh is not reloaded" {
+    install_updater_in_repo
+    run bash "$REPO/scripts/shared/update-gitconfig.sh" "$REPO"
+    [ "$status" -eq 0 ]
+    run ! grep -qF "reloading functions.sh" "$LOG"
+    [ -f "$HOME/.gitconfig" ]
+
+    # Off main, main is fast-forwarded in place but HEAD stays: no reload.
+    git -C "$REPO" switch -q -c feature
+    publish_new_functions
+    : > "$LOG"
+    run bash "$REPO/scripts/shared/update-gitconfig.sh" "$REPO"
+    [ "$status" -eq 0 ]
+    run ! grep -qF "reloading functions.sh" "$LOG"
+    run ! grep -qF "NEW generate_gitconfig ran" "$LOG"
 }
