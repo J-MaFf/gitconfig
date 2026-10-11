@@ -99,6 +99,15 @@ function Update-AllowedSigners {
         Write-Host "[OK] allowed_signers already up to date" -ForegroundColor Green
     }
     else {
+        # Add-Content appends straight after the last byte, so if the file
+        # doesn't end in a newline the new entry would be glued onto the last
+        # one and neither identity would verify (#255).
+        if (Test-Path -LiteralPath $AllowedSignersPath) {
+            $bytes = [System.IO.File]::ReadAllBytes((Get-Item -LiteralPath $AllowedSignersPath -Force).FullName)
+            if ($bytes.Length -gt 0 -and $bytes[$bytes.Length - 1] -ne 10) {
+                $line = [Environment]::NewLine + $line
+            }
+        }
         Add-Content -Path $AllowedSignersPath -Value $line
         Write-Host "[OK] Updated $AllowedSignersPath" -ForegroundColor Green
     }

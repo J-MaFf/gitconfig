@@ -75,7 +75,14 @@ $filesToLink = @(
     "gitconfig_helper.py"
 )
 
-# Function to create symlink
+# Function to create symlink. Returns 'Linked', 'Skipped' (the user said no)
+# or 'Failed'.
+#
+# The new link is made under a temporary name first and only then swapped in,
+# so a link that can't be made (no admin or Developer Mode, a repo on a share
+# or exFAT) leaves the existing file where it was (#255). The old order moved
+# the file aside first, so a failed link left nothing in place and
+# core.excludesfile pointed at a missing file.
 function New-Symlink {
     param(
         [string]$LinkPath,
@@ -86,48 +93,92 @@ function New-Symlink {
     # Already the right link: nothing to do.
     if (Test-LinkPointsTo -Path $LinkPath -Target $TargetPath) {
         Write-Host "[OK] Already linked: $LinkPath" -ForegroundColor Green
-        return $true
+        return 'Linked'
     }
 
+    $name = Split-Path -Leaf $LinkPath
     # Get-LinkAwareItem (not Test-Path) so a dangling symlink still counts.
-    if (Get-LinkAwareItem -Path $LinkPath) {
-        if (Test-LinkIntoDirectory -Path $LinkPath -Directory $repoRoot) {
-            # An old link of ours into the repo holds no user data: replace it
-            # without a backup.
-            Remove-Item -LiteralPath $LinkPath -Force
-        }
-        else {
-            if (-not $Force) {
-                $response = Read-Host "'$LinkPath' already exists. Overwrite? (y/n)"
-                if ($response -ne "y") {
-                    Write-Host "Skipped: $LinkPath" -ForegroundColor Yellow
-                    return $false
-                }
-            }
-            # A real file (or someone else's link): move it to a timestamped
-            # backup rather than deleting it.
-            try {
-                $backupPath = Backup-UserFile -Path $LinkPath -Move
-                Write-Host "[OK] Backed up existing $(Split-Path -Leaf $LinkPath) to $(Split-Path -Leaf $backupPath)" -ForegroundColor Yellow
-            }
-            catch {
-                Write-Host "[FAIL] Could not back up $LinkPath; leaving it in place" -ForegroundColor Red
-                Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
-                return $false
-            }
+    $existing = Get-LinkAwareItem -Path $LinkPath
+    # An old link of ours into the repo holds no user data: it is replaced
+    # without a prompt or a backup.
+    $ours = $existing -and (Test-LinkIntoDirectory -Path $LinkPath -Directory $repoRoot)
+    if ($existing -and -not $ours -and -not $Force) {
+        $response = Read-Host "'$LinkPath' already exists. Overwrite? (y/n)"
+        if ($response -ne "y") {
+            Write-Host "Skipped: $LinkPath" -ForegroundColor Yellow
+            return 'Skipped'
         }
     }
 
+    # 1. Make the link under a temporary name. Nothing has been touched yet, so
+    #    if this fails the existing file stays as it was. -ErrorAction Stop:
+    #    New-Item reports a missing privilege as a non-terminating error.
+    $tempLink = "$LinkPath.tmp-" + [guid]::NewGuid().ToString('N').Substring(0, 8)
     try {
-        New-Item -ItemType SymbolicLink -Path $LinkPath -Target $TargetPath -Force | Out-Null
-        Write-Host "[OK] Created symlink: $LinkPath -> $TargetPath" -ForegroundColor Green
-        return $true
+        New-Item -ItemType SymbolicLink -Path $tempLink -Target $TargetPath -ErrorAction Stop | Out-Null
     }
     catch {
+        Remove-Item -LiteralPath $tempLink -Force -ErrorAction SilentlyContinue
         Write-Host "[FAIL] Failed to create symlink for $LinkPath" -ForegroundColor Red
         Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
-        return $false
+        if ($existing) { Write-Host "  Left the existing $name in place" -ForegroundColor Yellow }
+        return 'Failed'
     }
+
+    # 2. Clear the way: delete our old link (remembering its target), or move a
+    #    real file (or someone else's link) to a timestamped backup.
+    $oldTarget = $null
+    $backupPath = $null
+    if ($existing) {
+        try {
+            if ($ours) {
+                $oldTarget = @($existing.Target)[0]
+                Remove-Item -LiteralPath $LinkPath -Force -ErrorAction Stop
+            }
+            else {
+                $backupPath = Backup-UserFile -Path $LinkPath -Move
+                Write-Host "[OK] Backed up existing $name to $(Split-Path -Leaf $backupPath)" -ForegroundColor Yellow
+            }
+            if (Get-LinkAwareItem -Path $LinkPath) { throw "$LinkPath is still there" }
+        }
+        catch {
+            Remove-Item -LiteralPath $tempLink -Force -ErrorAction SilentlyContinue
+            Write-Host "[FAIL] Could not back up $LinkPath; leaving it in place" -ForegroundColor Red
+            Write-Host "  Error: $($_.Exception.Message)" -ForegroundColor Red
+            return 'Failed'
+        }
+    }
+
+    # 3. Swap the new link in. If even that fails, put the old item back.
+    try {
+        Move-Item -LiteralPath $tempLink -Destination $LinkPath -ErrorAction Stop
+    }
+    catch {
+        $err = $_.Exception.Message
+        Remove-Item -LiteralPath $tempLink -Force -ErrorAction SilentlyContinue
+        Write-Host "[FAIL] Failed to create symlink for $LinkPath" -ForegroundColor Red
+        Write-Host "  Error: $err" -ForegroundColor Red
+        if (-not (Get-LinkAwareItem -Path $LinkPath)) {
+            try {
+                if ($backupPath) {
+                    Move-Item -LiteralPath $backupPath -Destination $LinkPath -ErrorAction Stop
+                    Write-Host "  Restored the existing $name from its backup" -ForegroundColor Yellow
+                }
+                elseif ($oldTarget) {
+                    New-Item -ItemType SymbolicLink -Path $LinkPath -Target $oldTarget -ErrorAction Stop | Out-Null
+                    Write-Host "  Restored the previous $name link" -ForegroundColor Yellow
+                }
+            }
+            catch {
+                Write-Host "  Could not restore $name : $($_.Exception.Message)" -ForegroundColor Red
+                if ($backupPath) { Write-Host "  Your file is at $backupPath" -ForegroundColor Red }
+            }
+        }
+        return 'Failed'
+    }
+
+    Write-Host "[OK] Created symlink: $LinkPath -> $TargetPath" -ForegroundColor Green
+    return 'Linked'
 }
 
 # Function to create scheduled task for git pull at login. Delegates to
@@ -153,24 +204,35 @@ function Register-LoginTask {
 
 # Create symlinks
 $successCount = 0
+$failCount = 0
 foreach ($file in $filesToLink) {
     $targetPath = Join-Path $repoRoot $file
     $linkPath = Join-Path $homeDir $file
 
     if (-not (Test-Path $targetPath)) {
         Write-Host "[FAIL] Source file not found: $targetPath" -ForegroundColor Red
+        $failCount++
         continue
     }
 
-    if (New-Symlink -LinkPath $linkPath -TargetPath $targetPath -Force $Force) {
-        $successCount++
+    switch (New-Symlink -LinkPath $linkPath -TargetPath $targetPath -Force $Force) {
+        'Linked' { $successCount++ }
+        'Failed' { $failCount++ }
     }
 }
 
 Write-Host ""
-Write-Host "Setup Complete!" -ForegroundColor Cyan
+if ($failCount -eq 0) {
+    Write-Host "Setup Complete!" -ForegroundColor Cyan
+}
+else {
+    Write-Host "Setup finished with errors" -ForegroundColor Red
+}
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host "Successfully linked $successCount file(s)" -ForegroundColor Green
+if ($failCount -gt 0) {
+    Write-Host "[FAIL] Could not link $failCount file(s); see the [FAIL] lines above" -ForegroundColor Red
+}
 Write-Host ""
 
 # Offer to create scheduled task
@@ -188,6 +250,14 @@ if ($taskResponse -eq "y") {
         }
     }
     Write-Host ""
+}
+
+if ($failCount -gt 0) {
+    # Exit non-zero so a caller can tell the links are not all in place (#255).
+    Write-Host "Not every file is symlinked. Creating symlinks on Windows needs an" -ForegroundColor Red
+    Write-Host "administrator prompt or Developer Mode; fix that and run this script again." -ForegroundColor Red
+    Write-Host ""
+    exit 1
 }
 
 Write-Host "Your .gitignore_global and gitconfig_helper.py are now symlinked from the repository." -ForegroundColor Cyan

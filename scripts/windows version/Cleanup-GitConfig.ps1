@@ -157,20 +157,19 @@ try {
     $beginMarker = "# >>> gitconfig git-alias browser (Ctrl-G) >>>"
     $endMarker = "# <<< gitconfig git-alias browser <<<"
     $profilePath = $PROFILE.CurrentUserAllHosts
-    if ((Test-Path $profilePath) -and ((Get-Content -Raw $profilePath).Contains($beginMarker))) {
-        $kept = New-Object System.Collections.Generic.List[string]
-        $skip = $false
-        foreach ($line in Get-Content $profilePath) {
-            if ($line -eq $beginMarker) { $skip = $true; continue }
-            if ($skip -and $line -eq $endMarker) { $skip = $false; continue }
-            if (-not $skip) { $kept.Add($line) }
+    # Remove-MarkedBlock keeps the profile's encoding, BOM and line endings
+    # (Set-Content under Windows PowerShell 5.1 rewrote it as ANSI).
+    switch (Remove-MarkedBlock -Path $profilePath -BeginMarker $beginMarker -EndMarker $endMarker) {
+        'Removed' {
+            Write-Host "[OK] Removed git-alias keybinding from profile" -ForegroundColor Green
+            $removed++
         }
-        Set-Content -Path $profilePath -Value $kept
-        Write-Host "[OK] Removed git-alias keybinding from profile" -ForegroundColor Green
-        $removed++
-    }
-    else {
-        Write-Host "[SKIP] git-alias keybinding not present" -ForegroundColor Yellow
+        'Unterminated' {
+            Write-Host "[WARN] Found '$beginMarker' in $profilePath but no end marker; left the profile unchanged" -ForegroundColor Yellow
+        }
+        default {
+            Write-Host "[SKIP] git-alias keybinding not present" -ForegroundColor Yellow
+        }
     }
 }
 catch {
@@ -208,10 +207,13 @@ Write-Host "-----" -ForegroundColor Cyan
 
 $verifyErrors = 0
 
-# Check symlinks were removed
+# Check symlinks were removed. Get-LinkAwareItem, not Test-Path: depending on
+# the PowerShell version, Test-Path follows a symlink, so a dangling link that
+# is still there would count as removed (#255). STEP 1 and 2 find the files
+# the same way.
 foreach ($file in $filesToRemove) {
     $path = Join-Path $homeDir $file
-    if (Test-Path $path) {
+    if (Get-LinkAwareItem -Path $path) {
         Write-Host "[FAIL] $file still exists!" -ForegroundColor Red
         $verifyErrors++
     }
@@ -224,7 +226,7 @@ foreach ($file in $filesToRemove) {
 if ($KeepLocal) {
     Write-Host "[OK] .gitconfig.local preserved (-KeepLocal)" -ForegroundColor Green
 }
-elseif (Test-Path $localConfigPath) {
+elseif (Get-LinkAwareItem -Path $localConfigPath) {
     Write-Host "[FAIL] .gitconfig.local still exists!" -ForegroundColor Red
     $verifyErrors++
 }
@@ -259,7 +261,7 @@ catch {
 # Check custom aliases are not available
 # (custom aliases are defined in .gitconfig, so if it's removed, aliases won't work)
 $gitconfigPath = Join-Path $homeDir ".gitconfig"
-if (-not (Test-Path $gitconfigPath)) {
+if (-not (Get-LinkAwareItem -Path $gitconfigPath)) {
     Write-Host "[OK] Custom aliases not available (.gitconfig removed)" -ForegroundColor Green
 }
 else {

@@ -86,6 +86,37 @@ Describe "Initialize-LocalConfig.ps1" {
             $content | Should -Match 'other@example.com'
             $content | Should -Match 'sandbox@example.com'
         }
+
+        It "Should start a new line when allowed_signers lacks a trailing newline (#255)" {
+            # Add-Content used to glue the new entry onto the last one, so
+            # neither identity verified.
+            $sshDir = Join-Path $script:sandbox ".ssh"
+            New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+            $allowed = Join-Path $sshDir "allowed_signers"
+            [System.IO.File]::WriteAllText($allowed, 'other@example.com namespaces="git" ssh-ed25519 AAAAOTHER')
+
+            Push-Location $script:sandbox
+            try { & $script:scriptPath -Force 2>&1 | Out-Null } finally { Pop-Location }
+
+            $lines = @(Get-Content $allowed)
+            $lines.Count | Should -Be 2
+            $lines[0] | Should -BeExactly 'other@example.com namespaces="git" ssh-ed25519 AAAAOTHER'
+            $lines[1] | Should -BeExactly 'sandbox@example.com namespaces="git" ssh-ed25519 AAAASANDBOXKEY'
+        }
+
+        It "Should not add a blank line when allowed_signers already ends in a newline (#255)" {
+            $sshDir = Join-Path $script:sandbox ".ssh"
+            New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+            $allowed = Join-Path $sshDir "allowed_signers"
+            [System.IO.File]::WriteAllText($allowed, "other@example.com namespaces=`"git`" ssh-ed25519 AAAAOTHER`n")
+
+            Push-Location $script:sandbox
+            try { & $script:scriptPath -Force 2>&1 | Out-Null } finally { Pop-Location }
+
+            $lines = @(Get-Content $allowed)
+            $lines.Count | Should -Be 2
+            $lines[1] | Should -BeExactly 'sandbox@example.com namespaces="git" ssh-ed25519 AAAASANDBOXKEY'
+        }
     }
 
     Context "config verification" {
