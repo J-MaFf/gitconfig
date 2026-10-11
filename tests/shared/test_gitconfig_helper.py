@@ -264,6 +264,19 @@ class TestGetGitAliases:
         # Curated description from ALIAS_METADATA, not the raw value.
         assert description == helper.ALIAS_METADATA["s"][1]
 
+    def test_helper_backed_aliases_get_their_curated_descriptions(self, helper, monkeypatch):
+        # The helper-backed aliases show what they do, not the raw `!python3 ...` body.
+        self._patch_git_output(
+            helper, monkeypatch,
+            "alias.alias !python3 helper.py print_aliases\n"
+            "alias.branches !python3 helper.py branches\n"
+            "alias.cleanup !python3 helper.py cleanup\n",
+        )
+        described = {name: text for name, text, _ in helper.get_git_aliases()}
+        assert "List all git aliases" in described["alias"]
+        assert "remote branches" in described["branches"]
+        assert "deleted remotes (merged)" in described["cleanup"]
+
     def test_unknown_shell_alias_is_categorized_as_other(self, helper, monkeypatch):
         self._patch_git_output(helper, monkeypatch, "alias.foo !echo hi\n")
         aliases = helper.get_git_aliases()
@@ -755,6 +768,459 @@ class TestIssuesAllWebFilters:
         url = opened[0]
         assert "assignee:octo" in url
         assert "label:%22bug%22" in url
+
+
+# --------------------------------------------------------------------------
+# git issues: repo mode and --all search, with gh stubbed (#233)
+# --------------------------------------------------------------------------
+
+_ISSUES = [
+    {"number": 12, "title": "Crash on [start]", "labels": [{"name": "bug"}],
+     "updatedAt": "2026-01-01T00:00:00Z"},
+    {"number": 3, "title": "Add docs", "labels": [], "updatedAt": None},
+]
+
+
+@pytest.fixture
+def gh(helper, monkeypatch):
+    """Stub gh and git for list_issues: `gh.respond(fn)` maps the gh argv to a
+    _Result; every call is recorded in `gh.calls` as (args, cwd)."""
+
+    class Gh:
+        calls = []
+        responder = staticmethod(lambda args: _Result(stdout="[]"))
+
+        def respond(self, fn):
+            self.responder = fn
+
+    stub = Gh()
+    stub.calls = []
+    monkeypatch.setenv("COLUMNS", "200")  # keep table cells on one line
+    monkeypatch.setattr(helper, "_have", lambda cmd: cmd == "gh")
+    monkeypatch.setattr(helper, "run_git", lambda *a, **k: _Result(stdout=".git\n"))
+
+    def run_gh(*args, cwd=None):
+        stub.calls.append((args, cwd))
+        return stub.responder(args)
+
+    monkeypatch.setattr(helper, "_run_gh", run_gh)
+    return stub
+
+
+class TestIssuesRepoMode:
+    """`git issues` in a repo: gh issue list --json, rendered as a table."""
+
+    BASE = ("issue", "list", "--state", "open", "--json", "number,title,labels,updatedAt",
+            "--limit", "50")
+
+    def test_lists_open_issues_as_a_table(self, helper, gh, capsys):
+        gh.respond(lambda args: _Result(stdout=json.dumps(_ISSUES)))
+        assert helper.list_issues([]) == 0
+        assert gh.calls == [(self.BASE, None)]
+        out = capsys.readouterr().out
+        assert "Open Issues" in out
+        assert "#12" in out and "#3" in out
+        assert "Crash on [start]" in out  # title printed verbatim
+        assert "bug" in out
+        assert "Repo" not in out  # no repo column in repo mode
+
+    @pytest.mark.parametrize(
+        "args, extra",
+        [
+            (["--mine"], ("--assignee", "@me")),
+            (["-m"], ("--assignee", "@me")),
+            (["--label", "good first issue"], ("--label", "good first issue")),
+            (["-m", "-l", "bug"], ("--assignee", "@me", "--label", "bug")),
+        ],
+    )
+    def test_filters_are_passed_to_gh(self, helper, gh, args, extra):
+        assert helper.list_issues(args) == 0
+        assert gh.calls == [(self.BASE + extra, None)]
+
+    def test_no_issues(self, helper, gh, capsys):
+        assert helper.list_issues([]) == 0
+        assert "No open issues" in capsys.readouterr().out
+
+    def test_gh_failure_exits_1_with_its_stderr(self, helper, gh, capsys):
+        gh.respond(lambda args: _Result(returncode=1, stderr="no git remotes found"))
+        assert helper.list_issues([]) == 1
+        out = capsys.readouterr().out
+        assert "could not list this repo's issues" in out
+        assert "no git remotes found" in out
+        assert "No open issues" not in out
+
+    def test_unparseable_gh_output_exits_1(self, helper, gh, capsys):
+        gh.respond(lambda args: _Result(stdout="not json"))
+        assert helper.list_issues([]) == 1
+        assert "unexpected response from gh issue list" in capsys.readouterr().out
+
+    def test_outside_a_repo_exits_1_without_calling_gh(self, helper, gh, monkeypatch, capsys):
+        monkeypatch.setattr(helper, "run_git", lambda *a, **k: _Result(returncode=128))
+        assert helper.list_issues([]) == 1
+        assert "Not in a git repository" in capsys.readouterr().out
+        assert gh.calls == []
+
+    def test_missing_gh_exits_1(self, helper, gh, monkeypatch, capsys):
+        monkeypatch.setattr(helper, "_have", lambda cmd: False)
+        assert helper.list_issues([]) == 1
+        assert "the GitHub CLI ('gh') is required" in capsys.readouterr().out
+        assert gh.calls == []
+
+    def test_web_opens_the_repo_list_with_filters(self, helper, gh):
+        gh.respond(lambda args: _Result())
+        assert helper.list_issues(["--web", "--mine", "--label", "bug"]) == 0
+        assert gh.calls == [
+            (("issue", "list", "--web", "--assignee", "@me", "--label", "bug"), None)
+        ]
+
+    def test_web_failure_exits_1(self, helper, gh, capsys):
+        gh.respond(lambda args: _Result(returncode=1, stderr="no browser"))
+        assert helper.list_issues(["-w"]) == 1
+        out = capsys.readouterr().out
+        assert "gh issue list --web failed" in out
+        assert "no browser" in out
+
+    @pytest.mark.parametrize(
+        "args, message",
+        [
+            (["--label"], "Usage: git issues --label <name>"),
+            (["-l", "--mine"], "Usage: git issues -l <name>"),
+            (["--local"], "--local only applies with --all"),
+            (["--all", "--local", "--web"], "--web cannot be combined with --local"),
+        ],
+    )
+    def test_usage_errors_exit_1_without_calling_gh(self, helper, gh, capsys, args, message):
+        assert helper.list_issues(args) == 1
+        assert message in capsys.readouterr().out
+        assert gh.calls == []
+
+
+class TestIssuesAllSearch:
+    """`git issues --all`: resolve the login, then one gh search across repos."""
+
+    BASE = ("search", "issues", "--owner", "octo", "--state", "open",
+            "--json", "number,title,labels,updatedAt,repository", "--limit", "50")
+
+    @staticmethod
+    def _responder(search):
+        def respond(args):
+            if args[:2] == ("api", "user"):
+                return _Result(stdout="octo\n")
+            return search
+        return respond
+
+    def test_lists_issues_with_a_repo_column(self, helper, gh, capsys):
+        found = [dict(_ISSUES[0], repository={"name": "gitconfig"}),
+                 dict(_ISSUES[1], repository={"name": "homelab"})]
+        gh.respond(self._responder(_Result(stdout=json.dumps(found))))
+        assert helper.list_issues(["--all"]) == 0
+        assert gh.calls == [(("api", "user", "--jq", ".login"), None), (self.BASE, None)]
+        out = capsys.readouterr().out
+        assert "Open Issues - all repos owned by octo" in out
+        assert "Repo" in out
+        assert "gitconfig" in out and "homelab" in out
+        assert "#12" in out and "#3" in out
+
+    def test_mine_and_label_filter_the_search(self, helper, gh):
+        gh.respond(self._responder(_Result(stdout="[]")))
+        assert helper.list_issues(["-a", "-m", "-l", "bug"]) == 0
+        assert gh.calls[-1] == (self.BASE + ("--assignee", "octo", "--label", "bug"), None)
+
+    def test_no_issues(self, helper, gh, capsys):
+        gh.respond(self._responder(_Result(stdout="[]")))
+        assert helper.list_issues(["--all"]) == 0
+        assert "No open issues" in capsys.readouterr().out
+
+    def test_unresolved_login_exits_1_before_searching(self, helper, gh, capsys):
+        gh.respond(lambda args: _Result(returncode=1, stderr="gh auth login required"))
+        assert helper.list_issues(["--all"]) == 1
+        out = capsys.readouterr().out
+        assert "could not resolve your GitHub login" in out
+        assert "gh auth login required" in out
+        assert len(gh.calls) == 1
+
+    def test_search_failure_exits_1(self, helper, gh, capsys):
+        gh.respond(self._responder(_Result(returncode=1, stderr="HTTP 502")))
+        assert helper.list_issues(["--all"]) == 1
+        out = capsys.readouterr().out
+        assert "gh search issues failed" in out
+        assert "HTTP 502" in out
+
+    def test_unparseable_search_output_exits_1(self, helper, gh, capsys):
+        gh.respond(self._responder(_Result(stdout="<html>")))
+        assert helper.list_issues(["--all"]) == 1
+        assert "unexpected response from gh search issues" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# git skill: diff with the audit runner stubbed, dispatcher routing,
+# wrapper-script selection (#233; replaces source-regex Pester checks)
+# --------------------------------------------------------------------------
+
+_AUDIT_REPORT = "\n".join([
+    "Skills repo: /home/u/.claude/skills",
+    "",
+    "[OK] Aligned (1)",
+    "   - steady - in sync",
+    "",
+    "[!] Drifted (2)",
+    "   - alpha - uncommitted local edits",
+    "   - beta - uncommitted local edits",
+    "",
+    "[?] Untracked (1)",
+    "   - gamma - uncommitted local edits",
+    "",
+])
+
+
+@pytest.fixture
+def audit(helper, tmp_path, monkeypatch):
+    """Stub _run_audit and record every git subprocess skill_diff starts.
+
+    `audit.report(stdout, returncode=0, stderr="")` sets what the audit prints
+    (None: the script is missing); `audit.git` maps the git subcommand
+    ("diff"/"ls-files") to the _Result it returns."""
+
+    class Audit:
+        args = []
+        commands = []
+        result = _Result(stdout=_AUDIT_REPORT)
+        git = {}
+
+        def report(self, stdout, returncode=0, stderr=""):
+            self.result = None if stdout is None else _Result(returncode, stdout, stderr)
+
+    stub = Audit()
+    stub.args, stub.commands, stub.git = [], [], {}
+    monkeypatch.setenv("COLUMNS", "200")  # keep rich from wrapping messages
+    monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+
+    def run_audit(args):
+        stub.args.append(list(args))
+        return stub.result
+
+    def run(cmd, **kwargs):
+        stub.commands.append(list(cmd))
+        return stub.git.get(cmd[3], _Result())
+
+    monkeypatch.setattr(helper, "_run_audit", run_audit)
+    monkeypatch.setattr(helper.subprocess, "run", run)
+    return stub
+
+
+class TestSkillDiffWithStubbedAudit:
+    def test_drifted_names_come_from_the_drifted_section_only(self, helper, audit):
+        assert helper._drifted_skill_names() == (["alpha", "beta"], None)
+        assert audit.args == [["--no-fetch"]]  # local report: never fetches
+
+    def test_diffs_every_drifted_skill_against_head_without_fetching(self, helper, audit, tmp_path):
+        assert helper.skill_diff([]) == 0
+        skills = str(tmp_path)
+        assert audit.commands == [
+            ["git", "-C", skills, "diff", "HEAD", "--", "alpha"],
+            ["git", "-C", skills, "ls-files", "--others", "--exclude-standard", "--", "alpha"],
+            ["git", "-C", skills, "diff", "HEAD", "--", "beta"],
+            ["git", "-C", skills, "ls-files", "--others", "--exclude-standard", "--", "beta"],
+        ]
+        assert not any("fetch" in arg for cmd in audit.commands for arg in cmd)
+
+    def test_diff_output_is_printed_verbatim(self, helper, audit, capsys):
+        audit.git["diff"] = _Result(stdout="+[/] added [red]x\n-[bold]gone\n")
+        assert helper.skill_diff(["alpha"]) == 0
+        out = capsys.readouterr().out
+        assert "+[/] added [red]x" in out
+        assert "-[bold]gone" in out
+
+    def test_named_skill_is_the_only_one_diffed(self, helper, audit):
+        assert helper.skill_diff(["beta"]) == 0
+        assert {cmd[-1] for cmd in audit.commands} == {"beta"}
+
+    @pytest.mark.parametrize("name", ["gamma", "steady", "no-such-skill"])
+    def test_a_skill_that_is_not_drifted_is_an_error(self, helper, audit, capsys, name):
+        assert helper.skill_diff([name]) == 1
+        assert f"'{name}' is not drifted" in capsys.readouterr().err
+        assert audit.commands == []
+
+    def test_no_drift_is_success(self, helper, audit, capsys):
+        audit.report("[OK] Aligned (3)\n   - a - in sync\n")
+        assert helper.skill_diff([]) == 0
+        assert "No drifted skills - nothing to diff" in capsys.readouterr().out
+        assert audit.commands == []
+
+    def test_missing_audit_script_is_an_error(self, helper, audit, capsys):
+        audit.report(None)
+        assert helper.skill_diff([]) == 1
+        assert "skill-audit not found" in capsys.readouterr().out
+
+    def test_failed_audit_is_an_error_not_no_drift(self, helper, audit, capsys):
+        audit.report("", returncode=2, stderr="Not a git repo: /x")
+        assert helper.skill_diff([]) == 1
+        captured = capsys.readouterr()
+        assert "Not a git repo: /x" in captured.err
+        assert "No drifted skills" not in captured.out
+
+    @pytest.mark.parametrize("sub", ["diff", "ls-files"])
+    def test_a_failing_git_command_exits_1(self, helper, audit, capsys, sub):
+        audit.git[sub] = _Result(returncode=128, stderr="fatal: bad revision")
+        assert helper.skill_diff(["alpha"]) == 1
+        assert "fatal: bad revision" in capsys.readouterr().out
+
+    def test_untracked_files_are_listed(self, helper, audit, capsys):
+        audit.git["ls-files"] = _Result(stdout="alpha/new.md\n")
+        assert helper.skill_diff(["alpha"]) == 0
+        out = capsys.readouterr().out
+        assert "Untracked (1)" in out
+        assert "alpha/new.md" in out
+
+    @pytest.mark.parametrize("arg", ["help", "-h", "--help"])
+    def test_help_prints_usage_without_running_the_audit(self, helper, audit, capsys, arg):
+        assert helper.skill_diff([arg]) == 0
+        assert "usage: git skill <subcommand>" in capsys.readouterr().out
+        assert audit.args == []
+
+
+class TestSkillDispatch:
+    """`git skill <sub>` routing; list/diff/sync/status render in Python and
+    publish runs the claude-skills wrapper script."""
+
+    @pytest.fixture
+    def routed(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        calls = []
+        for name in ("list_skills", "skill_diff", "_skill_sync_or_status", "_run_skill_script"):
+            monkeypatch.setattr(
+                helper, name, lambda *a, _n=name: calls.append((_n, *a)) or 0
+            )
+        return calls
+
+    @pytest.mark.parametrize(
+        "args, expected",
+        [
+            (["list"], ("list_skills",)),
+            (["diff"], ("skill_diff", [])),
+            (["diff", "alpha"], ("skill_diff", ["alpha"])),
+            (["sync"], ("_skill_sync_or_status", "sync")),
+            (["status"], ("_skill_sync_or_status", "status")),
+            (["publish"], ("_run_skill_script", "publish-skill")),
+        ],
+    )
+    def test_routes_each_subcommand(self, helper, routed, args, expected):
+        assert helper.skill(args) == 0
+        assert routed == [expected]
+
+    def test_usage_lists_every_subcommand_via_main(self):
+        # Runs the real entry point: `git skill help` needs no skills repo.
+        result = subprocess.run(
+            [sys.executable, HELPER_PATH, "skill", "help"], capture_output=True, text=True
+        )
+        assert result.returncode == 0
+        for line in ("list      List installed skills",
+                     "sync      Pull ~/.claude/skills",
+                     "status    Show this machine's",
+                     "diff      Show the full diff of drifted skill(s)",
+                     "publish   Publish new/edited skills"):
+            assert line in result.stdout
+
+    def test_rich_view_failure_falls_back_to_the_wrapper(self, helper, monkeypatch, capsys):
+        ran = []
+        monkeypatch.setattr(helper, "skill_status", lambda: 1 / 0)
+        monkeypatch.setattr(helper, "_run_skill_script", lambda base: ran.append(base) or 5)
+        assert helper._skill_sync_or_status("status") == 5
+        assert ran == ["skill-sync-status"]
+        assert "rich view failed (division by zero)" in capsys.readouterr().err
+
+    def test_sync_hints_when_the_upstream_branch_is_gone(self, helper, monkeypatch, capsys):
+        monkeypatch.setattr(helper, "_print_skill_header", lambda console, title: None)
+        monkeypatch.setattr(helper, "_render_skill_state", lambda console, no_fetch: True)
+        monkeypatch.setattr(
+            helper.subprocess, "run",
+            lambda *a, **k: _Result(1, "", "fatal: couldn't find remote ref\n"
+                                          "no such ref was fetched"),
+        )
+        assert helper.skill_sync() == 1
+        out = capsys.readouterr().out
+        assert "Pull failed" in out
+        assert "upstream is gone" in out
+
+    def test_last_background_sync_reads_the_newest_entry(self, helper, tmp_path, monkeypatch):
+        log = tmp_path / "skills-sync.log"
+        log.write_text(
+            "[2026-01-01 09:00] sync\nUpdating abc..def\nFast-forward\n[drift]\n"
+            "[2026-01-02 09:00] sync\nAlready up to date.\n"
+        )
+        monkeypatch.setattr(helper, "SYNC_LOG", str(log))
+        assert helper._last_background_sync() == ("2026-01-02 09:00", "already up to date")
+
+    def test_removed_dashed_aliases_and_skill_push_stay_gone(self, helper):
+        # #144 replaced skill-sync/skill-sync-status/skill-publish with
+        # `git skill <sub>`; publishing goes through a PR, never a direct push.
+        for name in ("skill-sync", "skill-sync-status", "skill-publish"):
+            assert name not in helper.ALIAS_METADATA
+        assert helper.ALIAS_METADATA["skill"][0] == "Claude Skills"
+        assert not hasattr(helper, "skill_push")
+
+
+class TestRunSkillScript:
+    """Wrapper-script selection: bash .sh off Windows; on Windows pwsh first,
+    powershell only for scripts that don't need PS7 (#188)."""
+
+    @pytest.fixture
+    def scripts(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setenv("COLUMNS", "200")  # keep rich from wrapping messages
+        scripts = tmp_path / "scripts"
+        scripts.mkdir()
+        for base in ("publish-skill", "skill-sync"):
+            (scripts / f"{base}.sh").write_text("")
+            (scripts / f"{base}.ps1").write_text("")
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(tmp_path))
+        ran = []
+        monkeypatch.setattr(
+            helper.subprocess, "run", lambda cmd, **k: ran.append(list(cmd)) or _Result(3)
+        )
+        return scripts, ran
+
+    def test_runs_the_bash_script_off_windows(self, helper, scripts, monkeypatch):
+        folder, ran = scripts
+        monkeypatch.setattr(sys, "platform", "linux")
+        assert helper._run_skill_script("publish-skill") == 3
+        assert ran == [["bash", str(folder / "publish-skill.sh")]]
+
+    def test_prefers_pwsh_on_windows(self, helper, scripts, monkeypatch):
+        folder, ran = scripts
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(helper.shutil, "which", lambda name: "/opt/pwsh" if name == "pwsh" else None)
+        assert helper._run_skill_script("publish-skill") == 3
+        assert ran == [["/opt/pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                        str(folder / "publish-skill.ps1")]]
+
+    def test_ps7_only_script_needs_pwsh(self, helper, scripts, monkeypatch, capsys):
+        _, ran = scripts
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(helper.shutil, "which", lambda name: None)
+        assert helper._run_skill_script("publish-skill") == 1
+        assert "requires PowerShell 7" in capsys.readouterr().err
+        assert ran == []
+
+    def test_winps_compatible_script_falls_back_to_powershell(self, helper, scripts, monkeypatch):
+        _, ran = scripts
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(helper.shutil, "which", lambda name: None)
+        assert helper._run_skill_script("skill-sync") == 3
+        assert ran[0][0] == "powershell"
+
+    def test_missing_script_is_an_error(self, helper, scripts, monkeypatch, capsys):
+        _, ran = scripts
+        monkeypatch.setattr(sys, "platform", "linux")
+        assert helper._run_skill_script("skill-sync-status") == 1
+        assert "wrapper script not found" in capsys.readouterr().err
+        assert ran == []
+
+    def test_audit_prefers_pwsh_on_windows(self, helper, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(helper.shutil, "which", lambda name: "/opt/pwsh" if name == "pwsh" else None)
+        script, cmd = helper._audit_cmd(["--no-fetch"])
+        assert cmd == ["/opt/pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                       script, "-NoFetch"]
 
 
 # --------------------------------------------------------------------------
