@@ -736,9 +736,19 @@ import gitconfig_helper
             & git checkout -b feature-x 2>&1 | Out-Null
             Set-Content -Path "wip.txt" -Value "work in progress"   # untracked change
             Pop-Location
+
+            # The root comes from gitconfig.scriptsRoot when it is set (#241),
+            # and the developer's real ~/.gitconfig.local may set it. Point the
+            # helper at an empty global config so the sandboxed copy's derived
+            # root ($parentDir) is what gets swept, never the real Scripts tree.
+            $script:savedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL
+            $script:sandboxGlobal = Join-Path $script:parentDir "global.gitconfig"
+            New-Item -ItemType File -Path $script:sandboxGlobal -ErrorAction Stop | Out-Null
+            $env:GIT_CONFIG_GLOBAL = $script:sandboxGlobal
         }
 
         AfterEach {
+            $env:GIT_CONFIG_GLOBAL = $script:savedGitConfigGlobal
             if ($script:parentDir) {
                 Remove-Item -Path $script:parentDir -Recurse -Force -ErrorAction SilentlyContinue
             }
@@ -772,6 +782,30 @@ import gitconfig_helper
             $output | Should -Match "Updated 1, skipped 1, failed 0"
             # Skips alone must not produce a non-zero exit code.
             $exitCode | Should -Be 0
+        }
+
+        It "Should refuse a root that is the parent of the home folder unless --force is passed (#241)" {
+            # Fake a home folder inside the root: the root is then the parent of
+            # $HOME (as with C:\Users or /home), which must not be swept silently.
+            $savedHome = $env:HOME; $savedProfile = $env:USERPROFILE
+            $fakeHome = New-Item -ItemType Directory -Path (Join-Path $script:parentDir "me") -ErrorAction Stop
+            $env:HOME = $fakeHome.FullName; $env:USERPROFILE = $fakeHome.FullName
+            try {
+                Push-Location $script:tempRoot
+                $result = & $script:python $script:sandboxHelper switch_to_main --all 2>&1
+                $output = $result -join "`n"
+                $exitCode = $LASTEXITCODE
+                $forced = (& $script:python $script:sandboxHelper switch_to_main --all --force 2>&1) -join "`n"
+                Pop-Location
+            } finally {
+                $env:HOME = $savedHome; $env:USERPROFILE = $savedProfile
+            }
+
+            $exitCode | Should -Be 1
+            $output | Should -Match "Refusing"
+            $output | Should -Match "gitconfig\.scriptsRoot"
+            $output | Should -Not -Match "Update Summary"
+            $forced | Should -Match "Updated 1, skipped 1, failed 0"
         }
     }
 

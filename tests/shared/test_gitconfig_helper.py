@@ -1247,6 +1247,133 @@ class TestCliArgValidation:
 
 
 # --------------------------------------------------------------------------
+# Scripts root: gitconfig.scriptsRoot, realpath, refusing broad roots (#241)
+# --------------------------------------------------------------------------
+
+
+class TestScriptsRoot:
+    """`git main --all` sweeps every repo under the Scripts root, so the root
+    must come from gitconfig.scriptsRoot when set, follow the install symlink,
+    and never silently be $HOME, its parent, or a filesystem root (#241)."""
+
+    @staticmethod
+    def _run(git_env, *args):
+        # The sandboxed copy's derived root is git_env/root, never the real
+        # Scripts folder, so a broken config lookup can't sweep real repos.
+        return TestCliArgValidation._run_sandboxed(git_env, *args)
+
+    def test_config_key_overrides_derived_root(self, helper, git_env):
+        target = git_env / "elsewhere"
+        target.mkdir()
+        _git(git_env, "config", "--global", "gitconfig.scriptsRoot", str(target))
+        assert helper._scripts_root() == os.path.realpath(target)
+
+    def test_config_key_expands_tilde(self, helper, git_env, monkeypatch):
+        monkeypatch.setenv("HOME", str(git_env))
+        _git(git_env, "config", "--global", "gitconfig.scriptsRoot", "~/code")
+        assert helper._scripts_root() == os.path.realpath(git_env / "code")
+
+    def test_config_key_read_through_gitconfig_local_include(self, helper, git_env):
+        # install sets the key in ~/.gitconfig.local, which ~/.gitconfig includes;
+        # `git config --global` skips includes unless --includes is passed.
+        local = git_env / "gitconfig.local"
+        local.write_text(f"[gitconfig]\n\tscriptsRoot = {git_env / 'viainclude'}\n")
+        _git(git_env, "config", "--global", "include.path", str(local))
+        assert helper._scripts_root() == os.path.realpath(git_env / "viainclude")
+
+    def test_unset_key_falls_back_to_derived_root(self, helper, git_env):
+        expected = os.path.dirname(os.path.dirname(os.path.realpath(helper.__file__)))
+        assert helper._scripts_root() == expected
+
+    def test_derived_root_follows_install_symlink(self, git_env, monkeypatch):
+        # install links ~/gitconfig_helper.py to the clone; running through the
+        # link must still derive <clone's parent>, not the home folder's parent.
+        home = git_env / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.chdir(git_env)
+        self._run(git_env, "switch_to_main", "--help")  # materialise the sandbox copy
+        link = home / "gitconfig_helper.py"
+        link.symlink_to(git_env / "root" / "gitconfig" / "gitconfig_helper.py")
+        result = subprocess.run(
+            [sys.executable, str(link), "switch_to_main", "--all"],
+            capture_output=True, text=True,
+        )
+        out = " ".join(result.stdout.split())  # rich may wrap the long path
+        assert "No git repositories found" in out, result.stdout + result.stderr
+        assert os.path.realpath(git_env / "root") in out
+        assert "Refusing" not in out
+
+    @pytest.mark.parametrize("which", ["home", "parent of home", "filesystem root"])
+    def test_unsafe_root_reasons(self, helper, tmp_path, monkeypatch, which):
+        home = tmp_path / "users" / "me"
+        home.mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        root = {
+            "home": os.path.realpath(home),
+            "parent of home": os.path.realpath(home.parent),
+            "filesystem root": os.path.abspath(os.sep),
+        }[which]
+        assert helper._unsafe_scripts_root(root) is not None
+
+    def test_ordinary_root_is_safe(self, helper, tmp_path, monkeypatch):
+        home = tmp_path / "me"
+        (home / "Documents" / "Scripts").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        assert helper._unsafe_scripts_root(os.path.realpath(home / "Documents" / "Scripts")) is None
+        assert helper._unsafe_scripts_root(os.path.realpath(home / "Documents")) is None
+
+    @pytest.mark.parametrize("home_is", ["root", "child of root"])
+    def test_main_all_refuses_home_and_its_parent(self, repo, git_env, monkeypatch, home_is):
+        # git_env holds the `work` clone. Make it the root, and make it either
+        # $HOME itself or $HOME's parent: the sweep must not touch `work`.
+        home = git_env if home_is == "root" else git_env / "me"
+        home.mkdir(exist_ok=True)
+        monkeypatch.setenv("HOME", str(home))
+        _git(git_env, "config", "--global", "gitconfig.scriptsRoot", str(git_env))
+        _git(repo, "switch", "-q", "-c", "work")
+        result = self._run(git_env, "switch_to_main", "--all")
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "Refusing" in result.stdout and "--force" in result.stdout
+        assert "gitconfig.scriptsRoot" in result.stdout
+        assert _git(repo, "branch", "--show-current") == "work"
+
+    def test_main_all_refuses_filesystem_root(self, git_env, monkeypatch):
+        monkeypatch.chdir(git_env)
+        _git(git_env, "config", "--global", "gitconfig.scriptsRoot", os.path.abspath(os.sep))
+        result = self._run(git_env, "switch_to_main", "-a")
+        assert result.returncode == 1
+        assert "filesystem root" in result.stdout and "Update Summary" not in result.stdout
+
+    def test_force_sweeps_a_refused_root(self, repo, git_env, monkeypatch):
+        monkeypatch.setenv("HOME", str(git_env))
+        _git(git_env, "config", "--global", "gitconfig.scriptsRoot", str(git_env))
+        _git(repo, "switch", "-q", "-c", "work")
+        result = self._run(git_env, "switch_to_main", "--all", "--force")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Refusing" not in result.stdout
+        assert _git(repo, "branch", "--show-current") == "main"
+
+    def test_missing_configured_root_fails(self, git_env, monkeypatch):
+        monkeypatch.chdir(git_env)
+        _git(git_env, "config", "--global", "gitconfig.scriptsRoot", str(git_env / "nope"))
+        result = self._run(git_env, "switch_to_main", "--all")
+        assert result.returncode == 1
+        assert "is not a directory" in result.stdout
+
+    def test_missing_root_lists_no_repos(self, helper, git_env):
+        _git(git_env, "config", "--global", "gitconfig.scriptsRoot", str(git_env / "nope"))
+        root, repos = helper._scripts_root_repos()
+        assert repos == [] and root == os.path.realpath(git_env / "nope")
+
+    def test_force_without_all_is_a_usage_error(self, repo, git_env):
+        _git(repo, "switch", "-q", "-c", "work")
+        result = self._run(git_env, "switch_to_main", "--force")
+        assert result.returncode == 2
+        assert "--force only applies with --all" in result.stderr
+        assert _git(repo, "branch", "--show-current") == "work"
+
+# --------------------------------------------------------------------------
 # `git pushf` alias from .gitconfig.template (#251)
 # --------------------------------------------------------------------------
 

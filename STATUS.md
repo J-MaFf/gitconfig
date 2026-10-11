@@ -73,6 +73,7 @@ Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows Po
 | [#281](https://github.com/J-MaFf/gitconfig/issues/281) | Docs lagged the #250–#263 fixes: no Unix exit-code docs, stale WORKFLOW scheduler/local-config advice, a STATUS that still listed merged work as pending and "None" open issues, a duplicate coverage row | [#282](https://github.com/J-MaFf/gitconfig/pull/282) |
 | [#245](https://github.com/J-MaFf/gitconfig/issues/245) | Integration tests looked up a scheduled task named `Update-GitConfig`, which no script creates, so the create test always skipped and the cleanup test always passed; the name is now read from `Register-LoginTask.ps1` and a missing task after setup fails | [#284](https://github.com/J-MaFf/gitconfig/pull/284) |
 | [#239](https://github.com/J-MaFf/gitconfig/issues/239) | Helper printed external text (gh stderr, paths, repo/branch names, alias bodies, exception text) as rich markup: `[/]` crashed it, `[slug]`/`[rejected]` vanished; now escaped, with `_print_ext()` for whole lines | [#285](https://github.com/J-MaFf/gitconfig/pull/285) |
+| [#241](https://github.com/J-MaFf/gitconfig/issues/241) | `git main --all` swept the clone's parent folder, which is the home folder for a `~/gitconfig` clone (or its parent via the install symlink); root now from `gitconfig.scriptsRoot`, realpath-derived, and $HOME / its parent / `/` refused without `--force` | PRLINK |
 
 ### Open Issues
 
@@ -87,7 +88,6 @@ From an earlier review; none are being worked on.
 | [#234](https://github.com/J-MaFf/gitconfig/issues/234) | macOS: bash 3.2 Ctrl-G, deprecated launchctl load/unload, install-time sync race |
 | [#235](https://github.com/J-MaFf/gitconfig/issues/235) | Stop hardcoding machine-specific values in .gitconfig.local generation |
 | [#240](https://github.com/J-MaFf/gitconfig/issues/240) | Windows install robustness: -NoTask prompt, success on failure, wrong user on elevation |
-| [#241](https://github.com/J-MaFf/gitconfig/issues/241) | git main --all: don't treat the repo's parent folder as the Scripts root |
 | [#246](https://github.com/J-MaFf/gitconfig/issues/246) | Add a systemd user timer backend to the Unix scheduler |
 
 ## Natural Next Steps

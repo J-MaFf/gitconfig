@@ -30,7 +30,8 @@
 	# Worktree-aware: if the default branch is checked out in another worktree,
 	# this worktree stays put and the default branch is updated over there.
 	# Pass --all (or -a) to run this for every git repo in immediate subdirectories
-	# of the Scripts root (the parent of this repo), regardless of where it runs.
+	# of the Scripts root (gitconfig.scriptsRoot, else the parent of this repo),
+	# regardless of where it runs. A root of $HOME, its parent or / needs --force.
 	main = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 	# Manage machine-specific git configuration (~/.gitconfig.local). With no
 	# arguments it opens the file in your editor (--edit); any arguments go
