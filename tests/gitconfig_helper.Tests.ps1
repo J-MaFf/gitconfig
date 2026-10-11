@@ -344,8 +344,9 @@ import gitconfig_helper
             $scriptContent = Get-Content $helperScript -Raw
             $scriptContent | Should -Match 'def _read_skill_description\('
             $scriptContent | Should -Match 'def _skill_last_updated\('
-            # last-updated uses the skills repo git log, short date format
-            $scriptContent | Should -Match '--format=%cs'
+            # last-updated uses one skills-repo git log pass, short date format (#232)
+            $scriptContent | Should -Match 'def _skill_commit_dates\('
+            $scriptContent | Should -Match '--format=%x00%cs'
         }
 
         It "defines skill_diff and wires it into the dispatcher and usage banner" {
@@ -372,18 +373,20 @@ import gitconfig_helper
 
         It "skill_diff follows the _audit_summary pwsh/powershell script-selection pattern" {
             # R6/C9: skill-audit.ps1 is WinPS-compatible (not in PS7_SCRIPTS), so
-            # _audit_full must prefer pwsh and fall back to powershell, matching
-            # _audit_summary(), rather than requiring PS7.
+            # the audit must prefer pwsh and fall back to powershell rather than
+            # requiring PS7. Both audits share one command builder (#232).
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1200}shutil\.which\("pwsh"\) or "powershell"'
-            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1200}skill-audit\.ps1'
-            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1400}skill-audit\.sh'
+            $scriptContent | Should -Match 'def _audit_cmd\([\s\S]{0,1200}shutil\.which\("pwsh"\) or "powershell"'
+            $scriptContent | Should -Match 'def _audit_cmd\([\s\S]{0,1200}skill-audit\.ps1'
+            $scriptContent | Should -Match 'def _audit_cmd\([\s\S]{0,1600}skill-audit\.sh'
+            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1200}_run_audit\('
+            $scriptContent | Should -Match 'def _audit_summary\(no_fetch\)[\s\S]{0,1200}_run_audit\('
         }
 
         It "skill_diff never fetches from the skills remote (local diff only, #R8)" {
+            # _audit_cmd() turns --no-fetch into -NoFetch for skill-audit.ps1.
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1200}-NoFetch'
-            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1400}--no-fetch'
+            $scriptContent | Should -Match 'def _audit_full\(\)[\s\S]{0,1400}_run_audit\(\["--no-fetch"\]\)'
             $scriptContent | Should -Not -Match 'def skill_diff\([\s\S]{0,2000}?git fetch'
         }
 

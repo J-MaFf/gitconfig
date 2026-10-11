@@ -335,7 +335,7 @@ class TestSkillCrossRepoGuard:
 class TestRepoDirt:
     """`git skill status` used to report only what skill-audit sees (skill
     directories), so uncommitted changes anywhere else in the skills repo left
-    it printing "nothing to publish" while `git update` skipped the repo as
+    it printing "nothing to publish" while `git main --all` skipped the repo as
     dirty. The repo-wide check must catch those and only those."""
 
     @staticmethod
@@ -416,7 +416,7 @@ class TestRepoDirt:
         assert helper._render_repo_dirt(helper.Console()) is True
         out = capsys.readouterr().out
         assert ".claude-plugin/a.json" in out
-        assert "git update" in out
+        assert "git main --all" in out and "git update" not in out
 
     def test_render_truncates_long_lists(self, helper, monkeypatch, capsys):
         monkeypatch.setattr(helper, "_repo_dirt_paths", lambda: [f"f{i}.txt" for i in range(8)])
@@ -424,6 +424,98 @@ class TestRepoDirt:
         out = capsys.readouterr().out
         assert "8 uncommitted file(s)" in out
         assert "and 3 more" in out
+
+
+# --------------------------------------------------------------------------
+# git skill list dates in one git log pass; shared skill-audit command (#232)
+# --------------------------------------------------------------------------
+
+
+class TestSkillDatesAndAuditCmd:
+    @staticmethod
+    def _commit_at(repo, path, date):
+        (repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / path).write_text(date + "\n")
+        _git(repo, "add", path)
+        env = dict(os.environ, GIT_AUTHOR_DATE=f"{date}T12:00:00", GIT_COMMITTER_DATE=f"{date}T12:00:00")
+        subprocess.run(
+            ["git", "commit", "-q", "-m", path], cwd=repo, env=env, check=True, capture_output=True
+        )
+
+    @pytest.fixture
+    def skills_repo(self, git_env):
+        repo = git_env / "skills"
+        repo.mkdir()
+        _git(repo, "init", "-q")
+        self._commit_at(repo, "alpha/SKILL.md", "2026-01-02")
+        self._commit_at(repo, "beta/SKILL.md", "2026-03-04")
+        self._commit_at(repo, "alpha/notes.md", "2026-05-06")
+        self._commit_at(repo, "README.md", "2026-07-08")
+        return repo
+
+    def test_commit_dates_take_each_directorys_newest_commit(self, helper, skills_repo):
+        dates = helper._skill_commit_dates(str(skills_repo))
+        assert dates["alpha"] == "2026-05-06"
+        assert dates["beta"] == "2026-03-04"
+        assert dates["README.md"] == "2026-07-08"
+
+    def test_commit_dates_empty_outside_a_repo(self, helper, git_env):
+        (git_env / "plain").mkdir()
+        assert helper._skill_commit_dates(str(git_env / "plain")) == {}
+
+    def test_list_skills_runs_git_log_once(self, helper, skills_repo, monkeypatch, capsys):
+        monkeypatch.setattr(helper, "SKILLS_DIR", str(skills_repo))
+        calls = []
+        real = helper.run_git
+
+        def counting(*args, **kwargs):
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(helper, "run_git", counting)
+        assert helper.list_skills() == 0
+        assert sum(1 for a in calls if "log" in a) == 1
+        out = capsys.readouterr().out
+        assert "2026-05-06" in out and "2026-03-04" in out
+
+    def test_uncommitted_skill_falls_back_to_mtime(self, helper, tmp_path):
+        from datetime import datetime
+
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text("x")
+        stamp = datetime(2025, 6, 15, 12).timestamp()
+        os.utime(skill_md, (stamp, stamp))
+        assert helper._skill_last_updated({}, "gamma", str(skill_md)) == "2025-06-15"
+        assert helper._skill_last_updated({}, "gamma", str(tmp_path / "missing")) == "unknown"
+        assert helper._skill_last_updated({"gamma": "2026-01-01"}, "gamma", str(skill_md)) == "2026-01-01"
+
+    def test_audit_cmd_passes_long_options_to_bash(self, helper, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        script, cmd = helper._audit_cmd(["--summary", "--strict", "--no-fetch"])
+        assert script.endswith("skill-audit.sh")
+        assert cmd == ["bash", script, "--summary", "--strict", "--no-fetch"]
+
+    def test_audit_cmd_maps_options_to_powershell_switches(self, helper, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(helper.shutil, "which", lambda name: None)
+        script, cmd = helper._audit_cmd(["--summary", "--strict", "--no-fetch"])
+        assert script.endswith("skill-audit.ps1")
+        assert cmd[0] == "powershell"  # pwsh absent: WinPS fallback
+        assert cmd[-4:] == [script, "-Summary", "-Strict", "-NoFetch"]
+
+    @pytest.mark.parametrize(
+        "call, expected",
+        [
+            (lambda h: h._audit_summary(no_fetch=False), ["--summary", "--strict"]),
+            (lambda h: h._audit_summary(no_fetch=True), ["--summary", "--strict", "--no-fetch"]),
+            (lambda h: h._audit_full(), ["--no-fetch"]),
+        ],
+    )
+    def test_audits_share_the_runner(self, helper, monkeypatch, call, expected):
+        seen = []
+        monkeypatch.setattr(helper, "_run_audit", lambda args: seen.append(list(args)))
+        assert call(helper) is None  # runner returned None: script missing
+        assert seen == [expected]
 
 
 # --------------------------------------------------------------------------
