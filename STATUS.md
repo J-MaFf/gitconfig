@@ -71,6 +71,7 @@ Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows Po
 | [#257](https://github.com/J-MaFf/gitconfig/issues/257) | Unix `install --force` wiped settings added to `~/.gitconfig.local`, wrote through a foreign `~/.gitconfig` symlink, and widget disable truncated the rc file when the end marker was missing; user settings are now kept, foreign links replaced, and only complete widget blocks removed (after a backup) | [#278](https://github.com/J-MaFf/gitconfig/pull/278) |
 | [#258](https://github.com/J-MaFf/gitconfig/issues/258) | Unix `install.sh`/cleanup always exited 0, a prompt at end of input aborted the run silently under `set -e`, an unparsable `~/.gitconfig` exited 128, and `git selfupdate` hid a failed pull in the log; failures now set the exit code, no input reads as "no", and `selfupdate` from a terminal prints progress and fails on a failed pull | [#280](https://github.com/J-MaFf/gitconfig/pull/280) |
 | [#281](https://github.com/J-MaFf/gitconfig/issues/281) | Docs lagged the #250–#263 fixes: no Unix exit-code docs, stale WORKFLOW scheduler/local-config advice, a STATUS that still listed merged work as pending and "None" open issues, a duplicate coverage row | [#282](https://github.com/J-MaFf/gitconfig/pull/282) |
+| [#245](https://github.com/J-MaFf/gitconfig/issues/245) | Integration tests looked up a scheduled task named `Update-GitConfig`, which no script creates, so the create test always skipped and the cleanup test always passed; the name is now read from `Register-LoginTask.ps1` and a missing task after setup fails | [#284](https://github.com/J-MaFf/gitconfig/pull/284) |
 
 ### Open Issues
 
@@ -87,7 +88,6 @@ From an earlier review; none are being worked on.
 | [#239](https://github.com/J-MaFf/gitconfig/issues/239) | Helper output: escape external text before printing with rich markup |
 | [#240](https://github.com/J-MaFf/gitconfig/issues/240) | Windows install robustness: -NoTask prompt, success on failure, wrong user on elevation |
 | [#241](https://github.com/J-MaFf/gitconfig/issues/241) | git main --all: don't treat the repo's parent folder as the Scripts root |
-| [#245](https://github.com/J-MaFf/gitconfig/issues/245) | Integration tests check for a scheduled task name that doesn't exist |
 | [#246](https://github.com/J-MaFf/gitconfig/issues/246) | Add a systemd user timer backend to the Unix scheduler |
 
 ## Natural Next Steps
