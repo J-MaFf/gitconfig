@@ -57,7 +57,7 @@ Four follow-up fixes from the #198 adversarial review landed: [#203](https://git
 | [#253](https://github.com/J-MaFf/gitconfig/issues/253) | Backup pruning (newest 5) deleted the only backup of the user's pre-install `~/.gitconfig` (Unix + Windows); the first backup is now also pinned as `<file>.pre-gitconfig`, never pruned | [#267](https://github.com/J-MaFf/gitconfig/pull/267) |
 | [#252](https://github.com/J-MaFf/gitconfig/issues/252) | `git start` ignored an existing remote branch, let issues with the same title slug share a branch, and silently branched from `HEAD` | [#265](https://github.com/J-MaFf/gitconfig/pull/265) |
 | [#254](https://github.com/J-MaFf/gitconfig/issues/254) | PowerShell Ctrl-G widget never inserted anything: PSReadLine redirects a key handler's native stdout, so `git alias --out` saw no TTY and silently did nothing; now launched via `Start-Process -NoNewWindow`, and `--out` fails loudly without a TTY | [#269](https://github.com/J-MaFf/gitconfig/pull/269) |
-| [#268](https://github.com/J-MaFf/gitconfig/issues/268) | More than 5 backups of one file in the same second reused a pruned `<stamp>` name, which sorted as oldest and was pruned at once (Unix + Windows); the next name is now one past the highest taken | [#270](https://github.com/J-MaFf/gitconfig/pull/270) (awaiting review) |
+| [#268](https://github.com/J-MaFf/gitconfig/issues/268) | More than 5 backups of one file in the same second reused a pruned `<stamp>` name, which sorted as oldest and was pruned at once (Unix + Windows); the next name is now one past the highest taken | [#270](https://github.com/J-MaFf/gitconfig/pull/270) |
 
 ### Open Issues
 
