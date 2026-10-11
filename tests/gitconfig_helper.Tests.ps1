@@ -387,9 +387,9 @@ import gitconfig_helper
             $scriptContent | Should -Not -Match 'def skill_diff\([\s\S]{0,2000}?git fetch'
         }
 
-        It "skill_diff escapes diff output before printing with rich (#R10)" {
+        It "skill_diff prints diff output verbatim, not as rich markup (#R10, #239)" {
             $scriptContent = Get-Content $helperScript -Raw
-            $scriptContent | Should -Match 'def skill_diff\([\s\S]{0,4000}?escape\(line\)'
+            $scriptContent | Should -Match 'def skill_diff\([\s\S]{0,4000}?_print_ext\(console, line\)'
         }
 
         It "skill_diff errors on a non-drifted or unknown skill name (#R3)" {
