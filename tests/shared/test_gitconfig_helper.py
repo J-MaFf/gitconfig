@@ -534,6 +534,28 @@ class TestCleanupBranches:
             "main", "trap", "fork", "local-merged", "local-unmerged", "gone-worktree",
         }
 
+    def test_cleanup_from_linked_worktree_does_not_switch(self, helper, repo, tmp_path, monkeypatch):
+        # main is checked out in the primary worktree, so cleanup can't switch
+        # to it here; it deletes from there instead and leaves this worktree be.
+        self._build(repo, tmp_path)
+        _git(repo, "switch", "-q", "main")
+        wt = tmp_path / "wt-trap"
+        _git(repo, "worktree", "add", "-q", str(wt), "trap")
+        monkeypatch.chdir(wt)
+        assert helper.cleanup_branches(force=True) == 0
+        assert _git(wt, "branch", "--show-current") == "trap"
+        assert _branches(repo) == {
+            "main", "trap", "fork", "local-unmerged", "gone-worktree",
+        }
+
+    def test_detached_head_is_restored(self, helper, repo, tmp_path):
+        self._build(repo, tmp_path)
+        _git(repo, "switch", "-q", "--detach", "trap")
+        sha = _git(repo, "rev-parse", "HEAD")
+        assert helper.cleanup_branches(force=False) == 0
+        assert _git(repo, "rev-parse", "HEAD") == sha
+        assert _git(repo, "branch", "--show-current") == ""  # still detached
+
     def test_failed_deletion_returns_1(self, helper, repo, tmp_path):
         self._build(repo, tmp_path)
         (repo / ".git" / "refs" / "heads" / "gone-unmerged.lock").write_text("")
@@ -601,6 +623,74 @@ class TestSwitchToMain:
         assert _git(repo, "branch", "--show-current") == "trunk"
 
 
+    def test_inside_linked_worktree_updates_main_where_it_lives(self, helper, repo, tmp_path, monkeypatch, capsys):
+        # main is checked out in the primary worktree; we run from a linked one.
+        _git(repo, "switch", "-q", "-c", "done")
+        _commit(repo, "d.txt", "done work")
+        _git(repo, "push", "-q", "-u", "origin", "done")
+        _git(repo, "switch", "-q", "main")
+        _git(repo, "branch", "other-gone", "done")
+        _git(repo, "branch", "-q", "--set-upstream-to=origin/done", "other-gone")
+        wt = tmp_path / "wt"
+        _git(repo, "worktree", "add", "-q", str(wt), "done")
+        _git(repo, "push", "-q", "origin", "--delete", "done")
+        remote_head = self._advance_remote(tmp_path)
+        monkeypatch.chdir(wt)
+        assert helper.switch_to_main() == 0
+        out = capsys.readouterr().out
+        assert _git(repo, "rev-parse", "main") == remote_head  # fast-forwarded in place
+        assert _git(wt, "branch", "--show-current") == "done"  # this worktree untouched
+        assert "other-gone" not in _branches(repo)  # cleanup ran
+        assert "done" in _branches(repo)  # still checked out here
+        assert "git worktree remove" in out
+
+    def test_main_in_linked_worktree_from_primary(self, helper, repo, tmp_path):
+        _git(repo, "switch", "-q", "-c", "work")
+        wt = tmp_path / "wt-main"
+        _git(repo, "worktree", "add", "-q", str(wt), "main")
+        remote_head = self._advance_remote(tmp_path)
+        assert helper.switch_to_main() == 0
+        assert _git(wt, "rev-parse", "HEAD") == remote_head
+        assert _git(repo, "branch", "--show-current") == "work"
+
+    def test_dirty_worktree_holding_main_is_not_touched(self, helper, repo, tmp_path, capsys):
+        _git(repo, "switch", "-q", "-c", "work")
+        wt = tmp_path / "wt-main"
+        _git(repo, "worktree", "add", "-q", str(wt), "main")
+        (wt / "README.md").write_text("edited\n")
+        before = _git(wt, "rev-parse", "HEAD")
+        self._advance_remote(tmp_path)
+        assert helper.switch_to_main() == 1
+        assert _git(wt, "rev-parse", "HEAD") == before
+        assert "Uncommitted changes" in capsys.readouterr().out
+
+    def test_fetches_default_branch_remote_not_current_branch_remote(self, helper, repo, tmp_path):
+        # On a branch tracking a second remote, a bare `git fetch` skipped origin.
+        upstream = tmp_path / "upstream.git"
+        _git(tmp_path, "clone", "-q", "--bare", str(tmp_path / "remote.git"), str(upstream))
+        _git(repo, "remote", "add", "upstream", str(upstream))
+        _git(repo, "fetch", "-q", "upstream")
+        _git(repo, "switch", "-q", "-c", "forkwork", "--track", "upstream/main")
+        remote_head = self._advance_remote(tmp_path)
+        assert helper.switch_to_main() == 0
+        assert _git(repo, "rev-parse", "HEAD") == remote_head
+
+    def test_repo_without_remote_succeeds(self, helper, git_env, monkeypatch, capsys):
+        work = git_env / "solo"
+        _git(git_env, "init", "-q", "-b", "main", str(work))
+        _commit(work, "README.md", "Initial")
+        _git(work, "switch", "-q", "-c", "feature")
+        monkeypatch.chdir(work)
+        assert helper.switch_to_main() == 0
+        assert _git(work, "branch", "--show-current") == "main"
+        assert "Error" not in capsys.readouterr().out
+
+    def test_bracketed_dirty_path_is_printed_verbatim(self, helper, repo, capsys):
+        (repo / "[slug].tsx").write_text("x\n")
+        assert helper.switch_to_main() == 1
+        assert "[slug].tsx" in capsys.readouterr().out
+
+
 class TestFastForwardConflictReport:
     """Unmerged paths come from `git diff --diff-filter=U`, not from searching
     `git status` text for "UU"/"AA"/"DD" (which also matched file names)."""
@@ -608,6 +698,7 @@ class TestFastForwardConflictReport:
     @staticmethod
     def _patch(helper, monkeypatch, unmerged):
         monkeypatch.setattr(helper, "run_git", _fake_git({
+            "rev-parse": _Result(stdout="abc1234\n"),  # an upstream exists
             "merge": _Result(returncode=1, stderr="fatal: Not possible to fast-forward"),
             "diff": _Result(stdout=unmerged),
             "status": _Result(stdout="?? UU_notes.md\n"),

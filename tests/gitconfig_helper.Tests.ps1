@@ -643,10 +643,11 @@ import gitconfig_helper
             & git commit -m "Initial commit" 2>&1 | Out-Null
             & git branch -M main 2>&1 | Out-Null
 
-            # When there's no remote configured, fetch doesn't error but pull may
-            # The function should handle this gracefully with appropriate exit code
-            & $script:python $script:helperScript switch_to_main 2>&1 | Out-Null
-            # With no valid remote, pull will fail and return exit code 1
+            # A remote that can't be reached makes the fetch fail. (A repo with
+            # no remote at all skips the fetch and succeeds; see the pytest suite.)
+            & git remote add origin (Join-Path $script:tempRoot "missing_$(Get-Random).git") 2>&1 | Out-Null
+            $output = (& $script:python $script:helperScript switch_to_main 2>&1) -join "`n"
+            $output | Should -Match "Failed to fetch"
             $LASTEXITCODE | Should -Be 1
         }
 
