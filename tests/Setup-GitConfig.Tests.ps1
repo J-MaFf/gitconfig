@@ -116,9 +116,9 @@ Describe "install.ps1" {
 
     Context ".gitconfig.local Generation" {
         # Only assertions about content that actually lives in .gitconfig.local.
-        # gpg.format / commit.gpgsign / user.signingKey come from the main
-        # .gitconfig (template), so they are verified in "Git Configuration" below
-        # via the effective config, not by grepping this file.
+        # The effective signing settings (gpg.format, commit.gpgsign,
+        # user.signingKey; all in .gitconfig.local since #231) are verified in
+        # "Git Configuration" below via the effective config.
         It "Should create .gitconfig.local file" -Skip:(-not $script:onWindows) {
             (Join-Path $script:testHome ".gitconfig.local") | Should -Exist
         }
@@ -159,14 +159,15 @@ Describe "install.ps1" {
             (& git config --get gpg.format 2>$null) | Should -Be "ssh"
         }
 
-        It "Should set commit.gpgsign to true" -Skip:(-not $script:onWindows) {
-            (& git config --get commit.gpgsign 2>$null) | Should -Be "true"
+        # The sandbox has no signing key, and the template no longer sets one
+        # (#231), so signing must be left off rather than on with nothing to
+        # sign with. TemplateSettingsMigration.Tests.ps1 covers machines with a key.
+        It "Should leave commit.gpgsign off when no signing key is configured" -Skip:(-not $script:onWindows) {
+            (& git config --get commit.gpgsign 2>$null) | Should -BeNullOrEmpty
         }
 
-        It "Should set user.signingKey" -Skip:(-not $script:onWindows) {
-            $result = & git config --get user.signingKey 2>$null
-            $result | Should -Not -BeNullOrEmpty
-            $result | Should -Match "ssh-ed25519"
+        It "Should not invent a user.signingKey" -Skip:(-not $script:onWindows) {
+            (& git config --get user.signingKey 2>$null) | Should -BeNullOrEmpty
         }
 
         It "Should point gpg.ssh.program to op-ssh-sign.exe" -Skip:(-not $script:onWindows) {

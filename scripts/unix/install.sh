@@ -144,6 +144,11 @@ echo "[STEP 1] Generating .gitconfig from template..."
 echo "-----"
 # generate_gitconfig reports what it did; 2 means the user kept the existing
 # file, which used to be followed by "[OK] Generated .gitconfig" (#258).
+# Whether ~/.gitconfig.local exists before STEP 1: regenerating ~/.gitconfig
+# can create it, holding only the settings moved out of the template (#231),
+# and STEP 3 must then fill it in rather than ask whether to regenerate it.
+LOCAL_EXISTED=false
+if [ -e "$HOME_DIR/.gitconfig.local" ] || [ -L "$HOME_DIR/.gitconfig.local" ]; then LOCAL_EXISTED=true; fi
 STEP_RC=0
 generate_gitconfig "$REPO_ROOT" "$HOME_DIR" "$FORCE" || STEP_RC=$?
 case $STEP_RC in
@@ -171,7 +176,7 @@ if [ -f "$LOCAL_CONFIG_SCRIPT" ]; then
     # prompt). Any other failure used to end the install here, under set -e,
     # without a summary (#258).
     STEP_RC=0
-    if [ "$FORCE" = true ]; then
+    if [ "$FORCE" = true ] || { [ "$LOCAL_EXISTED" = false ] && [ -f "$HOME_DIR/.gitconfig.local" ]; }; then
         bash "$LOCAL_CONFIG_SCRIPT" --force || STEP_RC=$?
     else
         bash "$LOCAL_CONFIG_SCRIPT" || STEP_RC=$?

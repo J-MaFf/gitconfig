@@ -1033,6 +1033,26 @@ Describe "Update-GitConfig.ps1" {
             $logContent | Should -Match "Repository synchronization process completed"
         }
 
+        It "Should keep signing and the editor on an install from an older template (#231)" {
+            # A machine installed before #231: ~/.gitconfig carries the signing
+            # key, gpgsign and the editor, and ~/.gitconfig.local (which the
+            # update never regenerates) doesn't. After the update the template
+            # no longer sets them, so they must have moved into the local file.
+            $key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYONLY"
+            $cfg = Join-Path $script:fakeHome ".gitconfig"
+            [IO.File]::WriteAllText($cfg, "[user]`n`tsigningkey = $key`n[commit]`n`tgpgsign = true`n[core]`n`teditor = code --wait`n[include]`n`tpath = ~/.gitconfig.local`n")
+            [IO.File]::WriteAllText((Join-Path $script:fakeHome ".gitconfig.local"), "[core]`n`tlongpaths = true`n")
+
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            $LASTEXITCODE | Should -Be 0
+            (Get-Content $cfg -Raw) | Should -Not -Match "signingkey"
+            (& git config --file $cfg --includes --get user.signingkey) | Should -Be $key
+            (& git config --file $cfg --includes --get commit.gpgsign) | Should -Be "true"
+            (& git config --file $cfg --includes --get core.editor) | Should -Be "code --wait"
+            (& git config --file $cfg --includes --get core.longpaths) | Should -Be "true"
+        }
+
         It "Should not rewrite ~/.gitconfig when it already matches the template" {
             # First run creates it from the template; the second run must be a no-op.
             & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null

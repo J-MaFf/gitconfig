@@ -612,7 +612,9 @@ checked out, e.g. `git reflog` (HEAD's history).
 `~/.gitconfig` is **not** a symlink. It is a regular file generated from
 `.gitconfig.template` and rewritten whenever the template changes, so put your own
 settings in `~/.gitconfig.local` (`git localconfig`), never in `~/.gitconfig`. Only
-`~/.gitignore_global` and `~/gitconfig_helper.py` are symlinks into the repo.
+`~/.gitignore_global` and `~/gitconfig_helper.py` are symlinks into the repo. Commit
+signing (`user.signingkey`, `commit.gpgsign`) and `core.editor` are set in
+`~/.gitconfig.local` too, not in the template ([#231](https://github.com/J-MaFf/gitconfig/issues/231)).
 
 **Pick up template changes**:
 

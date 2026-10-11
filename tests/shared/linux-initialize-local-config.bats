@@ -180,11 +180,95 @@ make_fake_gh() {
 }
 
 @test "uses 1Password's op-ssh-sign when no key file exists" {
+    git config --global user.signingkey "ssh-ed25519 AAAAOPKEY"
     run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" \
         GITCONFIG_OP_SSH_SIGN=/opt/1Password/op-ssh-sign bash "$SCRIPT" --force
     [ "$status" -eq 0 ]
     [ "$(git config --file "$SANDBOX/.gitconfig.local" --get gpg.ssh.program)" = /opt/1Password/op-ssh-sign ]
+    # The key moved out of the template (#231), so it is written here.
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get user.signingkey)" = "ssh-ed25519 AAAAOPKEY" ]
     [ "$(git config --file "$SANDBOX/.gitconfig.local" --get commit.gpgsign)" = true ]
+}
+
+@test "op-ssh-sign without a configured key leaves signing off (#231)" {
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" \
+        GITCONFIG_OP_SSH_SIGN=/opt/1Password/op-ssh-sign bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"No user.signingkey is configured"* ]]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get gpg.ssh.program)" = /opt/1Password/op-ssh-sign ]
+    run ! git config --file "$SANDBOX/.gitconfig.local" --get commit.gpgsign
+    run ! git config --file "$SANDBOX/.gitconfig.local" --get user.signingkey
+}
+
+# A fake ssh-add whose -L lists KEY, for the agent check.
+fake_agent_with() {
+    mkdir -p "$SANDBOX/bin"
+    printf '#!/bin/sh\necho "%s agent-comment"\n' "$1" > "$SANDBOX/bin/ssh-add"
+    chmod +x "$SANDBOX/bin/ssh-add"
+}
+
+@test "a configured literal key the agent lists keeps signing on (#231)" {
+    git config --global user.signingkey "ssh-ed25519 AAAALITERALKEY"
+    fake_agent_with "ssh-ed25519 AAAALITERALKEY"
+    run env PATH="$SANDBOX/bin:$PATH" GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" \
+        bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get user.signingkey)" = "ssh-ed25519 AAAALITERALKEY" ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get commit.gpgsign)" = true ]
+}
+
+@test "a configured key the machine doesn't hold is kept, but signing stays off (#231)" {
+    git config --global user.signingkey "ssh-ed25519 AAAALITERALKEY"
+    fake_agent_with "ssh-ed25519 AAAAOTHERKEY"
+    run env PATH="$SANDBOX/bin:$PATH" GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" \
+        bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"doesn't hold that key"* ]]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get user.signingkey)" = "ssh-ed25519 AAAALITERALKEY" ]
+    run ! git config --file "$SANDBOX/.gitconfig.local" --get commit.gpgsign
+}
+
+@test "a configured key file that exists keeps signing on (#231)" {
+    mkdir -p "$SANDBOX/.ssh"
+    echo "fake private key" > "$SANDBOX/.ssh/my_key"
+    git config --global user.signingkey "~/.ssh/my_key"
+    run env GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get user.signingkey)" = "~/.ssh/my_key" ]
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get commit.gpgsign)" = true ]
+}
+
+# --- core.editor (#231) ------------------------------------------------------
+
+# Run the script as a desktop session (or not), with `code` installed (or not).
+run_editor_case() {
+    run env -u SSH_CONNECTION -u SSH_CLIENT -u SSH_TTY -u WAYLAND_DISPLAY \
+        GITCONFIG_GH_BIN="" GITCONFIG_LIBSECRET_BIN="" "$@" bash "$SCRIPT" --force
+    [ "$status" -eq 0 ]
+}
+
+@test "sets core.editor to code --wait in a desktop session with VS Code" {
+    run_editor_case GITCONFIG_CODE_BIN=/usr/bin/code DISPLAY=:0
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get core.editor)" = "code --wait" ]
+}
+
+@test "leaves core.editor unset over SSH" {
+    run_editor_case GITCONFIG_CODE_BIN=/usr/bin/code DISPLAY=:0 SSH_CONNECTION="1.2.3.4 5 6.7.8.9 22"
+    run ! git config --file "$SANDBOX/.gitconfig.local" --get core.editor
+    grep -qF '# editor = code --wait' "$SANDBOX/.gitconfig.local"
+}
+
+@test "leaves core.editor unset without a display or without VS Code" {
+    run_editor_case GITCONFIG_CODE_BIN=/usr/bin/code DISPLAY=
+    run ! git config --file "$SANDBOX/.gitconfig.local" --get core.editor
+    run_editor_case GITCONFIG_CODE_BIN="" DISPLAY=:0
+    run ! git config --file "$SANDBOX/.gitconfig.local" --get core.editor
+}
+
+@test "keeps the editor already in ~/.gitconfig.local, once" {
+    printf '[core]\n\teditor = vim\n' > "$SANDBOX/.gitconfig.local"
+    run_editor_case GITCONFIG_CODE_BIN=/usr/bin/code DISPLAY=:0
+    [ "$(git config --file "$SANDBOX/.gitconfig.local" --get-all core.editor)" = vim ]
 }
 
 @test "prefers ~/.ssh/claude_desktop and the no-agent wrapper, like macOS" {

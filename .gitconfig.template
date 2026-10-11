@@ -6,24 +6,28 @@
 [user]
 	name = Joey Maffiola
 	email = 7maffiolajoey@gmail.com
-	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGjNJEhPFIZHo3t9aIb8Q2P4sY2AVV37/4eJoeDdREgB
 
+# Commit signing uses SSH keys. Which key signs, and whether signing is on
+# (commit.gpgsign), is machine-specific, so both live in ~/.gitconfig.local:
+# the local-config generator writes them only when it finds a usable key.
 [gpg]
 	format = ssh
-
-[commit]
-	gpgsign = true
 
 [push]
 	autoSetupRemote = true
 
 [alias]
+	# Run the Python helper (gitconfig_helper.py) with the first working Python:
+	# py (the Windows launcher), then python3, then python. The helper aliases
+	# below (alias, cleanup, main, skill, start, issues) all dispatch through it,
+	# so this probe lives in one place: git h <subcommand> [args...]
+	h = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" '{{REPO_PATH}}/gitconfig_helper.py' \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
 	# Browse all aliases: an interactive, categorized, searchable table when run
 	# in a terminal; pass --plain for a static grouped list (for piping/scripts).
-	alias = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py print_aliases \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
+	alias = !git h print_aliases
 	# Download all remote branches creating local counterparts
 	branches = "!git fetch && git for-each-ref --format='%(refname:short)' refs/remotes/origin/ | grep -v -e '^origin/HEAD$' -e '^origin$' | while read ref; do git branch --track \"${ref#origin/}\" \"$ref\" 2>/dev/null || true; done"
-	cleanup = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py cleanup \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
+	cleanup = !git h cleanup
 	# Switch to the default branch (origin/HEAD) with error handling: fetch, check
 	# for uncommitted changes, checkout, fast-forward only (a diverged branch is
 	# reported, never merged), then clean up branches whose remote is gone.
@@ -32,7 +36,7 @@
 	# Pass --all (or -a) to run this for every git repo in immediate subdirectories
 	# of the Scripts root (gitconfig.scriptsRoot, else the parent of this repo),
 	# regardless of where it runs. A root of $HOME, its parent or / needs --force.
-	main = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py switch_to_main \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
+	main = !git h switch_to_main
 	# Manage machine-specific git configuration (~/.gitconfig.local). With no
 	# arguments it opens the file in your editor (--edit); any arguments go
 	# straight to git config, e.g. git localconfig user.email you@example.com
@@ -47,7 +51,7 @@
 	# tweaks sync without touching this alias). sync/status fall back to their
 	# wrappers there if the rich view fails. `git skill` with no argument prints usage.
 	# Runs from any directory.
-	skill = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py skill \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
+	skill = !git h skill
 	# Pull the latest gitconfig repo and reinstall ~/.gitconfig from the template
 	# on demand. Dispatches by OS: Git-for-Windows reports MINGW/MSYS/CYGWIN.
 	selfupdate = "!f() { case \"$(uname -s)\" in MINGW*|MSYS*|CYGWIN*) powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{{REPO_PATH}}/scripts/windows version/Update-GitConfig.ps1' -RepoPath '{{REPO_PATH}}' ;; *) bash '{{REPO_PATH}}/scripts/shared/update-gitconfig.sh' '{{REPO_PATH}}' ;; esac; }; f"
@@ -71,7 +75,7 @@
 	# Undo the last commit but keep its changes staged
 	undo = reset --soft HEAD~1
 	# Unstage files while keeping working-tree changes
-	unstage = reset HEAD --
+	unstage = restore --staged --
 	# Park all current work as a WIP commit (skips hooks)
 	wip = !git add -A && git commit -m 'WIP' --no-verify
 	# --- Branch & Sync ---
@@ -87,7 +91,7 @@
 	# Start work on a GitHub issue (git start <issue-number>): switch to its
 	# <type>/<number>-<title-slug> branch, tracking it if it is only on a remote,
 	# or create it from the default branch. Dispatches to the Python helper.
-	start = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py start \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
+	start = !git h start
 	# --- GitHub ---
 	# Open the current branch's pull request in the browser
 	pr = !gh pr view --web
@@ -99,17 +103,17 @@
 	#   --mine/-m      only issues assigned to you
 	#   --label/-l X   only issues with label X
 	#   --web/-w       open in the browser instead of printing a table
-	issues = !"f() { for p in py python3 python; do command -v \"$p\" >/dev/null 2>&1 && \"$p\" -c '' >/dev/null 2>&1 && exec \"$p\" {{REPO_PATH}}/gitconfig_helper.py issues \"$@\"; done; echo 'No working Python found (tried py, python3, python)' >&2; return 1; }; f"
+	issues = !git h issues
 
 [init]
 	defaultBranch = main
 
-[core]
-	editor = code --wait
+# core.editor is machine-specific too: ~/.gitconfig.local sets it to
+# `code --wait` when VS Code is available in a desktop session; otherwise git
+# falls back to $GIT_EDITOR / $VISUAL / $EDITOR, then vi.
 
 # Include machine-specific configuration (local paths, safe directories, etc.).
 # Kept LAST so values in ~/.gitconfig.local override the template's defaults
-# above (e.g. a file-based signingkey): git applies includes inline and the
-# last declaration of a key wins.
+# above: git applies includes inline and the last declaration of a key wins.
 [include]
 	path = ~/.gitconfig.local

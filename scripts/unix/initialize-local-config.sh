@@ -45,8 +45,14 @@ DESCRIPTION:
     - SSH commit signing: prefers an on-disk key file (~/.ssh/claude_desktop or
       ~/.ssh/id_ed25519_signing, with its .pub, and the optional
       ~/.ssh/git-sign-no-agent wrapper); falls back to 1Password's
-      op-ssh-sign if installed; otherwise, if git already has a
-      user.signingkey, writes allowedSignersFile so signatures verify
+      op-ssh-sign if installed (with the configured user.signingkey);
+      otherwise, if git already has a user.signingkey, keeps it and writes
+      allowedSignersFile so signatures verify. commit.gpgsign is only
+      switched on when a key is configured and, for a configured key without
+      a key file or op-ssh-sign, only when the file exists or the SSH agent
+      lists it
+    - core.editor: code --wait when VS Code is on PATH in a desktop session
+      (not over SSH or headless); otherwise left unset
     - HTTPS credential helper: the macOS login keychain (osxkeychain) on
       macOS; the GitHub CLI (gh auth git-credential), else libsecret, on Linux
     - Safe directory entries (plus Homebrew's repo on a shared Mac where
@@ -98,6 +104,28 @@ CONFIG_CONTENT="# Machine-Specific Git Configuration ($OS_NAME)
 	excludesfile = $HOME_DIR/.gitignore_global
 "
 
+# --- Editor ------------------------------------------------------------------
+# core.editor moved here from the template (#231): `code --wait` fails over
+# SSH and on a headless machine. An editor already in the file is the user's
+# choice and is kept as it is (with the other settings the user added, below).
+if [ -f "$LOCAL_CONFIG_PATH" ] && git config --file "$LOCAL_CONFIG_PATH" --get core.editor >/dev/null 2>&1; then
+    :
+else
+    detect_default_editor "$TARGET_OS"
+    if [ -n "$DEFAULT_EDITOR" ]; then
+        echo "[INFO] Using VS Code as the commit message editor: $DEFAULT_EDITOR"
+        CONFIG_CONTENT+="	editor = $DEFAULT_EDITOR
+"
+    else
+        echo "[INFO] Not setting core.editor: $DEFAULT_EDITOR_WHY."
+        echo "       git uses \$GIT_EDITOR, \$VISUAL or \$EDITOR, else vi."
+        CONFIG_CONTENT+="	# Not set: $DEFAULT_EDITOR_WHY, so git uses
+	# \$GIT_EDITOR, \$VISUAL or \$EDITOR, else vi. To use VS Code:
+	# editor = code --wait
+"
+    fi
+fi
+
 # --- SSH commit signing ------------------------------------------------------
 detect_signing_key "$TARGET_OS" "$HOME_DIR"
 
@@ -135,8 +163,24 @@ case "$SIGNING_MODE" in
 "
         ;;
     op)
+        # op-ssh-sign signs with a key held in 1Password; git still needs to be
+        # told which one (user.signingkey, the public key). The template used to
+        # supply one for every machine; now it must be configured here (#231),
+        # so signing is only switched on when one is.
         echo "[INFO] Detected 1Password SSH signing helper: $SIGNING_PROGRAM"
-        SIGNING_ENABLED=true
+        if [ -n "$EXISTING_SIGNING_KEY" ]; then
+            echo "       Signing with the configured key: $EXISTING_SIGNING_KEY"
+            SIGNING_ENABLED=true
+            CONFIG_CONTENT+="
+[user]
+	signingkey = $EXISTING_SIGNING_KEY
+"
+        else
+            echo "[WARN] No user.signingkey is configured, so commit signing is left off."
+            echo "       Copy the key's public key from 1Password, then run:"
+            echo "         git config --file ~/.gitconfig.local user.signingkey 'ssh-ed25519 AAAA...'"
+            echo "         git config --file ~/.gitconfig.local commit.gpgsign true"
+        fi
         CONFIG_CONTENT+="
 [gpg]
 	format = ssh
@@ -145,21 +189,36 @@ case "$SIGNING_MODE" in
 	program = $SIGNING_PROGRAM
 	# Lets git verify SSH commit signatures locally (git log --show-signature)
 	allowedSignersFile = $HOME_DIR/.ssh/allowed_signers
-
+"
+        if [ "$SIGNING_ENABLED" = true ]; then
+            CONFIG_CONTENT+="
 [commit]
 	gpgsign = true
 "
+        else
+            CONFIG_CONTENT+="
+# Set the signing key (the public key from 1Password), then uncomment:
+# [user]
+# 	signingkey = ssh-ed25519 AAAA...
+# [commit]
+# 	gpgsign = true
+"
+        fi
         ;;
     existing)
-        # No key file and no op-ssh-sign, but git already has a signing key (the
-        # template ships a literal one with commit.gpgsign = true, or the user
-        # set one). Signing is on either way, so write allowedSignersFile or
-        # verification reports "No signature" (issue #116). Omit the program.
+        # No key file and no op-ssh-sign, but git already has a signing key (set
+        # by hand, or moved here from an older template, #231). Keep it, and
+        # write allowedSignersFile or verification reports "No signature"
+        # (issue #116). Omit the program. Signing is only switched on when the
+        # machine holds the key: the file exists, or the SSH agent lists it.
         echo "[INFO] op-ssh-sign not found, but a signing key is configured:"
         echo "       $EXISTING_SIGNING_KEY"
         echo "       Writing allowedSignersFile so signatures verify locally."
         SIGNING_ENABLED=true
         CONFIG_CONTENT+="
+[user]
+	signingkey = $EXISTING_SIGNING_KEY
+
 [gpg]
 	format = ssh
 
@@ -167,6 +226,22 @@ case "$SIGNING_MODE" in
 	# Lets git verify SSH commit signatures locally (git log --show-signature)
 	allowedSignersFile = $HOME_DIR/.ssh/allowed_signers
 "
+        if signing_key_available "$EXISTING_SIGNING_KEY" "$HOME_DIR"; then
+            CONFIG_CONTENT+="
+[commit]
+	gpgsign = true
+"
+        else
+            echo "[WARN] This machine doesn't hold that key (no such key file, and the SSH"
+            echo "       agent doesn't list it), so commit signing is left off. Once the key"
+            echo "       is available, run: git config --file ~/.gitconfig.local commit.gpgsign true"
+            CONFIG_CONTENT+="
+# Signing is off: this machine didn't hold the key above when this file was
+# generated. Once it does, uncomment:
+# [commit]
+# 	gpgsign = true
+"
+        fi
         ;;
     *)
         echo "[INFO] No signing key found and op-ssh-sign not installed — skipping signing config."

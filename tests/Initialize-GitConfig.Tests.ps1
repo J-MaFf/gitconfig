@@ -77,8 +77,10 @@ Describe "Initialize-GitConfig.ps1" {
         It "Template should have [alias] section with placeholders" {
             $templateContent = Get-Content $script:templatePath -Raw
             $templateContent | Should -Match '\[alias\]'
-            # Aliases should use {{REPO_PATH}} placeholder
-            $templateContent | Should -Match 'alias\s*=.*\{\{REPO_PATH\}\}'
+            # The helper dispatcher (h) reaches the helper through the
+            # {{REPO_PATH}} placeholder; the other helper aliases go through h.
+            $templateContent | Should -Match '(?m)^\s*h\s*=.*\{\{REPO_PATH\}\}'
+            $templateContent | Should -Match '(?m)^\s*alias\s*=\s*!git h print_aliases'
         }
     }
 
@@ -92,9 +94,10 @@ Describe "Initialize-GitConfig.ps1" {
             $script:expectedHelperPath = ($script:repoRoot -replace '\\', '/') + '/gitconfig_helper.py'
 
             # Every path the generated config uses to reach the helper: the
-            # whitespace-delimited word that ends in gitconfig_helper.py.
+            # single-quoted word that ends in gitconfig_helper.py (quoted so a
+            # repo path with spaces stays one argument, #231).
             function Get-HelperReference([string]$Content) {
-                [regex]::Matches($Content, '(?<=^|\s)[^\s"]*gitconfig_helper\.py(?=\s|$)') | ForEach-Object { $_.Value }
+                [regex]::Matches($Content, "'([^']*gitconfig_helper\.py)'") | ForEach-Object { $_.Groups[1].Value }
             }
         }
 
@@ -129,8 +132,8 @@ Describe "Initialize-GitConfig.ps1" {
 
         It "Generated config should contain absolute paths" {
             $generatedContent = Get-Content $script:outputPath -Raw
-            # The helper is invoked as `exec "$p" <abs-path>/gitconfig_helper.py` (the
-            # py/python3/python loop), so assert each reference is the absolute path
+            # The helper is invoked as `exec "$p" '<abs-path>/gitconfig_helper.py'`
+            # (the py/python3/python loop in h), so assert each reference is the absolute path
             # to this repo's helper - placeholder substituted, not relative (#262).
             [System.IO.Path]::IsPathRooted($script:expectedHelperPath) | Should -BeTrue
             $helperRefs = @(Get-HelperReference $generatedContent)

@@ -412,7 +412,10 @@ function Backup-UserFile {
 function Get-DroppedGitConfigKeys {
     param(
         [Parameter(Mandatory)][string]$ExistingPath,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$NewContent
+        [Parameter(Mandatory)][AllowEmptyString()][string]$NewContent,
+        # ~/.gitconfig.local: a key it sets still takes effect after the
+        # rewrite, so it isn't reported as dropped.
+        [string]$LocalPath
     )
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return @() }
     $tmp = [IO.Path]::GetTempFileName()
@@ -445,7 +448,105 @@ function Get-DroppedGitConfigKeys {
         $multi = ($oldCount[$k] -gt 1) -or ($newCount[$k] -gt 1)
         if ($multi -and -not $newSet.Contains($line)) { $k }
     }
-    return @($dropped | Sort-Object -Unique)
+    $dropped = @($dropped | Sort-Object -Unique)
+    if ($LocalPath -and (Test-Path -LiteralPath $LocalPath)) {
+        $dropped = @(foreach ($k in $dropped) {
+            & git config --file $LocalPath --includes --get-all $k 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { $k }
+        })
+    }
+    return $dropped
+}
+
+# Quote VALUE for a native command's argument list. Before PowerShell 7.3 (and
+# under $PSNativeCommandArgumentPassing = 'Legacy') PowerShell drops the
+# backslash escaping of embedded double quotes, so an editor value like
+# "C:/Program Files/app.exe" -w reached git without its quotes. Escape them
+# (and the backslashes before them) the way the C runtime parses argv.
+function ConvertTo-NativeArgument {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+    $v = $PSVersionTable.PSVersion
+    $legacy = ($v.Major -lt 7) -or ($v.Major -eq 7 -and $v.Minor -lt 3) -or
+        ((Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue) -eq 'Legacy')
+    if (-not $legacy -or $Value -notmatch '"') { return $Value }
+    $escaped = $Value -replace '(\\*)"', '$1$1\"'
+    # PowerShell wraps a value with a space in quotes; trailing backslashes
+    # would then escape the closing quote.
+    if ($escaped -match '\s') { $escaped = $escaped -replace '(\\+)$', '$1$1' }
+    return $escaped
+}
+
+# Move user.signingkey, core.editor and commit.gpgsign, which older templates
+# carried and ~/.gitconfig.local now holds (#231), from the current
+# ~/.gitconfig (PreviousPath, a copy of it) into ~/.gitconfig.local
+# (LocalPath) when neither the rendered template (NewContent) nor LocalPath
+# sets them. This keeps an installed machine signing, with the same key and
+# editor, after the scheduled update regenerates ~/.gitconfig from a template
+# without them: Update-GitConfig.ps1 never regenerates ~/.gitconfig.local
+# (Initialize-LocalConfig.ps1 is create-if-missing).
+#
+# Each value is copied exactly as it took effect before, so the result doesn't
+# depend on the session the update runs in. A key LocalPath already sets is
+# left alone: it already won over the template's value. commit.gpgsign is
+# carried only when a signing key is configured. Nothing happens once the old
+# ~/.gitconfig is gone, so this runs once per machine. LocalPath is created if
+# missing. Mirrors migrate_template_settings_to_local in shared/functions.sh.
+# Returns $true on success, $false (after reporting why) if LocalPath can't be
+# read or written.
+function Move-TemplateSettingsToLocal {
+    param(
+        [Parameter(Mandatory)][string]$PreviousPath,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$NewContent,
+        [Parameter(Mandatory)][string]$LocalPath
+    )
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $true }
+    # An unreadable old ~/.gitconfig has nothing git could have applied.
+    & git config --file $PreviousPath --list 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { return $true }
+    if (Test-Path -LiteralPath $LocalPath) {
+        & git config --file $LocalPath --includes --list 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] git can't read $LocalPath, so the settings ~/.gitconfig" -ForegroundColor Red
+            Write-Host "        no longer carries can't be moved into it. Fix or remove it and re-run." -ForegroundColor Red
+            return $false
+        }
+    }
+    $tmp = [IO.Path]::GetTempFileName()
+    try {
+        [IO.File]::WriteAllText($tmp, $NewContent)
+        foreach ($key in 'user.signingkey', 'core.editor', 'commit.gpgsign') {
+            $value = & git config --file $PreviousPath --get $key 2>$null
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($value)) { continue }
+            # Still in the template: the regenerated ~/.gitconfig keeps it.
+            & git config --file $tmp --get $key 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { continue }
+            # Already set locally: that value already won over the template's.
+            & git config --file $LocalPath --includes --get $key 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { continue }
+            if ($key -eq 'commit.gpgsign') {
+                $value = & git config --file $PreviousPath --type=bool --get $key 2>$null
+                # Off is git's default, so there's nothing to carry.
+                if ($LASTEXITCODE -ne 0 -or $value -ne 'true') { continue }
+                & git config --file $LocalPath --includes --get user.signingkey 2>$null | Out-Null
+                $localKey = ($LASTEXITCODE -eq 0)
+                & git config --file $tmp --get user.signingkey 2>$null | Out-Null
+                if (-not $localKey -and $LASTEXITCODE -ne 0) {
+                    Write-Host "[WARN] commit.gpgsign was on but no signing key is configured; not carrying it over" -ForegroundColor Yellow
+                    continue
+                }
+            }
+            & git config --file $LocalPath $key (ConvertTo-NativeArgument $value) 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "[ERROR] Could not write $key to $LocalPath" -ForegroundColor Red
+                return $false
+            }
+            Write-Host "[INFO] Moved $key from ~/.gitconfig to ~/.gitconfig.local (the template no longer sets it)" -ForegroundColor Yellow
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+    return $true
 }
 
 # --- UTF-8 text files (#230) ---------------------------------------------------
