@@ -2242,6 +2242,12 @@ def _note_browser_fallback(reason):
         )
 
 
+def _selection_failed(reason):
+    """Report why `git alias --out` (selection mode) could not run; return 1."""
+    print(f"git alias --out: {reason}.", file=sys.stderr)
+    return 1
+
+
 def print_aliases(force_plain=False, select_out=None):
     """Show git aliases.
 
@@ -2250,27 +2256,42 @@ def print_aliases(force_plain=False, select_out=None):
     "git <alias>", written to select_out (for the Ctrl-G keybinding) or copied
     to the clipboard when launched by typing `git alias`.
     When output is piped, in CI, with --plain, or without Textual it falls back
-    to a static grouped table so 'git alias | grep ...' and scripts keep working
-    -- except in selection mode (select_out set), where it stays silent so the
-    keybinding inserts nothing. When the browser is skipped for an unexpected
-    reason, a one-line explanation is printed to stderr (if stderr is a TTY).
+    to a static grouped table so 'git alias | grep ...' and scripts keep working.
+    Selection mode (select_out set) never prints the table: if the browser cannot
+    run there -- stdout is not a TTY, Textual is missing, the UI failed -- it
+    says why on stderr and returns 1, so a broken keybinding is visible instead
+    of silently inserting nothing (#254). When the browser is skipped for an
+    unexpected reason outside selection mode, a one-line explanation is printed
+    to stderr (if stderr is a TTY).
+
+    Returns the process exit code: 0, or 1 when selection mode could not run.
     """
     aliases = get_git_aliases()
 
     if force_plain:
         if select_out is None:
             _print_aliases_table(aliases)
-        return
+        return 0
+
+    if select_out is not None and not sys.stdout.isatty():
+        # The Ctrl-G widgets must hand the terminal to `git alias --out`
+        # (bash/zsh: >/dev/tty; PowerShell: Start-Process -NoNewWindow). If
+        # stdout is redirected the browser cannot draw, so fail loudly.
+        return _selection_failed(
+            "stdout is not a terminal (redirected or piped), so the interactive "
+            "browser cannot open; selection mode needs the console attached"
+        )
 
     if sys.stdout.isatty():
         ran, reason = _launch_alias_browser(aliases, select_out=select_out)
         if ran:
-            return
+            return 0
+        if select_out is not None:
+            return _selection_failed(reason)
         # The browser couldn't start (no Textual, a UI error, ...): say why,
-        # then fall through to the static table. Stay silent for Ctrl-G.
-        if select_out is None:
-            _note_browser_fallback(reason)
-    elif select_out is None:
+        # then fall through to the static table.
+        _note_browser_fallback(reason)
+    else:
         # stdout is redirected/piped: the static table is the right output, but
         # explain it for someone who expected the browser at a real terminal.
         _note_browser_fallback(
@@ -2278,8 +2299,8 @@ def print_aliases(force_plain=False, select_out=None):
             "skipped (use Ctrl-G for the interactive browser)"
         )
 
-    if select_out is None:
-        _print_aliases_table(aliases)
+    _print_aliases_table(aliases)
+    return 0
 
 
 # Arguments each __main__ command accepts, checked before it runs (#250):
@@ -2307,7 +2328,7 @@ if __name__ == "__main__":
                 idx = sys.argv.index("--out")
                 if idx + 1 < len(sys.argv):
                     select_out = sys.argv[idx + 1]
-            print_aliases(force_plain="--plain" in sys.argv, select_out=select_out)
+            sys.exit(print_aliases(force_plain="--plain" in sys.argv, select_out=select_out))
         elif function_name == "start":
             issue_arg = sys.argv[2] if len(sys.argv) > 2 else None
             sys.exit(start_branch(issue_arg))
