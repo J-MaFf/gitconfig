@@ -1299,9 +1299,9 @@ class TestScriptsRoot:
             [sys.executable, str(link), "switch_to_main", "--all"],
             capture_output=True, text=True,
         )
-        out = " ".join(result.stdout.split())  # rich may wrap the long path
-        assert "No git repositories found" in out, result.stdout + result.stderr
-        assert os.path.realpath(git_env / "root") in out
+        out = "".join(result.stdout.split())  # rich wraps long paths, even mid-word
+        assert "Nogitrepositoriesfound" in out, result.stdout + result.stderr
+        assert "".join(os.path.realpath(git_env / "root").split()) in out
         assert "Refusing" not in out
 
     @pytest.mark.parametrize("which", ["home", "parent of home", "filesystem root"])
