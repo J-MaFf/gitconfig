@@ -22,11 +22,11 @@ OPTIONS:
 
 DESCRIPTION:
     Creates symbolic links from your home directory (~) to the dotfiles repository.
-    Also optionally creates a scheduled task to run 'git pull' at login.
+    It does not ask about or create the login scheduled task: install.ps1 does
+    that with Register-LoginTask.ps1 (skip it with install.ps1 -NoTask).
 
 REQUIREMENTS:
-    - Administrator privileges (for creating symlinks on Windows)
-    - Administrator privileges (for creating scheduled task)
+    - Administrator privileges or Developer Mode (for creating symlinks on Windows)
     - PowerShell 7+ recommended, but works with Windows PowerShell 5.1+
 
 EXAMPLE:
@@ -40,8 +40,9 @@ FILES LINKED:
     - .gitignore_global
     - gitconfig_helper.py
 
-SCHEDULED TASKS:
-    - GitConfig Pull at Login (optional, runs Update-GitConfig.ps1 at user login)
+EXIT STATUS:
+    0 when every file is linked (or the user declined to replace one), 1 when
+    a link could not be made.
 "@
     exit 0
 }
@@ -181,27 +182,6 @@ function New-Symlink {
     return 'Linked'
 }
 
-# Function to create scheduled task for git pull at login. Delegates to
-# Register-LoginTask.ps1 so both install paths register the same task (repo
-# path, -ExecutionPolicy Bypass, per-user trigger, time limit); that script
-# keeps an up-to-date task and replaces a stale one on its own.
-function Register-LoginTask {
-    param(
-        [string]$RepoRoot,
-        [bool]$Force
-    )
-
-    $registerScript = Join-Path $RepoRoot "scripts\windows version\Register-LoginTask.ps1"
-    if (-not (Test-Path $registerScript)) {
-        Write-Host "[WARN] Register-LoginTask.ps1 not found at $registerScript" -ForegroundColor Yellow
-        Write-Host "  Skipping scheduled task creation." -ForegroundColor Yellow
-        return $false
-    }
-
-    if ($Force) { & $registerScript -RepoPath $RepoRoot -Force } else { & $registerScript -RepoPath $RepoRoot }
-    return ($LASTEXITCODE -eq 0)
-}
-
 # Create symlinks
 $successCount = 0
 $failCount = 0
@@ -235,23 +215,6 @@ if ($failCount -gt 0) {
 }
 Write-Host ""
 
-# Offer to create scheduled task
-Write-Host "Would you like to set up automatic 'git pull' at login?" -ForegroundColor Cyan
-$taskResponse = Read-Host "Create 'GitConfig Pull at Login' scheduled task? (y/n)"
-if ($taskResponse -eq "y") {
-    Write-Host ""
-    if (-not $isAdmin) {
-        Write-Host "[ERROR] Creating a scheduled task requires administrator privileges." -ForegroundColor Red
-        Write-Host "Please run this script as administrator to enable this feature." -ForegroundColor Red
-    }
-    else {
-        if (Register-LoginTask -RepoRoot $repoRoot -Force $Force) {
-            Write-Host "[OK] Scheduled task created successfully!" -ForegroundColor Green
-        }
-    }
-    Write-Host ""
-}
-
 if ($failCount -gt 0) {
     # Exit non-zero so a caller can tell the links are not all in place (#255).
     Write-Host "Not every file is symlinked. Creating symlinks on Windows needs an" -ForegroundColor Red
@@ -264,3 +227,4 @@ Write-Host "Your .gitignore_global and gitconfig_helper.py are now symlinked fro
 Write-Host "Any changes pushed to the repository will be reflected in your home directory." -ForegroundColor Cyan
 Write-Host ""
 
+exit 0

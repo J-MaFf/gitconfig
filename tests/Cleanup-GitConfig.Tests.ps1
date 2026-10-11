@@ -125,10 +125,11 @@ Describe "Cleanup-GitConfig.ps1 profile and verification steps (#255)" -Tag 'Uni
 
         # Run STEP 2b with $PROFILE pointing at ProfilePath.
         function Invoke-ProfileStep([string]$ProfilePath) {
-            $step = Get-StepText ([System.Management.Automation.Language.TryStatementAst]) 'CurrentUserAllHosts'
+            $step = Get-StepText ([System.Management.Automation.Language.TryStatementAst]) 'Remove-MarkedBlock'
             & {
                 $PROFILE = [pscustomobject]@{ CurrentUserAllHosts = $ProfilePath }
                 $removed = 0
+                $cleanupUser = $null
                 . $script:functionsPath
                 . ([scriptblock]::Create($step)) 6>$null
             }

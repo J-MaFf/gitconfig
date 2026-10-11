@@ -74,6 +74,7 @@ Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows Po
 | [#245](https://github.com/J-MaFf/gitconfig/issues/245) | Integration tests looked up a scheduled task named `Update-GitConfig`, which no script creates, so the create test always skipped and the cleanup test always passed; the name is now read from `Register-LoginTask.ps1` and a missing task after setup fails | [#284](https://github.com/J-MaFf/gitconfig/pull/284) |
 | [#239](https://github.com/J-MaFf/gitconfig/issues/239) | Helper printed external text (gh stderr, paths, repo/branch names, alias bodies, exception text) as rich markup: `[/]` crashed it, `[slug]`/`[rejected]` vanished; now escaped, with `_print_ext()` for whole lines | [#285](https://github.com/J-MaFf/gitconfig/pull/285) |
 | [#241](https://github.com/J-MaFf/gitconfig/issues/241) | `git main --all` swept the clone's parent folder, which is the home folder for a `~/gitconfig` clone (or its parent via the install symlink); root now from `gitconfig.scriptsRoot`, realpath-derived, and $HOME / its parent / `/` refused without `--force` | [#287](https://github.com/J-MaFf/gitconfig/pull/287) |
+| [#240](https://github.com/J-MaFf/gitconfig/issues/240) | Windows `install.ps1` printed `Setup Complete!` and exited 0 after failed steps, the elevated relaunch lost the exit code, `Initialize-Symlinks.ps1` asked about the task even with `-NoTask` and `-Reinstall -NoTask` deleted it, and elevating with another account's password set up the administrator's profile and task; now failures exit 1, `-KeepTask`, and the invoking account is configured | [#PRNUM](https://github.com/J-MaFf/gitconfig/pull/PRNUM) |
 
 ### Open Issues
 
@@ -87,7 +88,6 @@ From an earlier review; none are being worked on.
 | [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Replace source-text tests with behavioural tests in a sandboxed HOME |
 | [#234](https://github.com/J-MaFf/gitconfig/issues/234) | macOS: bash 3.2 Ctrl-G, deprecated launchctl load/unload, install-time sync race |
 | [#235](https://github.com/J-MaFf/gitconfig/issues/235) | Stop hardcoding machine-specific values in .gitconfig.local generation |
-| [#240](https://github.com/J-MaFf/gitconfig/issues/240) | Windows install robustness: -NoTask prompt, success on failure, wrong user on elevation |
 | [#246](https://github.com/J-MaFf/gitconfig/issues/246) | Add a systemd user timer backend to the Unix scheduler |
 
 ## Natural Next Steps
@@ -96,7 +96,7 @@ From an earlier review; none are being worked on.
 - On each additional machine, run `bd setup claude` (the SessionStart/PreCompact hooks live in the gitignored `.claude/settings.json`) and `bd bootstrap` to hydrate the Dolt graph.
 - Consider a small cleanup of `Integration.Tests.ps1` assertions that check `.gitconfig.local` for `[commit]`/`[user]` keys that actually live in `.gitconfig`.
 - Check the Ctrl-G widget by hand on Windows under pwsh 7 and Windows PowerShell 5.1 ([#269](https://github.com/J-MaFf/gitconfig/pull/269)); CI can't drive PSReadLine.
-- Known gaps left by the bug-fix wave, not yet filed: `install.sh --reinstall` removes `~/.gitconfig.local` before regenerating, so it doesn't carry your settings over the way `--force` does; `install.ps1` ignores `Initialize-Symlinks.ps1`'s exit 1 (part of [#240](https://github.com/J-MaFf/gitconfig/issues/240)); `install.ps1` STEP 6b still writes with `Add-Content`'s default encoding.
+- Known gaps left by the bug-fix wave, not yet filed: `install.sh --reinstall` removes `~/.gitconfig.local` before regenerating, so it doesn't carry your settings over the way `--force` does; `install.ps1` STEP 6b still writes with `Add-Content`'s default encoding.
 
 ## Prerequisites to Run
 

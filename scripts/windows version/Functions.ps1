@@ -515,3 +515,68 @@ function Remove-MarkedBlock {
     [System.IO.File]::WriteAllBytes($fullPath, $out)
     return 'Removed'
 }
+
+# --- Elevating as a different account (#240) ---------------------------------
+# With over-the-shoulder UAC (a standard user types an administrator's
+# password), the elevated relaunch of install.ps1 or Cleanup-GitConfig.ps1 runs
+# as the administrator, so its USERPROFILE, Documents folder and user name are
+# the administrator's, and everything would be set up for the wrong account.
+# The non-elevated run passes its own values (Get-InvokingUserArguments) and the
+# elevated run switches back to them (Use-InvokingUser).
+
+# The current account as DOMAIN\user (or just user), the form Task Scheduler
+# takes for a logon trigger and a task principal.
+function Get-CurrentUserName {
+    if ($env:USERDOMAIN) { "$env:USERDOMAIN\$env:USERNAME" } else { "$env:USERNAME" }
+}
+
+# Arguments for Start-Process that tell the elevated relaunch who started it.
+# Each value is quoted for the command line; a trailing backslash is trimmed so
+# it can't escape the closing quote.
+function Get-InvokingUserArguments {
+    $profileDir = "$env:USERPROFILE".TrimEnd('\')
+    $documents = "$([Environment]::GetFolderPath('MyDocuments'))".TrimEnd('\')
+    $out = @('-InvokingUser', "`"$(Get-CurrentUserName)`"", '-InvokingUserProfile', "`"$profileDir`"")
+    if ($documents) { $out += @('-InvokingDocuments', "`"$documents`"") }
+    $out
+}
+
+# Called by the elevated run with the values Get-InvokingUserArguments passed.
+# When it runs as a different account from the one that started it, it points
+# USERPROFILE and HOME at the invoking user's profile (the child scripts, git
+# and Python read them) and warns. Returns:
+#   User      - DOMAIN\user to configure (the login task's user)
+#   Documents - the invoking user's Documents folder when the account differs,
+#               else $null (use this process's own $PROFILE)
+#   Switched  - $true when the account differs
+function Use-InvokingUser {
+    param([string]$InvokingUser, [string]$InvokingUserProfile, [string]$InvokingDocuments)
+    $current = Get-CurrentUserName
+    # -eq on strings is case-insensitive, like Windows account names.
+    if (-not $InvokingUser -or $InvokingUser -eq $current) {
+        return [pscustomobject]@{ User = $current; Documents = $null; Switched = $false }
+    }
+
+    Write-Host "[WARN] Elevated as $current, but started by $InvokingUser." -ForegroundColor Yellow
+    if ($InvokingUserProfile) {
+        $env:USERPROFILE = $InvokingUserProfile
+        $env:HOME = $InvokingUserProfile
+        Write-Host "       Configuring $InvokingUser ($InvokingUserProfile), not $current." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "       $InvokingUser's profile folder is unknown; configuring $current's instead." -ForegroundColor Yellow
+    }
+    Write-Host "       Python packages go to the Python $current can run; the login task" -ForegroundColor Yellow
+    Write-Host "       installs any that are missing for $InvokingUser at their next login." -ForegroundColor Yellow
+    return [pscustomobject]@{ User = $InvokingUser; Documents = $InvokingDocuments; Switched = $true }
+}
+
+# The profile script that loads in every host of this PowerShell edition
+# ($PROFILE.CurrentUserAllHosts). After Use-InvokingUser switched accounts,
+# pass its Documents: $PROFILE still names the elevated account's folder.
+function Get-ProfileScriptPath {
+    param([string]$Documents)
+    if (-not $Documents) { return $PROFILE.CurrentUserAllHosts }
+    $edition = if ($PSVersionTable.PSEdition -eq 'Core') { 'PowerShell' } else { 'WindowsPowerShell' }
+    Join-Path (Join-Path $Documents $edition) 'profile.ps1'
+}

@@ -345,3 +345,80 @@ Describe "Functions.ps1" -Tag 'Unit' {
         }
     }
 }
+
+Describe "Elevating as a different account (Functions.ps1, #240)" -Tag 'Unit' {
+    # With over-the-shoulder UAC the elevated relaunch runs as the administrator.
+    # The non-elevated run passes who started it (Get-InvokingUserArguments) and
+    # the elevated run switches back to that account (Use-InvokingUser).
+
+    BeforeAll {
+        . $script:functionsPath
+        $script:savedEnv = @{
+            USERDOMAIN = $env:USERDOMAIN; USERNAME = $env:USERNAME
+            USERPROFILE = $env:USERPROFILE; HOME = $env:HOME
+        }
+    }
+
+    BeforeEach {
+        $env:USERDOMAIN = "CORP"
+        $env:USERNAME = "admin"
+        $env:USERPROFILE = "C:\Users\admin"
+        $env:HOME = "C:\Users\admin"
+    }
+
+    AfterAll {
+        foreach ($k in $script:savedEnv.Keys) {
+            if ($null -ne $script:savedEnv[$k]) { Set-Item "Env:$k" $script:savedEnv[$k] }
+            else { Remove-Item "Env:$k" -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It "Get-CurrentUserName returns DOMAIN\user, or the bare name without a domain" {
+        Get-CurrentUserName | Should -Be "CORP\admin"
+        $env:USERDOMAIN = ""
+        Get-CurrentUserName | Should -Be "admin"
+    }
+
+    It "Get-InvokingUserArguments quotes the user and profile and trims a trailing backslash" {
+        $env:USERNAME = "alice"
+        $env:USERPROFILE = "C:\Users\alice smith\"
+        $a = Get-InvokingUserArguments
+        $a[0..3] | Should -Be @('-InvokingUser', '"CORP\alice"', '-InvokingUserProfile', '"C:\Users\alice smith"')
+    }
+
+    It "Use-InvokingUser changes nothing when the same account elevated" {
+        $r = Use-InvokingUser -InvokingUser "corp\ADMIN" -InvokingUserProfile "C:\Users\other" -InvokingDocuments "D:\Docs" 6> $null
+        $r.Switched | Should -BeFalse
+        $r.User | Should -Be "CORP\admin"
+        $r.Documents | Should -BeNullOrEmpty
+        $env:USERPROFILE | Should -Be "C:\Users\admin"
+    }
+
+    It "Use-InvokingUser changes nothing when no invoking user was passed (run elevated directly)" {
+        $r = Use-InvokingUser -InvokingUser "" 6> $null
+        $r.Switched | Should -BeFalse
+        $r.User | Should -Be "CORP\admin"
+    }
+
+    It "Use-InvokingUser switches USERPROFILE and HOME to the invoking account and warns" {
+        $out = Use-InvokingUser -InvokingUser "CORP\alice" -InvokingUserProfile "C:\Users\alice" -InvokingDocuments "C:\Users\alice\OneDrive\Documents" 6>&1
+        $r = $out | Where-Object { $_ -isnot [System.Management.Automation.InformationRecord] }
+        $text = ($out | Where-Object { $_ -is [System.Management.Automation.InformationRecord] }) -join "`n"
+        $r.Switched | Should -BeTrue
+        $r.User | Should -Be "CORP\alice"
+        $r.Documents | Should -Be "C:\Users\alice\OneDrive\Documents"
+        $env:USERPROFILE | Should -Be "C:\Users\alice"
+        $env:HOME | Should -Be "C:\Users\alice"
+        $text | Should -Match '\[WARN\] Elevated as CORP\\admin, but started by CORP\\alice'
+    }
+
+    It "Get-ProfileScriptPath uses the given Documents folder and this edition's folder name" {
+        $edition = if ($PSVersionTable.PSEdition -eq 'Core') { 'PowerShell' } else { 'WindowsPowerShell' }
+        $p = Get-ProfileScriptPath -Documents (Join-Path $TestDrive "Docs")
+        $p | Should -Be (Join-Path (Join-Path (Join-Path $TestDrive "Docs") $edition) "profile.ps1")
+    }
+
+    It "Get-ProfileScriptPath falls back to `$PROFILE.CurrentUserAllHosts" {
+        Get-ProfileScriptPath | Should -Be $PROFILE.CurrentUserAllHosts
+    }
+}

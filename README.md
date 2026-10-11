@@ -67,6 +67,12 @@ Running the installer again is safe. It doesn't remove anything first. To wipe t
 
 A yes/no prompt with no input to read (cron, CI, `< /dev/null`) counts as "no": the script says so and carries on as if you had answered no, instead of stopping with no message. Pass `--force` to answer yes to every prompt in an unattended run.
 
+### Exit status and elevation (Windows)
+
+`install.ps1` exits 1 when any step fails or its final check finds a file missing; it still runs every step, then lists the failed steps under `Setup finished with errors` instead of printing `Setup Complete!`. `Cleanup-GitConfig.ps1` exits 1 when something is still present afterwards. Both exit 0 when you decline a prompt. When either script relaunches itself elevated, the new window pauses before it closes and the original window exits with its result, so a calling script sees a failed run.
+
+If the administrator prompt asks for another account's password (a standard user elevating with an admin's credentials), the scripts still set up the account that started them: its home folder, its PowerShell profile and its login task. They print a `[WARN]` naming both accounts. Python packages go to the Python the administrator account can run; the login task installs any that are missing for you at your next login.
+
 ## Uninstall
 
 Each platform has a cleanup script that removes symlinks, local config, and the auto-update job.
@@ -86,6 +92,8 @@ Removes: `~/.gitconfig`, `~/.gitignore_global` symlink, `~/gitconfig_helper.py` 
 ```
 
 Removes: `~/.gitconfig`, symlinks, `~/.gitconfig.local`, and the `GitConfig Pull at Login` scheduled task.
+
+Pass `-KeepTask` to leave the scheduled task registered.
 
 ### Linux
 
@@ -214,9 +222,11 @@ If `skill-audit` itself fails, `git skill status`, `sync` and `diff` show its er
 
 ```powershell
 & ".\scripts\windows version\install.ps1" -Force           # Full setup
-& ".\scripts\windows version\install.ps1" -Force -NoTask   # Skip scheduled task
+& ".\scripts\windows version\install.ps1" -Force -NoTask   # Don't register the scheduled task
+& ".\scripts\windows version\install.ps1" -Force -Reinstall -NoTask   # Reinstall, keeping the existing task
 & ".\scripts\windows version\Initialize-GitConfig.ps1" -Force      # Regenerate .gitconfig from template
-& ".\scripts\windows version\Initialize-Symlinks.ps1" -Force       # Recreate symlinks
+& ".\scripts\windows version\Initialize-Symlinks.ps1" -Force       # Recreate symlinks (never touches the scheduled task)
+& ".\scripts\windows version\Register-LoginTask.ps1" -Force         # Re-register the login task
 & ".\scripts\windows version\Initialize-LocalConfig.ps1" -Force    # Regenerate local config
 ```
 
