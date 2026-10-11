@@ -107,8 +107,12 @@ Describe "GitConfig Integration" -Tag 'Integration' {
             $content = Get-Content $localConfigPath -Raw
             $content | Should -Match '\[gpg\]'
             $content | Should -Match '\[commit\]'
-            $content | Should -Match '\[user\]'
             $content | Should -Match '\[safe\]'
+            # [user] signingkey is written only when the machine has a signing
+            # key (#231); the template no longer supplies one.
+            if (& git config --file $localConfigPath --get user.signingkey 2>$null) {
+                $content | Should -Match '\[user\]'
+            }
         }
 
         It ".gitconfig.local should have valid INI format" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $script:platformIsWindows)) {
@@ -126,6 +130,11 @@ Describe "GitConfig Integration" -Tag 'Integration' {
             $commitGpgSign = & git config --get commit.gpgsign 2>$null
 
             $gpgFormat | Should -Be "ssh"
+            # Signing is switched on only when there's a key to sign with (#231).
+            if (-not (& git config --get user.signingkey 2>$null)) {
+                Set-ItResult -Skipped -Because "no signing key is configured on this machine, so commit.gpgsign is left off (#231)"
+                return
+            }
             $commitGpgSign | Should -Be "true"
         }
 
@@ -140,8 +149,13 @@ Describe "GitConfig Integration" -Tag 'Integration' {
         It "Should set SSH signing key" -Skip:((-not [System.Environment]::UserInteractive) -or (-not $platformIsWindows)) {
             $signingKey = & git config --get user.signingKey 2>$null
 
-            $signingKey | Should -Not -BeNullOrEmpty
-            $signingKey | Should -Match "ssh-ed25519"
+            # The template no longer ships a key (#231): it comes from
+            # ~/.gitconfig.local, as a key file path or a literal public key.
+            if (-not $signingKey) {
+                Set-ItResult -Skipped -Because "no signing key is configured on this machine (#231)"
+                return
+            }
+            $signingKey | Should -Match '^(key::)?(ssh-|sk-ssh-|ecdsa-|sk-ecdsa-)|[\\/]|^~'
         }
 
         It "op-ssh-sign.exe should exist at configured path" -Skip:(-not $platformIsWindows) {
