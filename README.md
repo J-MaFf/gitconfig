@@ -164,6 +164,8 @@ git main --all     # Run the above for every git repo in immediate subdirectorie
 
 `git main` and `git cleanup` work from any worktree. git won't check a branch out in two worktrees, so when the default branch is checked out in another one, your current worktree stays where it is: the default branch is fast-forwarded in its own worktree (only if that one is clean) and branches are cleaned up from there. If your current worktree's own branch is gone upstream, you get a `git worktree remove <path>` hint. Repos with no remote skip the fetch and the fast-forward.
 
+The Python-backed aliases (`git alias`, `start`, `cleanup`, `main`, `skill`, `issues`) run nothing when given `-h`/`--help` (they print a usage line) or an argument they don't recognise (usage on stderr, exit 2). There is no `--dry-run`.
+
 **GitHub**
 
 ```bash

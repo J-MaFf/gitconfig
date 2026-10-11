@@ -1101,6 +1101,36 @@ def skill_diff(args):
     return 0
 
 
+def _check_args(args, usage, flags=(), value_flags=(), max_positional=0):
+    """Validate a command's arguments against its allow-list (#250).
+
+    `flags` are bare switches, `value_flags` consume the next argument, and up
+    to `max_positional` non-flag arguments are allowed. Returns None when the
+    command may run; otherwise the exit code to stop with, having run nothing:
+    0 after printing usage for -h/--help, 2 (usage on stderr) for anything
+    unrecognised -- so `git cleanup -h` or `--dry-run` never does the real work.
+    """
+    positional = 0
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-h", "--help"):
+            print(f"Usage: {usage}")
+            return 0
+        if arg in value_flags:
+            i += 2  # a missing value is left to the command to report
+            continue
+        if arg in flags:
+            pass
+        elif not arg.startswith("-") and positional < max_positional:
+            positional += 1
+        else:
+            print(f"Unknown argument: {arg}\nUsage: {usage}", file=sys.stderr)
+            return 2
+        i += 1
+    return None
+
+
 def skill(args):
     """Dispatch a `git skill <subcommand>` invocation.
 
@@ -1128,6 +1158,14 @@ def skill(args):
             f"(try: list, sync, status, diff, publish)[/red]"
         )
         return 1
+    # None of the subcommands take flags (and only diff takes a name), so an
+    # unrecognised one -- e.g. `git skill publish --dry-run` -- must not run it.
+    if sub == "diff":
+        rc = _check_args(args[1:], "git skill diff [<skill-name>]", max_positional=1)
+    else:
+        rc = _check_args(args[1:], f"git skill {sub}")
+    if rc is not None:
+        return rc
     # All real subcommands need the claude-skills repo at ~/.claude/skills.
     if not _require_skills_dir():
         return 1
@@ -1651,19 +1689,14 @@ def list_issues(args):
     # Reject anything unrecognised, so a typo like `--lable bug` fails instead
     # of silently listing everything. --label/-l consume the next argument
     # (a missing value is reported by the --label check below).
-    known = {"--all", "-a", "--local", "--web", "-w", "--mine", "-m"}
-    i = 0
-    while i < len(args):
-        if args[i] in ("--label", "-l"):
-            i += 2
-            continue
-        if args[i] not in known:
-            Console(stderr=True).print(
-                f"[red]Unknown argument: {escape(args[i])}[/red]\n"
-                + escape("Usage: git issues [--all|-a [--local]] [--mine|-m] [--label|-l <name>] [--web|-w]")
-            )
-            return 2
-        i += 1
+    rc = _check_args(
+        args,
+        "git issues [--all|-a [--local]] [--mine|-m] [--label|-l <name>] [--web|-w]",
+        flags={"--all", "-a", "--local", "--web", "-w", "--mine", "-m"},
+        value_flags={"--label", "-l"},
+    )
+    if rc is not None:
+        return rc
 
     all_mode = "--all" in args or "-a" in args
     local = "--local" in args
@@ -2141,9 +2174,25 @@ def print_aliases(force_plain=False, select_out=None):
         _print_aliases_table(aliases)
 
 
+# Arguments each __main__ command accepts, checked before it runs (#250):
+# command -> (usage, flags, flags taking a value, max positional args). skill
+# and issues validate their own arguments.
+CLI_ARGS = {
+    "print_aliases": ("git alias [--plain] [--out <file>]", {"--plain"}, {"--out"}, 0),
+    "start": ("git start <issue-number>", (), (), 1),
+    "cleanup": ("git cleanup [--force|-f]", {"--force", "-f"}, (), 0),
+    "switch_to_main": ("git main [--all|-a]", {"--all", "-a"}, (), 0),
+    "update_all_main": ("git main --all", (), (), 0),
+}
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         function_name = sys.argv[1]
+        if function_name in CLI_ARGS:
+            rc = _check_args(sys.argv[2:], *CLI_ARGS[function_name])
+            if rc is not None:
+                sys.exit(rc)
         if function_name == "print_aliases":
             select_out = None
             if "--out" in sys.argv:
