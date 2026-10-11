@@ -177,6 +177,23 @@ def _head_ref():
     return name, sha.stdout.strip()
 
 
+def _head_label(*git_args):
+    """Return (label, detached) naming HEAD for display; never raises.
+
+    label is the branch name, or the short SHA when HEAD is detached
+    (`rev-parse --abbrev-ref HEAD` prints a bare "HEAD" there, which reads like a
+    branch called HEAD -- #261). label is None when HEAD can't be read at all.
+    git_args go before the subcommand, e.g. ("-C", path).
+    """
+    branch = run_git(*git_args, "symbolic-ref", "--quiet", "--short", "HEAD")
+    if branch.returncode == 0 and branch.stdout.strip():
+        return branch.stdout.strip(), False
+    sha = run_git(*git_args, "rev-parse", "--short", "HEAD")
+    if sha.returncode == 0 and sha.stdout.strip():
+        return sha.stdout.strip(), True
+    return None, False
+
+
 def _is_linked_worktree():
     """True when the current directory is a linked (`git worktree add`) worktree."""
     result = run_git("rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
@@ -529,7 +546,9 @@ def _read_skill_description(skill_md_path):
     spaces and any surrounding quotes are stripped.
     """
     try:
-        with open(skill_md_path, encoding="utf-8", errors="replace") as handle:
+        # utf-8-sig drops a leading BOM (Windows editors add one), which would
+        # otherwise hide the opening '---' and lose the description (#261).
+        with open(skill_md_path, encoding="utf-8-sig", errors="replace") as handle:
             lines = handle.read().splitlines()
     except OSError:
         return ""
@@ -1025,12 +1044,19 @@ def _render_skill_state(console, no_fetch):
 
 def _print_skill_header(console, title):
     """Print the repo line, a not-on-main warning, and the last scheduled sync."""
-    branch = run_git("-C", SKILLS_DIR, "rev-parse", "--abbrev-ref", "HEAD")
-    branch_name = branch.stdout.strip() if branch.returncode == 0 else "?"
-    console.print(f"[bold]{title}[/bold]  [dim]{SKILLS_DIR} (branch: {branch_name})[/dim]")
-    if branch_name not in ("main", "?"):
+    label, detached = _head_label("-C", SKILLS_DIR)
+    if detached:
+        console.print(f"[bold]{title}[/bold]  [dim]{SKILLS_DIR} (detached HEAD at {label})[/dim]")
         console.print(
-            f"  [yellow][!] On branch '{branch_name}', not main - sync pulls the current branch[/yellow]"
+            f"  [yellow][!] Detached HEAD at {label}, not main - sync can't pull until "
+            f"you check out a branch[/yellow]"
+        )
+        label = None  # warned already; skip the not-on-main line below
+    else:
+        console.print(f"[bold]{title}[/bold]  [dim]{SKILLS_DIR} (branch: {label or '?'})[/dim]")
+    if label not in ("main", None):
+        console.print(
+            f"  [yellow][!] On branch '{label}', not main - sync pulls the current branch[/yellow]"
         )
     last = _last_background_sync()
     if last:
@@ -1611,8 +1637,11 @@ def _dirty_triage_lines(default_branch):
     changes -- enough for the user to judge stale-vs-active without the tool
     guessing intent.
     """
-    branch_result = run_git("rev-parse", "--abbrev-ref", "HEAD")
-    branch = branch_result.stdout.strip() or "(detached HEAD)"
+    label, detached = _head_label()
+    if detached:
+        branch = f"(detached HEAD at {label})"
+    else:
+        branch = label or "(unknown)"
 
     # Working-tree breakdown: untracked files start with '??', everything else
     # is a tracked modification (staged or unstaged).
@@ -2076,6 +2105,7 @@ def _build_alias_app(aliases):
     """
     try:
         from textual.app import App
+        from textual.binding import Binding
         from textual.widgets import DataTable, Footer, Header, Input, Tab, Tabs
     except ImportError:
         return None
@@ -2096,8 +2126,11 @@ def _build_alias_app(aliases):
             ("enter", "select", "Insert at prompt"),
             ("up", "cursor_up", "Up"),
             ("down", "cursor_down", "Down"),
-            ("ctrl+right", "next_tab", "Next category"),
-            ("ctrl+left", "prev_tab", "Prev category"),
+            # priority=True: the focused search Input binds ctrl+left/right to
+            # word-jumps, and a focused widget's bindings normally win, so
+            # without it the category shortcuts never reach the app (#261).
+            Binding("ctrl+right", "next_tab", "Next category", priority=True),
+            Binding("ctrl+left", "prev_tab", "Prev category", priority=True),
             ("escape", "clear_or_quit", "Clear / quit"),
         ]
         # Class-level defaults so handlers that may fire during mount (e.g. Tabs
@@ -2254,10 +2287,22 @@ def _copy_to_clipboard(text):
         if not _have(cmd[0]):
             continue
         try:
-            result = subprocess.run(cmd, input=text, text=True, capture_output=True)
+            # DEVNULL, not capture_output: xclip/xsel/wl-copy fork a child that
+            # keeps serving the selection and inherits stdout/stderr, so reading
+            # captured pipes to EOF would block until the selection changes
+            # (#261). The exit code still reports failure; the timeout is a
+            # last-resort guard against any other hang.
+            result = subprocess.run(
+                cmd,
+                input=text,
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
             if result.returncode == 0:
                 return True
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
             continue
     return False
 
