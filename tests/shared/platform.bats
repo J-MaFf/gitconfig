@@ -25,7 +25,13 @@ setup() {
     export GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig"
     export GIT_CONFIG_NOSYSTEM=1
     : > "$GIT_CONFIG_GLOBAL"
-    unset GITCONFIG_PLATFORM GITCONFIG_ALLOW_CROSS_OS GITCONFIG_OP_SSH_SIGN XDG_STATE_HOME
+    unset GITCONFIG_PLATFORM GITCONFIG_ALLOW_CROSS_OS GITCONFIG_OP_SSH_SIGN XDG_STATE_HOME XDG_CONFIG_HOME
+    # The scheduler must never reach the real systemd user manager: no session
+    # bus, and a systemctl that finds no user manager (tests that want one
+    # replace it).
+    unset XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
+    printf '#!/bin/sh\nexit 1\n' > "$SANDBOX/bin/systemctl"
+    chmod +x "$SANDBOX/bin/systemctl"
 }
 
 teardown() {
@@ -316,4 +322,54 @@ PY
     export GITCONFIG_LIBSECRET_BIN=""
     run _platform 'detect_credential_helper linux; echo "$CREDENTIAL_HELPER_KIND"'
     [ "$output" = none ]
+}
+
+# A systemctl whose user manager is running; calls are logged.
+_stub_systemctl_ok() {
+    printf '#!/bin/sh\necho "$*" >> "%s/systemctl.log"\nexit 0\n' "$SANDBOX" > "$SANDBOX/bin/systemctl"
+    chmod +x "$SANDBOX/bin/systemctl"
+}
+
+@test "the systemd timer's ExecStart escapes quotes, backslashes, percent and dollar signs in the repo path (#246)" {
+    _stub_systemctl_ok
+    repo="$SANDBOX/a\"b\\c 50%"'$x'
+    mkdir -p "$repo/scripts/shared"
+    : > "$repo/scripts/shared/update-gitconfig.sh"
+    export repo
+    run _platform 'scheduler_install linux "$repo" true'
+    [ "$status" -eq 0 ]
+    # systemd reads \" and \\ as escapes, %% as %, $$ as $.
+    esc="$SANDBOX/a\\\"b\\\\c 50%%\$\$x"
+    grep -qF "\"$esc/scripts/shared/update-gitconfig.sh\" \"$esc\"" \
+        "$HOME/.config/systemd/user/gitconfig-update.service"
+    run _platform 'scheduler_status linux "$repo"'
+    [ "$status" -eq 0 ]
+    run _platform 'scheduler_remove linux "$repo"'
+    [ "$status" -eq 0 ]
+    [ ! -e "$HOME/.config/systemd/user/gitconfig-update.timer" ]
+}
+
+@test "the systemd units go under an absolute XDG_CONFIG_HOME, not a relative one (#246)" {
+    export XDG_CONFIG_HOME="$SANDBOX/cfg"
+    [ "$(_platform _systemd_unit_dir)" = "$SANDBOX/cfg/systemd/user" ]
+    export XDG_CONFIG_HOME=relative/cfg
+    [ "$(_platform _systemd_unit_dir)" = "$HOME/.config/systemd/user" ]
+}
+
+@test "scheduler_name on Linux names the timer or the cron job that is in place (#246)" {
+    _stub_uname Linux
+    _stub_crontab_file
+    : > "$SANDBOX/crontab.txt"
+    # No user manager, nothing installed: an install would use cron.
+    [ "$(_platform 'scheduler_name linux /a')" = "cron job" ]
+    _stub_systemctl_ok
+    [ "$(_platform 'scheduler_name linux /a')" = "systemd timer" ]
+    # This clone's cron line wins over an available but unused user manager...
+    echo '0 9 * * * bash "/a/scripts/shared/update-gitconfig.sh" "/a" # gitconfig-autoupdate' > "$SANDBOX/crontab.txt"
+    [ "$(_platform 'scheduler_name linux /a')" = "cron job" ]
+    # ...and the timer's units win over both.
+    mkdir -p "$HOME/.config/systemd/user"
+    : > "$HOME/.config/systemd/user/gitconfig-update.timer"
+    [ "$(_platform 'scheduler_name linux /a')" = "systemd timer" ]
+    [ "$(_platform 'scheduler_name macos /a')" = "launchd agent" ]
 }

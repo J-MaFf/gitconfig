@@ -25,6 +25,10 @@ setup() {
 
     # Stub uname so the "wrong platform" verdict can be forced on any host.
     mkdir -p "$SANDBOX/bin"
+    # Never reach the real systemd user manager if an install gets that far.
+    unset XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XDG_CONFIG_HOME
+    printf '#!/bin/sh\nexit 1\n' > "$SANDBOX/bin/systemctl"
+    chmod +x "$SANDBOX/bin/systemctl"
 }
 
 teardown() {
