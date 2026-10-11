@@ -155,6 +155,57 @@ Describe "Update-GitConfig.ps1" {
             # Verify completion message
             $logContent | Should -Match "Repository synchronization process completed"
         }
+
+        It "Should write the log as UTF-8 without a BOM (#230)" {
+            # Tee-Object -Append wrote UTF-16 LE under Windows PowerShell 5.1.
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            $bytes = [System.IO.File]::ReadAllBytes($script:logFile)
+            $bytes[0] | Should -Not -Be 0xFF
+            $bytes[0] | Should -Not -Be 0xEF
+            $bytes | Should -Not -Contain ([byte]0)
+            [System.Text.Encoding]::UTF8.GetString($bytes) | Should -Match "Starting git repository synchronization"
+        }
+
+        It "Should keep appending to a log under -MaxLogBytes (#230)" {
+            [System.IO.File]::WriteAllText($script:logFile, "old line`n")
+
+            & $script:scriptPath -RepoPath $script:testRepo -MaxLogBytes 1000000 2>&1 | Out-Null
+
+            [System.IO.File]::ReadAllText($script:logFile) | Should -Match '^old line\n.*Starting git repository synchronization'
+            "$script:logFile.1" | Should -Not -Exist
+        }
+
+        It "Should roll a log past -MaxLogBytes to update-gitconfig.log.1 (#230)" {
+            $old = "old line`n" * 200
+            [System.IO.File]::WriteAllText("$script:logFile.1", "older roll")
+            [System.IO.File]::WriteAllText($script:logFile, $old)
+
+            & $script:scriptPath -RepoPath $script:testRepo -MaxLogBytes 1000 2>&1 | Out-Null
+
+            [System.IO.File]::ReadAllText("$script:logFile.1") | Should -BeExactly $old
+            $new = [System.IO.File]::ReadAllText($script:logFile)
+            $new | Should -Not -Match 'old line'
+            $new | Should -Match "Starting git repository synchronization"
+        }
+
+        It "Should roll an old UTF-16 log aside instead of appending UTF-8 to it (#230)" {
+            $utf16 = [byte[]](0xFF, 0xFE) + [System.Text.Encoding]::Unicode.GetBytes("old line`r`n")
+            [System.IO.File]::WriteAllBytes($script:logFile, $utf16)
+
+            & $script:scriptPath -RepoPath $script:testRepo 2>&1 | Out-Null
+
+            [System.IO.File]::ReadAllBytes("$script:logFile.1") | Should -Be $utf16
+            [System.IO.File]::ReadAllBytes($script:logFile) | Should -Not -Contain ([byte]0)
+        }
+
+        It "Should resolve a relative -RepoPath against the PowerShell location (#230)" {
+            Push-Location (Split-Path -Parent $script:testRepo)
+            try { & $script:scriptPath -RepoPath (Split-Path -Leaf $script:testRepo) 2>&1 | Out-Null }
+            finally { Pop-Location }
+
+            [System.IO.File]::ReadAllText($script:logFile) | Should -Match "Starting git repository synchronization"
+        }
     }
 
     Context "Step 1: Stay on the Current Branch" {

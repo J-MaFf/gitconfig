@@ -93,13 +93,14 @@ function Update-AllowedSigners {
     $line = "$signerEmail namespaces=`"git`" $pubKey"
     $existing = @()
     if (Test-Path $AllowedSignersPath) {
-        $existing = @(Get-Content $AllowedSignersPath)
+        # UTF-8 in both editions (Get-Content reads ANSI under 5.1, #230).
+        $existing = @((Read-Utf8File $AllowedSignersPath) -split '\r?\n')
     }
     if ($existing -contains $line) {
         Write-Host "[OK] allowed_signers already up to date" -ForegroundColor Green
     }
     else {
-        # Add-Content appends straight after the last byte, so if the file
+        # Appending goes straight after the last byte, so if the file
         # doesn't end in a newline the new entry would be glued onto the last
         # one and neither identity would verify (#255).
         if (Test-Path -LiteralPath $AllowedSignersPath) {
@@ -108,7 +109,7 @@ function Update-AllowedSigners {
                 $line = [Environment]::NewLine + $line
             }
         }
-        Add-Content -Path $AllowedSignersPath -Value $line
+        Add-Utf8Text -Path $AllowedSignersPath -Text ($line + [Environment]::NewLine)
         Write-Host "[OK] Updated $AllowedSignersPath" -ForegroundColor Green
     }
 }
@@ -183,7 +184,8 @@ try {
         }
 
         # Create or overwrite the local config file
-        Set-Content -Path $localConfigPath -Value $configContent -Force
+        # UTF-8, not 5.1's ANSI, so a non-ASCII home path survives (#230).
+        Write-Utf8File -Path $localConfigPath -Text ($configContent + [Environment]::NewLine)
         if ($localConfigExists) {
             Write-Host "[OK] Regenerated .gitconfig.local (-Force)" -ForegroundColor Green
         }

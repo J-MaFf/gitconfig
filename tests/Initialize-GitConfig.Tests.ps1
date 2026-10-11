@@ -240,6 +240,64 @@ Describe "Initialize-GitConfig.ps1" {
         }
     }
 
+    Context "Encoding and path substitution (#230)" {
+        # Windows PowerShell 5.1 read the template and wrote ~/.gitconfig as
+        # ANSI, and -replace expanded a '$1' or '$&' in the repo path. Runs a
+        # copy of the script from a repo folder whose name has both, with a
+        # home folder whose name is non-ASCII.
+        BeforeAll {
+            # Spelled with char codes so this file stays ASCII: e-acute and a CJK character.
+            $nonAscii = "Jos" + [char]0xE9 + " " + [char]0x4E2D
+            $script:copyRepo = Join-Path $TestDrive ('repo ' + $nonAscii + ' $1 $& $_')
+            $copyDir = Join-Path (Join-Path $script:copyRepo "scripts") "windows version"
+            New-Item -ItemType Directory -Path $copyDir -Force | Out-Null
+            Copy-Item -LiteralPath $script:scriptPath -Destination $copyDir
+            Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $script:scriptPath) "Functions.ps1") -Destination $copyDir
+            Copy-Item -LiteralPath $script:templatePath -Destination $script:copyRepo
+            $script:copyScript = Join-Path $copyDir "Initialize-GitConfig.ps1"
+            $script:encHome = Join-Path $TestDrive ("home " + $nonAscii)
+        }
+
+        BeforeEach {
+            if (Test-Path -LiteralPath $script:encHome) { Remove-Item -LiteralPath $script:encHome -Recurse -Force }
+            New-Item -ItemType Directory -Path $script:encHome | Out-Null
+            $env:USERPROFILE = $script:encHome
+            $env:HOME = $script:encHome
+        }
+
+        AfterEach {
+            $env:USERPROFILE = $script:testHome
+            $env:HOME = $script:testHome
+        }
+
+        It "writes ~/.gitconfig as UTF-8 without a BOM, with the repo path copied as is" {
+            & $script:copyScript -Force *> $null
+            $LASTEXITCODE | Should -Be 0
+
+            $out = Join-Path $script:encHome ".gitconfig"
+            $bytes = [System.IO.File]::ReadAllBytes($out)
+            $bytes[0] | Should -Not -Be 0xEF
+            $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+            $text | Should -Not -Match '\{\{REPO_PATH\}\}'
+            $repoForward = $script:copyRepo -replace '\\', '/'
+            $text.Contains("$repoForward/gitconfig_helper.py") | Should -BeTrue
+            # git reads the same path back.
+            $alias = & git config --file $out --get alias.alias
+            ($alias -join "`n").Contains("$repoForward/gitconfig_helper.py") | Should -BeTrue
+        }
+
+        It "sees its own non-ASCII output as up to date on the next run" {
+            & $script:copyScript -Force *> $null
+            $before = [System.IO.File]::ReadAllBytes((Join-Path $script:encHome ".gitconfig"))
+
+            $output = & $script:copyScript -Force *>&1 | Out-String
+
+            $output | Should -Match 'already up to date'
+            [System.IO.File]::ReadAllBytes((Join-Path $script:encHome ".gitconfig")) | Should -Be $before
+            @(Get-ChildItem -LiteralPath $script:encHome -Force -Filter ".gitconfig.bak*").Count | Should -Be 0
+        }
+    }
+
     Context "Error Handling" {
         It "Should fail gracefully if template is missing" {
             $scriptContent = Get-Content $script:scriptPath -Raw

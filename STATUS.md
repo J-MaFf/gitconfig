@@ -17,7 +17,7 @@ Healthy; `main` is clean and no PRs are open. A repo-wide bug review filed [#250
 
 - **macOS:** the bash Ctrl-G widget needs bash 4+ and says so under `/bin/bash` 3.2, launchd uses `launchctl bootstrap`/`bootout`, and a per-user lock keeps to one sync at a time ([#234](https://github.com/J-MaFf/gitconfig/issues/234)).
 
-Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows PowerShell 5.1 ([#269](https://github.com/J-MaFf/gitconfig/pull/269)), `install.ps1` replacing a network-gated login task left by an older version ([#275](https://github.com/J-MaFf/gitconfig/pull/275)), `launchctl bootstrap`/`bootout` plus the bash 3.2 Ctrl-G note on a real Mac ([#234](https://github.com/J-MaFf/gitconfig/issues/234)), and the Linux systemd timer under a real user manager (enable, a daily run in the journal, `Persistent=` catch-up, cleanup) ([#246](https://github.com/J-MaFf/gitconfig/issues/246)).
+Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows PowerShell 5.1 ([#269](https://github.com/J-MaFf/gitconfig/pull/269)), the install writing it to both editions' profiles and the UTF-8 files under 5.1 ([#292](https://github.com/J-MaFf/gitconfig/pull/292)), `install.ps1` replacing a network-gated login task left by an older version ([#275](https://github.com/J-MaFf/gitconfig/pull/275)), `launchctl bootstrap`/`bootout` plus the bash 3.2 Ctrl-G note on a real Mac ([#234](https://github.com/J-MaFf/gitconfig/issues/234)), and the Linux systemd timer under a real user manager (enable, a daily run in the journal, `Persistent=` catch-up, cleanup) ([#246](https://github.com/J-MaFf/gitconfig/issues/246)).
 
 ### Components
 
@@ -81,6 +81,7 @@ Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows Po
 | [#234](https://github.com/J-MaFf/gitconfig/issues/234) | macOS: the bash Ctrl-G widget bound but did nothing under `/bin/bash` 3.2, the scheduler used the deprecated `launchctl load`/`unload`, and the `RunAtLoad` sync ran the same pip install as the installer's STEP 6; now the widget binds only under bash 4+ (with a note), `bootstrap`/`bootout` are used, and a per-user lock keeps to one sync at a time | [#286](https://github.com/J-MaFf/gitconfig/pull/286) |
 | [#232](https://github.com/J-MaFf/gitconfig/issues/232) | `git skill list` ran one `git log` per skill (now one pass); the two skill-audit runners duplicated script/shell selection (now `_audit_cmd`); the skills-repo dirt warning named a nonexistent `git update` (now `git main --all`) | [#289](https://github.com/J-MaFf/gitconfig/pull/289) |
 | [#246](https://github.com/J-MaFf/gitconfig/issues/246) | Linux auto-sync was cron-only: skipped on hosts with no `crontab`, missed days the machine was off, logged to a file; now a systemd user timer (daily, `Persistent=true`, journal) where `systemctl --user` works, cron otherwise, never both, with a linger hint | [#290](https://github.com/J-MaFf/gitconfig/pull/290) |
+| [#230](https://github.com/J-MaFf/gitconfig/issues/230) | Windows: the Ctrl-G block went only into the profile of the edition that ran the install (Windows PowerShell 5.1 for the elevated relaunch) and was never updated after the repo moved; under 5.1 `~/.gitconfig`, `.gitconfig.local` and `allowed_signers` were read/written as ANSI, `-replace` expanded `$` in the repo path, and the update log was UTF-16 and never rotated. Now both profiles get the block (rewritten in place), files are UTF-8, and the log rolls to `.log.1` past 1 MB | [#292](https://github.com/J-MaFf/gitconfig/pull/292) |
 
 ### Open Issues
 
@@ -88,7 +89,6 @@ From an earlier review; none are being worked on.
 
 | Issue | Description |
 |-------|-------------|
-| [#230](https://github.com/J-MaFf/gitconfig/issues/230) | Windows: Ctrl-G only installed for one PowerShell edition; PS 5.1 encoding and log quirks |
 | [#231](https://github.com/J-MaFf/gitconfig/issues/231) | Template: dedupe the Python-finder alias loop (quote the repo path) and move machine-specific settings out |
 | [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Replace source-text tests with behavioural tests in a sandboxed HOME |
 | [#235](https://github.com/J-MaFf/gitconfig/issues/235) | Stop hardcoding machine-specific values in .gitconfig.local generation |
@@ -99,7 +99,7 @@ From an earlier review; none are being worked on.
 - On each additional machine, run `bd setup claude` (the SessionStart/PreCompact hooks live in the gitignored `.claude/settings.json`) and `bd bootstrap` to hydrate the Dolt graph.
 - Consider a small cleanup of `Integration.Tests.ps1` assertions that check `.gitconfig.local` for `[commit]`/`[user]` keys that actually live in `.gitconfig`.
 - Check the Ctrl-G widget by hand on Windows under pwsh 7 and Windows PowerShell 5.1 ([#269](https://github.com/J-MaFf/gitconfig/pull/269)); CI can't drive PSReadLine.
-- Known gaps left by the bug-fix wave, not yet filed: `install.sh --reinstall` removes `~/.gitconfig.local` before regenerating, so it doesn't carry your settings over the way `--force` does; `install.ps1` STEP 6b still writes with `Add-Content`'s default encoding.
+- Known gaps left by the bug-fix wave, not yet filed: `install.sh --reinstall` removes `~/.gitconfig.local` before regenerating, so it doesn't carry your settings over the way `--force` does.
 
 ## Prerequisites to Run
 

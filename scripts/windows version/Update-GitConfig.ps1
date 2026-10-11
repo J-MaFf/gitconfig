@@ -6,18 +6,24 @@
 # RepoPath defaults to the repo this script lives in (scripts\windows version ->
 # repo root), not a fixed Documents path, so a clone anywhere still syncs.
 # Register-LoginTask.ps1 also passes the path explicitly.
+# MaxLogBytes caps docs\update-gitconfig.log: a bigger log is rolled to
+# update-gitconfig.log.1 (replacing the last one) when the run starts.
 param(
-    [string]$RepoPath = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+    [string]$RepoPath = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)),
+    [long]$MaxLogBytes = 1MB
 )
 
-# Log file location
-$logFile = Join-Path $RepoPath "docs\update-gitconfig.log"
+# UTF-8 without a BOM, like the launchd/cron logs on macOS and Linux.
+$logEncoding = New-Object System.Text.UTF8Encoding($false)
 
-# Function to log messages with timestamp
+# Log a timestamped line to the console (the success stream, as before) and the
+# log file. Tee-Object -Append wrote UTF-16 LE under Windows PowerShell 5.1,
+# which runs the login task, and has no -Encoding before PowerShell 7.2 (#230).
 function Write-Log {
     param([string]$Message)
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "$timestamp - $Message" | Tee-Object -FilePath $logFile -Append
+    $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $Message"
+    $line
+    [System.IO.File]::AppendAllText($logFile, $line + [Environment]::NewLine, $logEncoding)
 }
 
 # Check the path BEFORE logging: the log lives inside the repo, so with a wrong
@@ -27,8 +33,32 @@ if (-not (Test-Path -LiteralPath $RepoPath -PathType Container)) {
     [Console]::Error.WriteLine("$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - ERROR: Repository path not found: $RepoPath")
     exit 1
 }
+# Full path: .NET resolves a relative path against the process's working
+# directory, not the PowerShell location.
+$logFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath((Join-Path $RepoPath "docs\update-gitconfig.log"))
 $logDir = Split-Path -Parent $logFile
 if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+
+# Keep the log bounded (#230): roll it to .log.1 once it passes MaxLogBytes. A
+# log that starts with a UTF-16 LE BOM was written by the old Tee-Object; roll
+# it too, so UTF-8 lines are not appended to a UTF-16 file.
+try {
+    $logItem = Get-Item -LiteralPath $logFile -Force -ErrorAction SilentlyContinue
+    if ($logItem -and -not $logItem.PSIsContainer) {
+        $utf16 = $false
+        if ($logItem.Length -ge 2) {
+            $stream = [System.IO.File]::OpenRead($logFile)
+            try { $utf16 = ($stream.ReadByte() -eq 0xFF) -and ($stream.ReadByte() -eq 0xFE) } finally { $stream.Dispose() }
+        }
+        if ($utf16 -or $logItem.Length -gt $MaxLogBytes) {
+            Move-Item -LiteralPath $logFile -Destination "$logFile.1" -Force
+        }
+    }
+}
+catch {
+    # A log that can't be rolled (locked) must not stop the sync; keep appending.
+    [Console]::Error.WriteLine("WARN: could not rotate ${logFile}: $($_.Exception.Message)")
+}
 
 # Headless (login task): a git credential prompt would block forever with nobody
 # to answer it. Fail the network step instead; it is best-effort. Restored in
