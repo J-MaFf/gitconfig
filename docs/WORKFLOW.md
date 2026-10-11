@@ -694,10 +694,21 @@ cd "$HOME\Documents\Scripts\gitconfig"
 This only replaces the scheduled task. Don't use `Cleanup-GitConfig.ps1` for this: it
 uninstalls everything, including moving your `~/.gitconfig.local` aside.
 
+The task runs at every login, whether or not the network is up yet: rendering
+`~/.gitconfig` from the local template needs no network, and a pull that fails while
+offline is logged as a warning. Re-running `install.ps1` replaces a task registered by
+an older version that still waits for a network.
+
 The macOS (launchd) and Linux (cron) jobs run the same sync; `git selfupdate` runs it
-by hand on any OS. To re-register the job, re-run `bash scripts/unix/install.sh` and
-answer `y` when it asks to replace the job and `n` when it asks to overwrite
-`.gitconfig.local` (`--force` would say yes to both).
+by hand on any OS (on macOS/Linux, run from a terminal, it also prints its progress and
+exits 1 if the pull failed). The launchd job
+logs to `docs/update-gitconfig.log` in the repo; the cron job logs to
+`${XDG_STATE_HOME:-~/.local/state}/gitconfig/gitconfig-update.log` (it used the shared
+`/tmp/gitconfig-update.log` before, which another user could block). To re-register
+the job, re-run `bash scripts/unix/install.sh` and answer `y` when it asks to replace
+the job. Answering `y` to regenerating `.gitconfig.local` too is safe: the settings you
+added are kept. `--force` says yes to both. Install and cleanup only touch this clone's
+cron line, so after moving a clone, remove the old path's line with `crontab -e`.
 
 ---
 
@@ -745,7 +756,8 @@ The setup scripts automatically request admin elevation. If you still get permis
 never touch it, and the repo's `.gitignore` lists `.gitconfig.local` in case a copy
 ends up in the working tree. On Windows, `install.ps1` creates it once and then keeps
 it, even with `-Force`. On macOS/Linux, `install.sh` asks before overwriting it, and
-`install.sh --force` regenerates it. To regenerate it on purpose, run
+`install.sh --force` regenerates it, keeping the settings you added in a "Your
+settings" section at the end. To regenerate it on purpose, run
 `Initialize-LocalConfig.ps1 -Force` or `bash scripts/unix/initialize-local-config.sh --force`.
 Every regeneration backs up the old file first. Edit it with `git localconfig`.
 

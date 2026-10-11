@@ -61,6 +61,12 @@ Whenever a script replaces or removes one of your files, it first saves a timest
 
 Running the installer again is safe. It doesn't remove anything first. To wipe the previous install before setting up again, pass `--reinstall` (bash) or `-Reinstall` (PowerShell). Everything it removes is backed up first.
 
+### Exit status and unattended runs (macOS/Linux)
+
+`install.sh` exits 1 when any step fails or its final check finds something missing; it still runs every step and prints the summary first. `cleanup-gitconfig.sh` exits 1 when something is still present afterwards. `cleanup-gitconfig.sh`, `scripts/shared/initialize-gitconfig.sh` and `scripts/unix/initialize-local-config.sh` exit 2 when you decline a prompt. Each script's `--help` lists its exit codes.
+
+A yes/no prompt with no input to read (cron, CI, `< /dev/null`) counts as "no": the script says so and carries on as if you had answered no, instead of stopping with no message. Pass `--force` to answer yes to every prompt in an unattended run.
+
 ## Uninstall
 
 Each platform has a cleanup script that removes symlinks, local config, and the auto-update job.
@@ -221,7 +227,7 @@ If `skill-audit` itself fails, `git skill status`, `sync` and `diff` show its er
 
 ## Troubleshooting
 
-**Symlink creation fails (Windows):** Run PowerShell as Administrator.
+**Symlink creation fails (Windows):** Run PowerShell as Administrator (or turn on Developer Mode). A failed link leaves the existing `~/.gitignore_global` or `~/gitconfig_helper.py` in place, prints `[FAIL]`, and `Initialize-Symlinks.ps1` exits 1.
 
 **Python dependency issues:**
 
@@ -258,7 +264,8 @@ on Windows, `& ".\scripts\windows version\Initialize-LocalConfig.ps1"` adds the
 `allowed_signers` entry but keeps your existing `~/.gitconfig.local`, so if that file
 has no `allowedSignersFile` line, add `-Force` to regenerate it (the old file is backed
 up first); on macOS/Linux, `bash scripts/unix/initialize-local-config.sh --force`
-regenerates `~/.gitconfig.local` (backing up the old one) and adds the entry.
+regenerates `~/.gitconfig.local` (backing up the old one and keeping the settings you
+added) and adds the entry.
 GitHub verifies signatures independently, so commits show as Verified there regardless.
 
 ## License
