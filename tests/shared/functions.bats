@@ -688,10 +688,11 @@ backups_of() {
 
 @test "the bash widget binds Ctrl-G only under bash 4+, and says why otherwise (#234)" {
     # Runs the widget in an interactive bash (no rc files): bash 5 on Linux CI,
-    # the stock /bin/bash 3.2 on macOS CI.
+    # the stock /bin/bash 3.2 on macOS CI. bind -X (list `bind -x` bindings)
+    # only exists since bash 4.3, so its failure under 3.2 is ignored.
     major="$(bash -c 'echo "${BASH_VERSINFO[0]}"')"
     run bash --norc --noprofile -i -c \
-        "source '$REPO_ROOT/scripts/shell/git-alias-widget.bash'; bind -X" < /dev/null
+        "source '$REPO_ROOT/scripts/shell/git-alias-widget.bash'; bind -X 2>/dev/null || true" < /dev/null
     [ "$status" -eq 0 ]
     if [ "$major" -ge 4 ]; then
         [[ "$output" == *'__git_alias_insert'* ]]
