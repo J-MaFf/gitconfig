@@ -163,3 +163,13 @@ mac_install() { bash "$MAC_INSTALL" --force --no-launchd "$@"; }
     some_backup_has "$HOME/.gitignore_global" "ORIGINAL-GITIGNORE"
     some_backup_has "$HOME/.gitconfig.local" "/original/local"
 }
+
+@test "install --force keeps the settings in ~/.gitconfig.local (#257)" {
+    printf '[alias]\n\tco = checkout\n' >> "$HOME/.gitconfig.local"
+    run linux_install
+    [ "$status" -eq 0 ]
+    git config --file "$HOME/.gitconfig.local" --get-all safe.directory | grep -qxF /original/local
+    [ "$(git config --file "$HOME/.gitconfig.local" alias.co)" = "checkout" ]
+    # And git sees them through the include.
+    [ "$(git config --global --includes alias.co)" = "checkout" ]
+}

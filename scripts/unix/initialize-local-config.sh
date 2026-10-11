@@ -34,7 +34,7 @@ USAGE:
     scripts/unix/initialize-local-config.sh [OPTIONS]
 
 OPTIONS:
-    -f, --force     Overwrite existing .gitconfig.local without prompting
+    -f, --force     Regenerate an existing .gitconfig.local without prompting
                     (the old file is kept as .gitconfig.local.bak.<timestamp>)
     -h, --help      Display this help message
 
@@ -51,6 +51,10 @@ DESCRIPTION:
       macOS; the GitHub CLI (gh auth git-credential), else libsecret, on Linux
     - Safe directory entries (plus Homebrew's repo on a shared Mac where
       another account owns it)
+    Regenerating keeps every setting you added to the file (aliases, includes,
+    extra safe directories, ...). Only the settings listed above are rebuilt.
+    A ~/.gitconfig.local symlink is replaced by a regular file; the file it
+    points to is not changed.
 HELP
     exit 0
 fi
@@ -73,9 +77,9 @@ echo "Home Directory: $HOME_DIR"
 echo "Local Config Path: $LOCAL_CONFIG_PATH"
 echo ""
 
-if [ -f "$LOCAL_CONFIG_PATH" ] && [ "$FORCE" = false ]; then
-    echo ".gitconfig.local already exists."
-    read -p "Overwrite? (y/n) " -n 1 -r
+if { [ -f "$LOCAL_CONFIG_PATH" ] || [ -L "$LOCAL_CONFIG_PATH" ]; } && [ "$FORCE" = false ]; then
+    echo ".gitconfig.local already exists (settings you added to it are kept)."
+    read -p "Regenerate it? (y/n) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "Cancelled."
@@ -277,9 +281,32 @@ if [ "$TARGET_OS" = macos ]; then
     fi
 fi
 
-# Keep a timestamped copy of the file we are about to replace, unless it
-# already holds exactly what we would write.
-if [ -f "$LOCAL_CONFIG_PATH" ] && [ "$(cat "$LOCAL_CONFIG_PATH")" != "$(printf '%s\n' "$CONFIG_CONTENT")" ]; then
+# --- Settings the user added -------------------------------------------------
+# install.sh and the ~/.gitconfig regeneration tell users to put their own git
+# settings here, so regenerating (--force, or "y" at the prompt) must keep
+# them (#257). Everything this script doesn't generate is carried over below
+# its own header; the generated settings are rebuilt from what was detected.
+if [ -f "$LOCAL_CONFIG_PATH" ]; then
+    KEPT_FILE="$(mktemp "${TMPDIR:-/tmp}/gitconfig-local-kept.XXXXXX")"
+    if keep_local_settings "$LOCAL_CONFIG_PATH" "$CONFIG_CONTENT" "$KEPT_FILE"; then
+        if [ -s "$KEPT_FILE" ]; then
+            CONFIG_CONTENT+="
+$LOCAL_CONFIG_KEPT_HEADER
+$(cat "$KEPT_FILE")"
+        fi
+    else
+        echo "[WARN] Could not read the existing .gitconfig.local (is it valid git config?),"
+        echo "       so none of its settings are carried over. The backup below keeps them."
+    fi
+    rm -f "$KEPT_FILE"
+fi
+
+# A symlink (into a dotfiles repo, say) is backed up and replaced, never
+# written through (#257). Otherwise keep a timestamped copy of the file we are
+# about to replace, unless it already holds exactly what we would write.
+if [ -L "$LOCAL_CONFIG_PATH" ]; then
+    detach_symlink "$LOCAL_CONFIG_PATH"
+elif [ -f "$LOCAL_CONFIG_PATH" ] && [ "$(cat "$LOCAL_CONFIG_PATH")" != "$(printf '%s\n' "$CONFIG_CONTENT")" ]; then
     backup_copy "$LOCAL_CONFIG_PATH"
 fi
 

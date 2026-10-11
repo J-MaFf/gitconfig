@@ -493,6 +493,34 @@ backups_of() {
     [ -z "$(backups_of "$HOME_DIR/.gitconfig")" ]
 }
 
+@test "generate_gitconfig replaces a ~/.gitconfig symlink outside the repo instead of writing through it (#257)" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo" "$TESTDIR/dotfiles"
+    printf '[core]\n\trepo = {{REPO_PATH}}\n' > "$repo/.gitconfig.template"
+    printf '[user]\n\tname = Dotfiles\n' > "$TESTDIR/dotfiles/gitconfig"
+    ln -s "$TESTDIR/dotfiles/gitconfig" "$HOME_DIR/.gitconfig"
+    run generate_gitconfig "$repo" "$HOME_DIR" true
+    [ "$status" -eq 0 ]
+    [ ! -L "$HOME_DIR/.gitconfig" ]
+    grep -qF "repo = $repo" "$HOME_DIR/.gitconfig"
+    # The dotfiles copy is untouched, and the backup holds its content.
+    [ "$(cat "$TESTDIR/dotfiles/gitconfig")" = "$(printf '[user]\n\tname = Dotfiles')" ]
+    grep -qF "name = Dotfiles" "$(backups_of "$HOME_DIR/.gitconfig")"
+    [ -L "$HOME_DIR/.gitconfig.pre-gitconfig" ]
+}
+
+@test "generate_gitconfig never writes through a dangling ~/.gitconfig symlink (#257)" {
+    local repo="$TESTDIR/repo"
+    mkdir -p "$repo" "$TESTDIR/dotfiles"
+    printf '[core]\n\trepo = {{REPO_PATH}}\n' > "$repo/.gitconfig.template"
+    ln -s "$TESTDIR/dotfiles/gitconfig" "$HOME_DIR/.gitconfig"
+    run generate_gitconfig "$repo" "$HOME_DIR" true
+    [ "$status" -eq 0 ]
+    [ ! -L "$HOME_DIR/.gitconfig" ]
+    [ ! -e "$TESTDIR/dotfiles/gitconfig" ]
+    grep -qF "repo = $repo" "$HOME_DIR/.gitconfig"
+}
+
 # ---------------------------------------------------------------------------
 # enable_git_alias_widget / disable_git_alias_widget
 # ---------------------------------------------------------------------------
@@ -531,4 +559,64 @@ backups_of() {
     grep -qF 'export FOO=1' "$HOME_DIR/.bashrc"
     grep -qF 'export BAR=2' "$HOME_DIR/.bashrc"
     run ! grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$HOME_DIR/.bashrc"
+}
+
+@test "disable_git_alias_widget leaves the rc unchanged when the end marker is missing (#257)" {
+    printf 'export FOO=1\n' > "$HOME_DIR/.bashrc"
+    enable_git_alias_widget "$REPO_ROOT" "$HOME_DIR"
+    printf 'export BAR=2\nexport BAZ=3\n' >> "$HOME_DIR/.bashrc"
+    # The user edited the end marker.
+    sed -i.orig "s/^# <<< gitconfig git-alias browser <<<\$/# end of git-alias block/" "$HOME_DIR/.bashrc"
+    rm -f "$HOME_DIR/.bashrc.orig"
+    cp "$HOME_DIR/.bashrc" "$TESTDIR/before"
+    run disable_git_alias_widget "$HOME_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[WARN]"* ]]
+    [[ "$output" != *"[OK] Disabled"* ]]
+    cmp -s "$TESTDIR/before" "$HOME_DIR/.bashrc"
+    [ -z "$(backups_of "$HOME_DIR/.bashrc")" ]
+}
+
+@test "disable_git_alias_widget leaves the rc unchanged when a block is never closed (#257)" {
+    printf 'export FOO=1\n' > "$HOME_DIR/.bashrc"
+    enable_git_alias_widget "$REPO_ROOT" "$HOME_DIR"
+    printf '%s\nexport BAR=2\n' "$GIT_ALIAS_WIDGET_BEGIN" >> "$HOME_DIR/.bashrc"
+    cp "$HOME_DIR/.bashrc" "$TESTDIR/before"
+    run disable_git_alias_widget "$HOME_DIR"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"[WARN]"* ]]
+    cmp -s "$TESTDIR/before" "$HOME_DIR/.bashrc"
+}
+
+@test "disable_git_alias_widget backs up the rc before rewriting it (#257)" {
+    printf 'export FOO=1\n' > "$HOME_DIR/.bashrc"
+    enable_git_alias_widget "$REPO_ROOT" "$HOME_DIR"
+    cp "$HOME_DIR/.bashrc" "$TESTDIR/before"
+    run disable_git_alias_widget "$HOME_DIR"
+    [ "$status" -eq 0 ]
+    [ "$(backups_of "$HOME_DIR/.bashrc" | wc -l | tr -d ' ')" -eq 1 ]
+    cmp -s "$TESTDIR/before" "$(backups_of "$HOME_DIR/.bashrc")"
+    [ "$(cat "$HOME_DIR/.bashrc")" = "export FOO=1" ]
+}
+
+# ---------------------------------------------------------------------------
+# keep_local_settings
+# ---------------------------------------------------------------------------
+
+@test "keep_local_settings keeps unmanaged settings and drops generated ones (#257)" {
+    printf '[gpg "ssh"]\n\tprogram = /old/op-ssh-sign\n[safe]\n\tdirectory = /gen\n\tdirectory = /mine\n[alias]\n\tco = checkout\n' > "$TESTDIR/old"
+    run keep_local_settings "$TESTDIR/old" "$(printf '[safe]\n\tdirectory = /gen\n')" "$TESTDIR/kept"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"gpg.ssh.program"* ]]
+    [[ "$output" != *"/old/op-ssh-sign"* ]]
+    [ "$(git config --file "$TESTDIR/kept" --get-all safe.directory)" = "/mine" ]
+    [ "$(git config --file "$TESTDIR/kept" alias.co)" = "checkout" ]
+    run ! git config --file "$TESTDIR/kept" gpg.ssh.program
+}
+
+@test "keep_local_settings fails on a file git can't parse" {
+    printf '[user\n\tname = x\n' > "$TESTDIR/old"
+    run keep_local_settings "$TESTDIR/old" "" "$TESTDIR/kept"
+    [ "$status" -eq 1 ]
+    [ ! -s "$TESTDIR/kept" ]
 }
