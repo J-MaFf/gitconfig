@@ -60,22 +60,27 @@ generate_gitconfig() {
         return 0
     fi
 
-    # A ~/.gitconfig that is a symlink into this repo is a leftover from an old
-    # install that linked it instead of generating it. Writing through it would
-    # clobber a file inside the repo, and backing it up would only save a link,
-    # so drop the link and write a real file in its place.
     # Snapshot what ~/.gitconfig holds now, before the symlink handling below
     # can remove it: the settings the template no longer carries are moved
     # from this copy into ~/.gitconfig.local before the rewrite (#231).
+    # Without a snapshot the move can't happen, so stop rather than rewrite;
+    # an unreadable ~/.gitconfig is the exception, as git applied nothing from it.
     local previous=""
     if [ -f "$output_path" ]; then
-        previous="$(mktemp "${TMPDIR:-/tmp}/gitconfig-prev.XXXXXX")" || previous=""
-        if [ -n "$previous" ] && ! cat "$output_path" > "$previous" 2>/dev/null; then
+        if ! previous="$(mktemp "${TMPDIR:-/tmp}/gitconfig-prev.XXXXXX")"; then
+            echo "[ERROR] Could not create a temporary file; ~/.gitconfig left unchanged"
+            return 1
+        fi
+        if ! cat "$output_path" > "$previous" 2>/dev/null; then
             rm -f "$previous"
             previous=""
         fi
     fi
 
+    # A ~/.gitconfig that is a symlink into this repo is a leftover from an old
+    # install that linked it instead of generating it. Writing through it would
+    # clobber a file inside the repo, and backing it up would only save a link,
+    # so drop the link and write a real file in its place.
     if _link_points_into "$output_path" "$repo_root"; then
         rm -f "$output_path"
         echo "[INFO] Replaced the old ~/.gitconfig symlink into the repo with a generated file"
@@ -192,6 +197,8 @@ warn_dropped_gitconfig_keys() {
 }
 
 # Settings older templates carried that now live in ~/.gitconfig.local (#231).
+# Order matters: user.signingkey is moved before commit.gpgsign, which is
+# carried only once a signing key is in ~/.gitconfig.local.
 # shellcheck disable=SC2034
 TEMPLATE_MOVED_KEYS="user.signingkey
 core.editor

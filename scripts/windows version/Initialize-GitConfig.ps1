@@ -73,11 +73,20 @@ $localConfigPath = Join-Path $homeDir ".gitconfig.local"
 # copy into ~/.gitconfig.local before the rewrite (#231).
 $previousPath = $null
 if (Test-Path -LiteralPath $outputPath -PathType Leaf) {
+    # Without a snapshot the move can't happen, so stop rather than rewrite;
+    # an unreadable ~/.gitconfig is the exception, as git applied nothing from it.
     try {
         $previousPath = [IO.Path]::GetTempFileName()
+    }
+    catch {
+        Write-Host "[ERROR] Could not create a temporary file; ~/.gitconfig left unchanged" -ForegroundColor Red
+        exit 1
+    }
+    try {
         Copy-Item -LiteralPath $outputPath -Destination $previousPath -Force -ErrorAction Stop
     }
     catch {
+        Remove-Item -LiteralPath $previousPath -Force -ErrorAction SilentlyContinue
         $previousPath = $null
     }
 }
