@@ -51,6 +51,7 @@ Four follow-up fixes from the #198 adversarial review landed: [#203](https://git
 | [#201](https://github.com/J-MaFf/gitconfig/issues/201) | Vacuous `PSParser::Tokenize` parse assertion in `Update-GitConfig.Tests.ps1` could never fail | [#205](https://github.com/J-MaFf/gitconfig/pull/205) |
 | [#202](https://github.com/J-MaFf/gitconfig/issues/202) | `Integration.Tests.ps1` invoked bare `python`, bypassing the repo's resolution rule | [#206](https://github.com/J-MaFf/gitconfig/pull/206) |
 | [#214](https://github.com/J-MaFf/gitconfig/issues/214) | Adopt shared reusable claude.yml workflow from J-MaFf/.github | [#215](https://github.com/J-MaFf/gitconfig/pull/215) |
+| [#248](https://github.com/J-MaFf/gitconfig/issues/248) | `git main` failed in worktrees, fetched the current branch's remote instead of the default branch's, and failed in repos with no remote | [#249](https://github.com/J-MaFf/gitconfig/pull/249) (awaiting review) |
 
 ### Open Issues
 
