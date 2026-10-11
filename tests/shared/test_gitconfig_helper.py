@@ -977,7 +977,10 @@ class TestCliArgValidation:
         monkeypatch.chdir(git_env)
         out = tmp_path / "sel.txt"
         assert self._run("print_aliases", "--plain").returncode == 0
-        assert self._run("print_aliases", "--out", str(out)).returncode == 0
+        # --out is accepted; with no terminal it then fails on purpose (#254), not as a usage error
+        result = self._run("print_aliases", "--out", str(out))
+        assert result.returncode == 1 and "not a terminal" in result.stderr
+        assert "Usage: git alias" not in result.stderr
         result = self._run("print_aliases", "--bogus")
         assert result.returncode == 2 and "Usage: git alias" in result.stderr
         result = self._run("print_aliases", "-h")
@@ -1061,6 +1064,85 @@ class TestPushfAlias:
         # The teammate's change survives in the rewritten history.
         assert (me / "b.txt").exists()
         assert _git(me, "show", "-s", "--format=%B", remote_tip) == "teammate work, reworded"
+
+
+# --------------------------------------------------------------------------
+# print_aliases: selection mode (`git alias --out`, the Ctrl-G widgets)
+# --------------------------------------------------------------------------
+
+class TestPrintAliasesSelectionMode:
+    """Selection mode must fail loudly when the browser can't run (#254).
+
+    Before, `--out` with no TTY (the PowerShell widget's redirected stdout)
+    printed nothing and exited 0, so Ctrl-G silently did nothing.
+    """
+
+    @staticmethod
+    def _run(tmp_path, *args):
+        # Isolated global config with one known alias; captured stdout/stderr
+        # are pipes, i.e. exactly the "no TTY" case.
+        cfg = tmp_path / "gitconfig"
+        cfg.write_text("[alias]\n\tst = status\n", encoding="utf-8")
+        env = dict(os.environ, GIT_CONFIG_GLOBAL=str(cfg), GIT_CONFIG_NOSYSTEM="1")
+        return subprocess.run(
+            [sys.executable, HELPER_PATH, "print_aliases", *args],
+            capture_output=True, text=True, env=env, cwd=tmp_path,
+        )
+
+    def test_out_without_tty_exits_nonzero_with_stderr_message(self, tmp_path):
+        out = tmp_path / "selection with space.txt"
+        out.write_text("", encoding="utf-8")
+        result = self._run(tmp_path, "--out", str(out))
+        assert result.returncode == 1
+        assert "git alias --out" in result.stderr
+        assert "not a terminal" in result.stderr
+        assert result.stdout == ""  # no static table dumped into the widget
+        assert out.read_text(encoding="utf-8") == ""
+
+    def test_piped_without_out_still_prints_table(self, tmp_path):
+        # install.ps1 runs `git alias | Out-Null`; `git alias | grep` must work.
+        result = self._run(tmp_path)
+        assert result.returncode == 0
+        assert "Git Aliases" in result.stdout
+        assert "st" in result.stdout
+        assert "git alias --out" not in result.stderr
+
+    def test_plain_with_out_stays_silent_and_succeeds(self, tmp_path):
+        result = self._run(tmp_path, "--plain", "--out", str(tmp_path / "o"))
+        assert result.returncode == 0
+        assert result.stdout == ""
+
+    def test_out_on_tty_when_browser_unavailable_fails_loudly(
+        self, helper, monkeypatch, capsys, tmp_path
+    ):
+        monkeypatch.setattr(helper, "get_git_aliases", lambda: [])
+        monkeypatch.setattr(helper.sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(
+            helper, "_launch_alias_browser",
+            lambda aliases, select_out=None: (False, "textual is missing"),
+        )
+        rc = helper.print_aliases(select_out=str(tmp_path / "o"))
+        captured = capsys.readouterr()
+        assert rc == 1
+        assert "git alias --out: textual is missing" in captured.err
+        assert "Git Aliases" not in captured.out
+
+    def test_out_on_tty_when_browser_runs_returns_zero(
+        self, helper, monkeypatch, capsys, tmp_path
+    ):
+        seen = {}
+        monkeypatch.setattr(helper, "get_git_aliases", lambda: [])
+        monkeypatch.setattr(helper.sys.stdout, "isatty", lambda: True)
+
+        def fake_launch(aliases, select_out=None):
+            seen["select_out"] = select_out
+            return True, None
+
+        monkeypatch.setattr(helper, "_launch_alias_browser", fake_launch)
+        target = str(tmp_path / "o")
+        assert helper.print_aliases(select_out=target) == 0
+        assert seen["select_out"] == target
+        assert capsys.readouterr().err == ""
 
 
 if __name__ == "__main__":

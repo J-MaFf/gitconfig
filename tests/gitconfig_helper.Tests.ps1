@@ -865,18 +865,21 @@ import gitconfig_helper
             $script:src | Should -Match "_copy_to_clipboard\(choice\)"
         }
 
-        It "Stays silent in selection mode (no static table dumped to the tty)" {
-            # --out is the keybinding path; with no TTY the browser is skipped and
-            # nothing should be printed (so the shell inserts an empty selection).
+        It "Fails loudly in selection mode without a TTY (no table, stderr, exit 1)" {
+            # --out is the keybinding path. With stdout redirected the browser
+            # can't draw; it used to exit 0 silently, hiding #254. Now it must
+            # say why on stderr, exit non-zero and still not dump the table.
             $tmp = [System.IO.Path]::GetTempFileName()
+            $errFile = [System.IO.Path]::GetTempFileName()
             try {
-                $result = & $script:python $script:helperScript print_aliases --out $tmp 2>&1
-                $output = ($result -join "`n").Trim()
-                $output | Should -Not -Match "Git Aliases"
-                $LASTEXITCODE | Should -Be 0
+                $stdout = & $script:python $script:helperScript print_aliases --out $tmp 2>$errFile
+                $code = $LASTEXITCODE
+                ($stdout -join "`n") | Should -Not -Match "Git Aliases"
+                (Get-Content -LiteralPath $errFile -Raw) | Should -Match "git alias --out: stdout is not a terminal"
+                $code | Should -Be 1
             }
             finally {
-                Remove-Item $tmp -ErrorAction SilentlyContinue
+                Remove-Item $tmp, $errFile -ErrorAction SilentlyContinue
             }
         }
     }
@@ -928,7 +931,7 @@ import gitconfig_helper
             $zsh | Should -Match 'git alias --out'
             $zsh | Should -Match 'LBUFFER'
             $ps = Get-Content (Join-Path $script:repoRoot "scripts/shell/git-alias-widget.ps1") -Raw
-            $ps | Should -Match 'git alias --out'
+            $ps | Should -Match "'alias', '--out'"
             $ps | Should -Match 'PSConsoleReadLine'
         }
 
@@ -941,6 +944,93 @@ import gitconfig_helper
             $unixInstall | Should -Match "enable_git_alias_widget"
             $unixCleanup = Get-Content (Join-Path $script:repoRoot "scripts/unix/cleanup-gitconfig.sh") -Raw
             $unixCleanup | Should -Match "disable_git_alias_widget"
+        }
+    }
+
+    Context "PowerShell Ctrl-G widget launch (#254)" {
+        # PSReadLine runs key handlers with native stdout redirected, so the
+        # widget must start git with Start-Process -NoNewWindow (inheriting the
+        # console). A real PSReadLine session can't run in CI; instead these
+        # call the widget's Invoke-GitAliasBrowser with Start-Process mocked to
+        # launch a stand-in child for git through the real Start-Process.
+        BeforeAll {
+            $script:widgetPath = Join-Path $script:repoRoot "scripts/shell/git-alias-widget.ps1"
+            # A temp dir with a space, so the --out path must survive
+            # Start-Process's space-joined -ArgumentList on 5.1 and 7.
+            $script:spaceTemp = Join-Path ([System.IO.Path]::GetTempPath()) ("ctrl g " + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $script:spaceTemp -Force | Out-Null
+            # Stand-in for git: checks it got `alias --out <path>` as exactly
+            # three argv entries, then writes a selection to <path>.
+            $script:fakeGit = Join-Path $script:spaceTemp "fake git.py"
+            Set-Content -LiteralPath $script:fakeGit -Encoding ASCII -Value @(
+                'import sys'
+                'args = sys.argv[1:]'
+                'if len(args) != 3 or args[:2] != ["alias", "--out"]:'
+                '    sys.exit(3)'
+                'open(args[2], "w").write("git lg\n")'
+            )
+            $script:savedTemp = @{ TMP = $env:TMP; TEMP = $env:TEMP; TMPDIR = $env:TMPDIR }
+            # The real cmdlet, captured before any Mock: invoking the CmdletInfo
+            # bypasses Pester's Start-Process mock (a qualified name does not).
+            $script:realStartProcess = Get-Command -Name Start-Process -CommandType Cmdlet
+            # Don't bind a real key in the test host; just load the function.
+            function Set-PSReadLineKeyHandler { }
+            . $script:widgetPath
+        }
+
+        AfterAll {
+            foreach ($name in 'TMP', 'TEMP', 'TMPDIR') {
+                if ($null -eq $script:savedTemp[$name]) {
+                    Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+                }
+                else {
+                    Set-Item -Path "Env:$name" -Value $script:savedTemp[$name]
+                }
+            }
+            Remove-Item -LiteralPath $script:spaceTemp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        BeforeEach {
+            # GetTempFileName reads TMP/TEMP on Windows and TMPDIR elsewhere.
+            $env:TMP = $script:spaceTemp; $env:TEMP = $script:spaceTemp; $env:TMPDIR = $script:spaceTemp
+        }
+
+        It "Starts git on the console (no redirection) and returns the selection" {
+            Mock Start-Process -MockWith {
+                & $script:realStartProcess -FilePath $script:python `
+                    -ArgumentList (@(('"{0}"' -f $script:fakeGit)) + $ArgumentList) `
+                    -NoNewWindow:$NoNewWindow -Wait:$Wait -PassThru:$PassThru
+            }
+
+            $result = Invoke-GitAliasBrowser
+
+            $result.ExitCode | Should -Be 0
+            $result.Selection | Should -Be 'git lg'
+            Should -Invoke Start-Process -Times 1 -Exactly -ParameterFilter {
+                $NoNewWindow -and $Wait -and $PassThru -and
+                -not $RedirectStandardOutput -and -not $RedirectStandardError -and
+                -not $RedirectStandardInput -and
+                $ArgumentList[0] -eq 'alias' -and $ArgumentList[1] -eq '--out'
+            }
+            # The temp selection file is cleaned up.
+            @(Get-ChildItem -LiteralPath $script:spaceTemp -Filter '*.tmp').Count | Should -Be 0
+        }
+
+        It "Reports git's non-zero exit and no selection" {
+            Mock Start-Process -MockWith { [pscustomobject]@{ ExitCode = 1 } }
+
+            $result = Invoke-GitAliasBrowser
+
+            $result.ExitCode | Should -Be 1
+            $result.Selection | Should -BeNullOrEmpty
+        }
+
+        It "Returns nothing when git is not on PATH" {
+            Mock Get-Command -ParameterFilter { $Name -eq 'git' } -MockWith { }
+            Mock Start-Process -MockWith { throw "must not launch" }
+
+            Invoke-GitAliasBrowser | Should -BeNullOrEmpty
+            Should -Invoke Start-Process -Times 0 -Exactly
         }
     }
 

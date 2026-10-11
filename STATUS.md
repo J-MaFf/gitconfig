@@ -56,6 +56,7 @@ Four follow-up fixes from the #198 adversarial review landed: [#203](https://git
 | [#251](https://github.com/J-MaFf/gitconfig/issues/251) | `git pushf` used a bare `--force-with-lease`, which any background fetch disarms, so it could overwrite a teammate's commit; now adds `--force-if-includes` (git 2.30+) | [#264](https://github.com/J-MaFf/gitconfig/pull/264) |
 | [#253](https://github.com/J-MaFf/gitconfig/issues/253) | Backup pruning (newest 5) deleted the only backup of the user's pre-install `~/.gitconfig` (Unix + Windows); the first backup is now also pinned as `<file>.pre-gitconfig`, never pruned | [#267](https://github.com/J-MaFf/gitconfig/pull/267) |
 | [#252](https://github.com/J-MaFf/gitconfig/issues/252) | `git start` ignored an existing remote branch, let issues with the same title slug share a branch, and silently branched from `HEAD` | [#265](https://github.com/J-MaFf/gitconfig/pull/265) |
+| [#254](https://github.com/J-MaFf/gitconfig/issues/254) | PowerShell Ctrl-G widget never inserted anything: PSReadLine redirects a key handler's native stdout, so `git alias --out` saw no TTY and silently did nothing; now launched via `Start-Process -NoNewWindow`, and `--out` fails loudly without a TTY | [#269](https://github.com/J-MaFf/gitconfig/pull/269) |
 
 ### Open Issues
 
