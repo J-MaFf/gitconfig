@@ -86,6 +86,16 @@ Describe "Initialize-GitConfig.ps1" {
         BeforeAll {
             # Generate config for testing
             & $script:scriptPath -Force | Out-Null
+
+            # Initialize-GitConfig.ps1 writes {{REPO_PATH}} as the repo root with
+            # backslashes turned into forward slashes.
+            $script:expectedHelperPath = ($script:repoRoot -replace '\\', '/') + '/gitconfig_helper.py'
+
+            # Every path the generated config uses to reach the helper: the
+            # whitespace-delimited word that ends in gitconfig_helper.py.
+            function Get-HelperReference([string]$Content) {
+                [regex]::Matches($Content, '(?<=^|\s)[^\s"]*gitconfig_helper\.py(?=\s|$)') | ForEach-Object { $_.Value }
+            }
         }
 
         It "Should generate .gitconfig in home directory" {
@@ -100,13 +110,14 @@ Describe "Initialize-GitConfig.ps1" {
 
         It "Generated config should use forward slashes in paths" {
             $generatedContent = Get-Content $script:outputPath -Raw
-            # Git config requires forward slashes, not backslashes.
-            # The helper is now invoked via the py/python3/python loop as
-            # `exec "$p" <path>/gitconfig_helper.py`, so match the absolute
-            # path directly (same pattern as "should contain absolute paths").
-            if ($generatedContent -match '((?:[A-Za-z]:)?/[^\s"]*gitconfig_helper\.py)') {
-                $helperPath = $matches[1]
-                $helperPath | Should -Not -Match '\\'
+            # Git config requires forward slashes, not backslashes. Check every
+            # helper reference is the whole repo path in forward-slash form; a
+            # looser pattern also matched just "/gitconfig_helper.py" (#262).
+            $helperRefs = @(Get-HelperReference $generatedContent)
+            $helperRefs.Count | Should -BeGreaterThan 0
+            foreach ($ref in $helperRefs) {
+                $ref | Should -Not -Match '\\'
+                $ref | Should -BeExactly $script:expectedHelperPath
             }
         }
 
@@ -119,10 +130,12 @@ Describe "Initialize-GitConfig.ps1" {
         It "Generated config should contain absolute paths" {
             $generatedContent = Get-Content $script:outputPath -Raw
             # The helper is invoked as `exec "$p" <abs-path>/gitconfig_helper.py` (the
-            # py/python3/python loop), so assert an absolute path to it - placeholder
-            # substituted, not relative. Matches Unix (/path/to/gitconfig_helper.py)
-            # and Windows (C:/path/to/gitconfig_helper.py).
-            $generatedContent | Should -Match '(?:[A-Za-z]:)?/[^\s"]*gitconfig_helper\.py'
+            # py/python3/python loop), so assert each reference is the absolute path
+            # to this repo's helper - placeholder substituted, not relative (#262).
+            [System.IO.Path]::IsPathRooted($script:expectedHelperPath) | Should -BeTrue
+            $helperRefs = @(Get-HelperReference $generatedContent)
+            $helperRefs.Count | Should -BeGreaterThan 0
+            foreach ($ref in $helperRefs) { $ref | Should -BeExactly $script:expectedHelperPath }
         }
 
         It "Generated config should preserve [include] section" {

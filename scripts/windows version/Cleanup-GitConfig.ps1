@@ -40,8 +40,12 @@ NOTE: Requires administrator privileges
     exit 0
 }
 
-# Check if running as administrator - elevate if needed
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+# Check if running as administrator - elevate if needed. The check is a
+# function so the relaunch tests can stub it (tests/Backups.Tests.ps1).
+function Test-IsAdministrator {
+    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+$isAdmin = Test-IsAdministrator
 if (-not $isAdmin) {
     Write-Host "GitConfig Cleanup - Elevation Required" -ForegroundColor Yellow
     Write-Host "=====================================" -ForegroundColor Yellow
