@@ -154,6 +154,10 @@ Describe "Cleanup-GitConfig.ps1 (#233)" -Tag 'Unit' {
             $script:r.Output | Should -Match ([regex]::Escape("[OK] Backed up $_ to $($backups[0].Name)"))
         }
 
+        It "leaves no old-style Existing.* backups" {
+            Get-ChildItem -LiteralPath $script:sb.Home -Force -Filter "Existing.*" | Should -BeNullOrEmpty
+        }
+
         It "moves .gitconfig.local to a backup" {
             Join-Path $script:sb.Home ".gitconfig.local" | Should -Not -Exist
             (Get-Backup $script:sb ".gitconfig.local").Count | Should -Be 1

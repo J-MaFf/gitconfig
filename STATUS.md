@@ -34,7 +34,7 @@ Not yet checked on a real machine: the Ctrl-G widget under pwsh 7 and Windows Po
 
 | Issue | Description | PR |
 |-------|-------------|----|
-| [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Source-text tests replaced with behavioural tests in a sandboxed HOME (helper, updater, `Cleanup-GitConfig.ps1`); remaining helper source checks moved to [#294](https://github.com/J-MaFf/gitconfig/issues/294) | [#293](https://github.com/J-MaFf/gitconfig/pull/293), [#PRNUM](https://github.com/J-MaFf/gitconfig/pull/PRNUM) |
+| [#233](https://github.com/J-MaFf/gitconfig/issues/233) | Source-text tests replaced with behavioural tests in a sandboxed HOME (helper, updater, `Cleanup-GitConfig.ps1`); remaining helper source checks moved to [#294](https://github.com/J-MaFf/gitconfig/issues/294) | [#293](https://github.com/J-MaFf/gitconfig/pull/293), [#295](https://github.com/J-MaFf/gitconfig/pull/295) |
 | [#183](https://github.com/J-MaFf/gitconfig/issues/183) | Mac credential block lacked the empty helper reset line (multi-valued accumulation) | [#184](https://github.com/J-MaFf/gitconfig/pull/184) |
 | [#160](https://github.com/J-MaFf/gitconfig/issues/160) | Login task "No Python interpreter found" (WindowsApps alias stub) | [#161](https://github.com/J-MaFf/gitconfig/pull/161) |
 | [#163](https://github.com/J-MaFf/gitconfig/issues/163) | Non-ASCII em-dashes failing Encoding tests | [#164](https://github.com/J-MaFf/gitconfig/pull/164) |
