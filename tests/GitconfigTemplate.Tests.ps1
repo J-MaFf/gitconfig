@@ -100,4 +100,12 @@ Describe ".gitconfig.template simple aliases" -Tag 'Unit' {
         $line = $script:templateLines | Where-Object { $_ -match '^\s*alias\s*=' } | Select-Object -First 1
         $line | Should -Match 'print_aliases \\"\$@\\"'
     }
+
+    It "localconfig defaults to --edit and forwards arguments (#263)" {
+        # Bare 'git config --file X' exits 129 ("no action specified"). The
+        # behavioural check lives in tests/shared/test_gitconfig_helper.py.
+        $line = $script:templateLines | Where-Object { $_ -match '^\s*localconfig\s*=' } | Select-Object -First 1
+        $line | Should -Match '\[ \$# -eq 0 \] && set -- --edit'
+        $line | Should -Match 'git config --file ~/\.gitconfig\.local \\"\$@\\"'
+    }
 }

@@ -59,6 +59,30 @@ is_ignored() {
     done
 }
 
+@test "ignores nested secrets, not just ones at the repository root (#263)" {
+    # A pattern with a slash in the middle is anchored to the root, so these
+    # need a leading **/ (or no inner slash) to match in subdirectories.
+    for p in sub/.aws/credentials deep/er/.aws/credentials sub/.ssh/id_ed25519 \
+             sub/.env sub/id.pem sub/private.key sub/credentials.json; do
+        is_ignored "$p" || { echo "not ignored: $p"; return 1; }
+    done
+}
+
+@test "has no root-anchored patterns (a slash in the middle without **/) (#263)" {
+    run bash -c "grep -vE '^[[:space:]]*(#|$)' '$GITIGNORE_GLOBAL' | grep -vE '^\*\*/' | grep -E '^[^/]+/.+'"
+    [ -z "$output" ] || { echo "root-anchored: $output"; return 1; }
+}
+
+@test "a project's own .gitignore can re-include a public .pem or a .key (#263)" {
+    # *.pem and *.key stay broad on purpose; the documented escape hatch is a
+    # negation in the project's .gitignore, which outranks core.excludesfile.
+    printf '!ca-bundle.pem\n!deck.key\n' > "$SCRATCH/.gitignore"
+    if is_ignored ca-bundle.pem; then echo "still ignored: ca-bundle.pem"; return 1; fi
+    if is_ignored deck.key; then echo "still ignored: deck.key"; return 1; fi
+    is_ignored server.pem
+    is_ignored server.key
+}
+
 @test "does not ignore files projects legitimately commit" {
     for p in package-lock.json yarn.lock Gemfile.lock Cargo.lock poetry.lock \
              bin/run lib/util.py .vscode/settings.json .vscode/extensions.json \

@@ -601,26 +601,37 @@ checked out, e.g. `git reflog` (HEAD's history).
 
 ---
 
-#### Issue: "Symlinks aren't working"
+#### Issue: "Template changes aren't taking effect" or "Symlinks aren't working"
 
-**Symptoms**: Changes to `.gitconfig` aren't taking effect, or `gitconfig_helper.py` can't be found.
+**Symptoms**: A change to `.gitconfig.template` isn't showing up in `~/.gitconfig`, or `~/.gitignore_global` / `~/gitconfig_helper.py` is missing.
 
-**Verify symlinks**:
+`~/.gitconfig` is **not** a symlink. It is a regular file generated from
+`.gitconfig.template` and rewritten whenever the template changes, so put your own
+settings in `~/.gitconfig.local` (`git localconfig`), never in `~/.gitconfig`. Only
+`~/.gitignore_global` and `~/gitconfig_helper.py` are symlinks into the repo.
 
-```powershell
-# Check if symlinks exist
-cmd /c dir "$env:USERPROFILE\.gitconfig" /L
-cmd /c dir "$env:USERPROFILE\gitconfig_helper.py" /L
+**Pick up template changes**:
 
-# Should show "<SYMLINK>" in the output
+```bash
+git selfupdate   # pull this repo and regenerate ~/.gitconfig from the template
 ```
 
-**Recreate symlinks**:
+**Verify the symlinks**:
 
 ```powershell
-# Run setup script
-cd ~\Documents\Scripts\gitconfig
-& ".\scripts\windows version\install.ps1" -Force
+cmd /c dir "$env:USERPROFILE\.gitignore_global" /AL
+cmd /c dir "$env:USERPROFILE\gitconfig_helper.py" /AL
+
+# Each should list the file as <SYMLINK> pointing into the repo
+```
+
+**Recreate them** (symlinks need admin rights: run `Initialize-Symlinks.ps1` from an
+elevated PowerShell, or `install.ps1`, which elevates itself):
+
+```powershell
+cd "$HOME\Documents\Scripts\gitconfig"
+& ".\scripts\windows version\Initialize-Symlinks.ps1" -Force   # symlinks only
+& ".\scripts\windows version\install.ps1" -Force                # or the full setup
 ```
 
 ---
@@ -631,15 +642,15 @@ cd ~\Documents\Scripts\gitconfig
 
 **Solution**:
 
-```bash
-# Verify setup is complete
-git config --get-all alias.alias
+```powershell
+# Verify ~/.gitconfig was generated (prints the alias definition)
+git config --global --get alias.alias
 
-# Check if gitconfig_helper.py is in path
-Get-Command gitconfig_helper.py
+# The aliases run gitconfig_helper.py from the repo, not from PATH; check it is there
+Test-Path "$HOME\Documents\Scripts\gitconfig\gitconfig_helper.py"
 
-# Re-run setup
-& ".\scripts\windows version\install.ps1" -Force
+# Regenerate ~/.gitconfig from the template
+git selfupdate
 ```
 
 ---
@@ -651,10 +662,10 @@ Get-Command gitconfig_helper.py
 **Check task status**:
 
 ```powershell
-Get-ScheduledTask -TaskName "GitConfig Pull at Login" | Select-Object State, LastTaskResult
+Get-ScheduledTask -TaskName "GitConfig Pull at Login" | Select-Object State
+Get-ScheduledTaskInfo -TaskName "GitConfig Pull at Login" | Select-Object LastTaskResult
 
-# Should show State: Enabled
-# LastTaskResult: 0 (success)
+# State should be Ready (not Disabled); LastTaskResult 0 means the last run succeeded
 ```
 
 **View task history**:
@@ -672,12 +683,21 @@ Start-ScheduledTask -TaskName "GitConfig Pull at Login"
 Get-Content "~\Documents\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 10
 ```
 
-**Re-register task if needed**:
+**Re-register task if needed** (for example after moving the repo), from an elevated
+PowerShell, as `install.ps1` does:
 
 ```powershell
-& ".\scripts\windows version\Cleanup-GitConfig.ps1" -Force
-& ".\scripts\windows version\install.ps1" -Force
+cd "$HOME\Documents\Scripts\gitconfig"
+& ".\scripts\windows version\Register-LoginTask.ps1" -Force
 ```
+
+This only replaces the scheduled task. Don't use `Cleanup-GitConfig.ps1` for this: it
+uninstalls everything, including moving your `~/.gitconfig.local` aside.
+
+The macOS (launchd) and Linux (cron) jobs run the same sync; `git selfupdate` runs it
+by hand on any OS. To re-register the job, re-run `bash scripts/unix/install.sh` and
+answer `y` when it asks to replace the job and `n` when it asks to overwrite
+`.gitconfig.local` (`--force` would say yes to both).
 
 ---
 
@@ -687,15 +707,15 @@ Get-Content "~\Documents\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 10
 
 **Solution**:
 
-```bash
-# Verify Python is installed
-python --version
+```powershell
+# Verify Python is installed (the aliases try py, then python3, then python)
+py --version
 
-# Check gitconfig_helper.py syntax
-python "~\Documents\Scripts\gitconfig\gitconfig_helper.py"
+# Check gitconfig_helper.py compiles
+py -m py_compile "$HOME\Documents\Scripts\gitconfig\gitconfig_helper.py"
 
-# Reinstall rich library (auto-installs but you can force it)
-pip install --upgrade rich
+# Reinstall rich (setup and git selfupdate install it, but you can force it)
+py -m pip install --upgrade rich
 
 # Re-run setup
 & ".\scripts\windows version\install.ps1" -Force
@@ -719,33 +739,15 @@ The setup scripts automatically request admin elevation. If you still get permis
 
 ---
 
-#### Issue: "Merge conflicts with .gitconfig.local"
+#### Issue: "Where does .gitconfig.local live?"
 
-**Symptoms**: Getting merge conflicts when pulling from main.
-
-**Solution**:
-
-```bash
-# .gitconfig.local is machine-specific and shouldn't be in version control
-# It should be in .gitignore
-
-# Check if it's tracked
-git ls-files | grep gitconfig.local
-
-# If tracked, remove it
-git rm --cached .gitconfig.local
-
-# Verify .gitignore has it
-cat .gitignore | grep gitconfig.local
-
-# If not there, add it
-echo ".gitconfig.local" >> .gitignore
-
-# Commit the fix
-git add .gitignore
-git commit -m "Remove .gitconfig.local from version control"
-git push
-```
+`~/.gitconfig.local` lives in your home directory, not in this repository, so pulls
+never touch it, and the repo's `.gitignore` lists `.gitconfig.local` in case a copy
+ends up in the working tree. On Windows, `install.ps1` creates it once and then keeps
+it, even with `-Force`. On macOS/Linux, `install.sh` asks before overwriting it, and
+`install.sh --force` regenerates it. To regenerate it on purpose, run
+`Initialize-LocalConfig.ps1 -Force` or `bash scripts/unix/initialize-local-config.sh --force`.
+Every regeneration backs up the old file first. Edit it with `git localconfig`.
 
 ---
 
@@ -753,26 +755,25 @@ git push
 
 **Complete setup verification**:
 
-```bash
-# 1. Check symlinks
-cmd /c dir "$env:USERPROFILE\.gitconfig" /L
-cmd /c dir "$env:USERPROFILE\gitconfig_helper.py" /L
+```powershell
+# 1. Check symlinks (~/.gitconfig is a generated file, not a symlink)
+cmd /c dir "$env:USERPROFILE\.gitignore_global" /AL
+cmd /c dir "$env:USERPROFILE\gitconfig_helper.py" /AL
 
 # 2. Test git config
-git config --list | grep -E "include|alias"
+git config --list | Select-String "include|alias"
 
 # 3. Test aliases
 git alias
 
-# 4. Test branch operations
-git branches
-git cleanup
+# 4. Test branch operations (read-only)
+git branch -vv
 
 # 5. Check scheduled task
 Get-ScheduledTask -TaskName "GitConfig Pull at Login" | Select-Object State
 
 # 6. View logs
-Get-Content "~\Documents\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 5
+Get-Content "$HOME\Documents\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 5
 ```
 
 **If everything shows green** ✅ - Your setup is working correctly!
@@ -829,5 +830,5 @@ Get-Content "~\Documents\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 10
 
 ---
 
-**Last Updated**: December 18, 2025
+**Last Updated**: October 11, 2026
 **Repository**: <https://github.com/J-MaFf/gitconfig>

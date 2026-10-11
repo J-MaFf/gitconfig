@@ -63,34 +63,31 @@ bd close <id>         # Complete work
 
 ### Rules
 
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- Use `bd` for durable, cross-session task tracking in this repo — not ad-hoc markdown TODO lists. The **GitHub Issue stays the shippable unit**; bd is the execution/memory layer beneath it.
+- Run `bd prime` for detailed command reference and the session-close protocol
+- Use `bd remember` for **repo-scoped** knowledge that should travel with this repo; the global `~/.claude` memory (and `MEMORY.md`) remains the home for cross-repo / user-level context
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on the git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 
-## Session Completion
+## Session Close (reconciled with the git-policies skill)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+> This section overrides bd's default "auto-push to main" wording to match this
+> project's git workflow. **Merges to `main` stay human-gated via PR — never
+> auto-push or auto-merge to `main`.**
 
-**MANDATORY WORKFLOW:**
+When ending a work session:
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+1. **File issues for remaining work** — `bd create` for fine-grained follow-ups; open a GitHub issue for anything shippable
+2. **Run quality gates** (if code changed) — tests, linters, builds
+3. **Update issue status** — `bd close` finished work, update in-progress items
+4. **Make work durable WITHOUT merging:**
    ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
+   git commit -S ...                    # signed, on the FEATURE branch
+   git push -u origin <feature-branch>  # push the branch, never main
+   bd dolt push                         # sync the bead graph (refs/dolt/data)
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+5. **Open/update the PR** (`Fixes #N`) and **stop at the merge gate** — a human approves the squash-merge
+6. **Clean up** — clear stashes, prune merged branches (`git cleanup`)
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+Note: editing this block makes `bd setup claude --check` report it as "stale" — that is expected; do **not** run `bd setup claude` to clear it (doing so reverts this reconciliation).
 <!-- END BEADS INTEGRATION -->

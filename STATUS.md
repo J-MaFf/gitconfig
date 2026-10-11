@@ -60,6 +60,7 @@ Four follow-up fixes from the #198 adversarial review landed: [#203](https://git
 | [#268](https://github.com/J-MaFf/gitconfig/issues/268) | More than 5 backups of one file in the same second reused a pruned `<stamp>` name, which sorted as oldest and was pruned at once (Unix + Windows); the next name is now one past the highest taken | [#270](https://github.com/J-MaFf/gitconfig/pull/270) |
 | [#260](https://github.com/J-MaFf/gitconfig/issues/260) | `git skill diff` missed staged/untracked drift; a skill-audit failure read as drift (or as "nothing to diff"); `git issues --all --local` printed "No open issues" and exited 0 when every repo failed; `git issues --all --web` dropped `--mine`/`--label` | [#271](https://github.com/J-MaFf/gitconfig/pull/271) |
 | [#261](https://github.com/J-MaFf/gitconfig/issues/261) | Helper minor bugs: alias-browser ctrl+left/right swallowed by the search box, clipboard copy could hang on a forking `xclip`/`wl-copy`, detached HEAD labelled `HEAD`, a UTF-8 BOM hid a `SKILL.md` description, and `deps.py`'s Python < 3.11 fallback broke on extras/markers | [#272](https://github.com/J-MaFf/gitconfig/pull/272) |
+| [#263](https://github.com/J-MaFf/gitconfig/issues/263) | Docs/config inaccuracies: `git localconfig` with no args exited 129 (now `--edit`), root-anchored `.aws/credentials` ignore (now `**/`), undocumented broad `*.pem`/`*.key`, PS 5.1 `~` clone path, `selfupdate`/`allowed_signers` claim, stale WORKFLOW troubleshooting, AGENTS.md session close | [#273](https://github.com/J-MaFf/gitconfig/pull/273) |
 
 ### Open Issues
 

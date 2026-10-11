@@ -28,10 +28,12 @@ bash scripts/unix/install.sh --force
 **Requirements:** PowerShell 5.1+, Administrator privileges, Python 3
 
 ```powershell
-git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
-cd ~/Documents/Scripts/gitconfig
+git clone https://github.com/J-MaFf/gitconfig.git "$HOME\Documents\Scripts\gitconfig"
+cd "$HOME\Documents\Scripts\gitconfig"
 & ".\scripts\windows version\install.ps1" -Force
 ```
+
+Use `$HOME`, not `~`, in the clone command: PowerShell before 7.5 doesn't expand `~` for native programs such as `git`, so the clone would land in a folder literally named `~`.
 
 ### Linux
 
@@ -182,7 +184,8 @@ git issues --all   # Open issues across every repo you own (alias: -a; --local: 
 **Maintenance**
 
 ```bash
-git localconfig          # Edit machine-specific git config (~/.gitconfig.local)
+git localconfig          # Edit machine-specific git config (~/.gitconfig.local) in your editor
+git localconfig <args>   # Run git config on that file, e.g. git localconfig user.email you@example.com
 git selfupdate           # Pull this repo and reinstall ~/.gitconfig from the template
 ```
 
@@ -241,14 +244,22 @@ browser, so the cause is visible. If a crashed TUI ever leaves the terminal in a
 weird state (the browser looks broken or the keybinding stops responding), run
 `reset` or open a fresh tab to restore it.
 
-**Aliases not working:** Verify the symlink exists and `.gitconfig` includes the helper path.
+**Aliases not working:** The aliases live in the generated `~/.gitconfig` (not a symlink)
+and run `gitconfig_helper.py` from this repo. Check that `git config --global --get alias.alias`
+prints a definition; if not, run `git selfupdate` or re-run install to regenerate `~/.gitconfig`.
 
 **`git log --show-signature` says "No signature" on a signed commit:** Install writes a
 `~/.ssh/allowed_signers` entry for your signing key and points
 `gpg.ssh.allowedSignersFile` at it (in `~/.gitconfig.local`) so git can verify SSH
-signatures locally. If you signed before this was set up, re-run install (or
-`git selfupdate`) to regenerate it. GitHub verifies signatures independently, so commits
-show as Verified there regardless.
+signatures locally. Only the local-config step of install writes these; `git selfupdate`
+and the auto-update job don't touch either file. If one is missing (say you installed
+before this existed, or set up signing later), re-run that step:
+on Windows, `& ".\scripts\windows version\Initialize-LocalConfig.ps1"` adds the
+`allowed_signers` entry but keeps your existing `~/.gitconfig.local`, so if that file
+has no `allowedSignersFile` line, add `-Force` to regenerate it (the old file is backed
+up first); on macOS/Linux, `bash scripts/unix/initialize-local-config.sh --force`
+regenerates `~/.gitconfig.local` (backing up the old one) and adds the entry.
+GitHub verifies signatures independently, so commits show as Verified there regardless.
 
 ## License
 
