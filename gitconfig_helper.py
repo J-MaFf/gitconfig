@@ -1797,10 +1797,12 @@ def update_all_main(force=False):
     cleanup). Repos with a dirty working tree are NOT switched -- instead a
     triage report (branch position vs origin/main, last-commit age, working-tree
     breakdown) is printed so the user can judge stale-vs-active themselves. The working tree is never
-    mutated.
+    mutated. A linked worktree (its `.git` is a file) is reported as Skipped
+    (worktree) and never touched, since its default branch is checked out in
+    the primary worktree.
 
     Prints a per-repo header and a final summary table classifying each repo as
-    OK, Skipped (dirty), or Failed. Returns 0 if no repo failed (skips don't
+    OK, Skipped (dirty), Skipped (worktree), or Failed. Returns 0 if no repo failed (skips don't
     count as failures), 1 if any repo failed or none were found.
     """
     console = Console()
@@ -1831,26 +1833,35 @@ def update_all_main(force=False):
         )
         return 1
 
-    results = []  # (repo_name, outcome) where outcome in {"ok", "skipped", "failed"}
+    results = []  # (repo_name, outcome): "ok", "skipped", "worktree" or "failed"
     for repo in repos:
         console.print(f"\n[bold]-- {escape(repo)} --[/bold]")
         try:
             os.chdir(os.path.join(root, repo))
-            # Detect a dirty working tree up front (no fetch needed for status).
-            # If dirty, skip the switch and print a triage report instead of
-            # touching the working tree; otherwise hand off to switch_to_main.
-            status_result = run_git("status", "--porcelain")
-            if status_result.returncode == 0 and status_result.stdout.strip():
-                console.print("[yellow]SKIPPED: uncommitted changes[/yellow]")
-                # Fetch so the ahead/behind report reflects the current remote.
-                fetch_args = _fetch_args(_default_branch())
-                if fetch_args:
-                    run_git(*fetch_args)
-                for line in _dirty_triage_lines(_default_branch()):
-                    console.print(line)
-                outcome = "skipped"
+            if _is_linked_worktree():
+                # Its default branch is checked out in the primary worktree, so
+                # checkout here can only fail. Leave it untouched.
+                console.print(
+                    "[yellow]SKIPPED: linked worktree[/yellow] "
+                    "(update its primary worktree instead)"
+                )
+                outcome = "worktree"
             else:
-                outcome = "ok" if switch_to_main() == 0 else "failed"
+                # Detect a dirty working tree up front (no fetch needed for status).
+                # If dirty, skip the switch and print a triage report instead of
+                # touching the working tree; otherwise hand off to switch_to_main.
+                status_result = run_git("status", "--porcelain")
+                if status_result.returncode == 0 and status_result.stdout.strip():
+                    console.print("[yellow]SKIPPED: uncommitted changes[/yellow]")
+                    # Fetch so the ahead/behind report reflects the current remote.
+                    fetch_args = _fetch_args(_default_branch())
+                    if fetch_args:
+                        run_git(*fetch_args)
+                    for line in _dirty_triage_lines(_default_branch()):
+                        console.print(line)
+                    outcome = "skipped"
+                else:
+                    outcome = "ok" if switch_to_main() == 0 else "failed"
         except Exception as e:
             # Don't let one repo abort the whole sweep
             console.print(f"[red]Error updating '{escape(repo)}': {escape(str(e))}[/red]")
@@ -1869,13 +1880,14 @@ def update_all_main(force=False):
     status_label = {
         "ok": "[green]OK[/green]",
         "skipped": "[yellow]Skipped (dirty)[/yellow]",
+        "worktree": "[yellow]Skipped (worktree)[/yellow]",
         "failed": "[red]Failed[/red]",
     }
     for repo, outcome in results:
         table.add_row(escape(repo), status_label[outcome])
 
     ok_count = sum(1 for _, o in results if o == "ok")
-    skipped_count = sum(1 for _, o in results if o == "skipped")
+    skipped_count = sum(1 for _, o in results if o in ("skipped", "worktree"))
     failed_count = sum(1 for _, o in results if o == "failed")
     console.print()
     console.print(table)

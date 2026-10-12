@@ -2344,3 +2344,51 @@ class TestPrintAliasesSelectionMode:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# --------------------------------------------------------------------------
+# git main --all: linked worktrees (#299)
+# --------------------------------------------------------------------------
+
+class TestUpdateAllMainWorktrees:
+    """`git main -a` tried to check out main in a linked worktree that lives
+    directly under the Scripts root (e.g. claude-skills-archive) and reported
+    it Failed, because main is checked out in the primary worktree."""
+
+    @pytest.fixture
+    def sweep(self, helper, git_env, monkeypatch):
+        root = git_env / "scripts"
+        primary = root / "primary"
+        primary.mkdir(parents=True)
+        _git(primary, "init", "-q")
+        _commit(primary, "a.txt", "first")
+        _git(primary, "worktree", "add", "-q", "-b", "feature", str(root / "wt"))
+        calls = []
+
+        def fake_switch():
+            calls.append(os.path.basename(os.getcwd()))
+            return 0
+
+        monkeypatch.setattr(
+            helper, "_scripts_root_repos", lambda: (str(root), ["primary", "wt"])
+        )
+        monkeypatch.setattr(helper, "_unsafe_scripts_root", lambda r: None)
+        monkeypatch.setattr(helper, "switch_to_main", fake_switch)
+        return root, calls
+
+    def test_worktree_is_skipped_not_switched(self, helper, sweep, capsys):
+        root, calls = sweep
+        assert helper.update_all_main() == 0
+        out = capsys.readouterr().out
+        assert calls == ["primary"]
+        assert "Skipped (worktree)" in out
+        assert "Failed" not in out
+
+    def test_dirty_worktree_reports_worktree_not_dirty(self, helper, sweep, capsys):
+        root, calls = sweep
+        (root / "wt" / "scratch.txt").write_text("wip\n")
+        assert helper.update_all_main() == 0
+        out = capsys.readouterr().out
+        assert calls == ["primary"]
+        assert "Skipped (worktree)" in out
+        assert "Skipped (dirty)" not in out
