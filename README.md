@@ -192,6 +192,8 @@ git main --all     # Run the above for every git repo directly under the Scripts
 
 The Scripts root is the folder that holds this repo's clone (`~/Documents/Scripts` on a standard install). To point it somewhere else, set it in your machine-local config: `git localconfig gitconfig.scriptsRoot ~/code`. `git main --all` won't sweep your home folder, its parent (`/home`, `/Users`, `C:\Users`) or a filesystem root. It stops with exit 1 and asks you to set `gitconfig.scriptsRoot`, or to pass `--force` if you really mean it. This guards against a clone at `~/gitconfig`, which would otherwise make the home folder the root.
 
+A linked worktree directly under the Scripts root (for example a `git worktree add ../repo-feature` sibling) is listed as **Skipped (worktree)** and left untouched; update it from its primary worktree.
+
 `git main` and `git cleanup` work from any worktree. git won't check a branch out in two worktrees, so when the default branch is checked out in another one, your current worktree stays where it is: the default branch is fast-forwarded in its own worktree (only if that one is clean) and branches are cleaned up from there. If your current worktree's own branch is gone upstream, you get a `git worktree remove <path>` hint. Repos with no remote skip the fetch and the fast-forward.
 
 The Python-backed aliases (`git alias`, `start`, `cleanup`, `main`, `skill`, `issues`) run nothing when given `-h`/`--help` (they print a usage line) or an argument they don't recognise (usage on stderr, exit 2). There is no `--dry-run`.
