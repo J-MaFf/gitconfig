@@ -288,7 +288,7 @@ case "$CREDENTIAL_HELPER_KIND" in
     osxkeychain)
         CONFIG_CONTENT+="
 [credential]
-	# Lets unattended HTTPS pulls of private repos (e.g. the claude-skills
+	# Lets unattended HTTPS pulls of private repos (e.g. the agent-skills
 	# launchd sync) authenticate from the macOS login keychain — no prompt and
 	# no 1Password dependency. Store a token once with:
 	#   git credential-osxkeychain store

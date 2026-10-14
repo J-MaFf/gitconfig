@@ -47,7 +47,7 @@
 	#   status    this machine's sync state (last background sync + local changes)
 	#   publish   publish new/edited skills via a PR (its main is branch-protected)
 	# list/sync/status render in Python (rich); publish delegates to the per-OS
-	# wrapper script in ~/.claude/skills/scripts (kept in the claude-skills repo so
+	# wrapper script in ~/.claude/skills/scripts (kept in the agent-skills repo so
 	# tweaks sync without touching this alias). sync/status fall back to their
 	# wrappers there if the rich view fails. `git skill` with no argument prints usage.
 	# Runs from any directory.
