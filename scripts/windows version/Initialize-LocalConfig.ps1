@@ -324,7 +324,7 @@ $signingSection
 $editorLine
 
 [credential]
-	# HTTPS auth for unattended pulls of private repos (e.g. the claude-skills
+	# HTTPS auth for unattended pulls of private repos (e.g. the agent-skills
 	# scheduled-task sync). Git Credential Manager stores the token in the
 	# per-user Windows Credential Manager, so the scheduled task never prompts.
 	helper = manager

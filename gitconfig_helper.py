@@ -641,29 +641,29 @@ def _skill_last_updated(commit_dates, name, skill_md_path):
         return "unknown"
 
 
-# The claude-skills repo, cloned to ~/.claude/skills, supplies both the skills
+# The agent-skills repo, cloned to ~/.claude/skills, supplies both the skills
 # themselves and the wrapper scripts that `git skill sync/status/publish` drive.
-# It is a SEPARATE repo (https://github.com/J-MaFf/claude-skills); gitconfig only
+# It is a SEPARATE repo (https://github.com/J-MaFf/agent-skills); gitconfig only
 # provides the `git skill` UX layer on top of it. So every `git skill` subcommand
 # depends on that repo being installed there.
 SKILLS_DIR = os.path.join(os.path.expanduser("~"), ".claude", "skills")
 
 # Log written by the scheduled background syncs (claude-sync wrappers from the
-# claude-skills setup scripts). Read-only here.
+# agent-skills setup scripts). Read-only here.
 SYNC_LOG = os.path.join(os.path.expanduser("~"), ".claude", "skills-sync.log")
 
 
 def _require_skills_dir():
     """Return True if ~/.claude/skills exists, else print an actionable pointer to
-    the claude-skills repo and return False."""
+    the agent-skills repo and return False."""
     if os.path.isdir(SKILLS_DIR):
         return True
     Console(stderr=True).print(
-        f"[red]git skill: {escape(SKILLS_DIR)} not found - the claude-skills repo isn't "
+        f"[red]git skill: {escape(SKILLS_DIR)} not found - the agent-skills repo isn't "
         f"installed on this machine.[/red]\n"
         f"[yellow]It's a separate repo that supplies the skills and the wrapper "
         f"scripts these aliases drive. Install it:[/yellow]\n"
-        f"  git clone https://github.com/J-MaFf/claude-skills.git ~/.claude/skills\n"
+        f"  git clone https://github.com/J-MaFf/agent-skills.git ~/.claude/skills\n"
         f"  # then run its per-OS setup, e.g.:  sh ~/.claude/skills/scripts/setup-macos.sh"
     )
     return False
@@ -713,7 +713,7 @@ def list_skills():
 
 
 # Subcommands that delegate to the per-OS wrapper scripts shipped in the
-# claude-skills repo (~/.claude/skills/scripts). Maps subcommand -> script base
+# agent-skills repo (~/.claude/skills/scripts). Maps subcommand -> script base
 # name (the .ps1 and .sh share the base). Keeping these wrappers in that repo is
 # intentional so tweaks sync without touching this helper.
 SKILL_SCRIPTS = {
@@ -742,7 +742,7 @@ PS7_SCRIPTS = {"publish-skill"}
 
 
 def _run_skill_script(base):
-    """Run a claude-skills wrapper script (~/.claude/skills/scripts/<base>.{ps1,sh}).
+    """Run an agent-skills wrapper script (~/.claude/skills/scripts/<base>.{ps1,sh}).
 
     Picks the per-OS variant: PowerShell on Windows, bash elsewhere. On Windows,
     prefers PowerShell 7 (pwsh) and falls back to Windows PowerShell only for
@@ -851,7 +851,7 @@ def _run_audit(extra_args):
 def _audit_summary(no_fetch):
     """Run skill-audit --summary --strict; return (lines, actionable, error) or None.
 
-    skill-audit (in the claude-skills repo) is the single source of truth for
+    skill-audit (in the agent-skills repo) is the single source of truth for
     local skill state; --strict exits 1 when something needs publishing. Its
     summary output is the counts line, sometimes preceded by an ahead/behind
     line. error is None unless the audit itself failed (see
@@ -997,7 +997,7 @@ def _render_repo_dirt(console):
     """Report uncommitted non-skill changes in the skills repo. True if any.
 
     Named with its consequence: this dirt is what makes `git main --all` print
-    "Skipped (dirty)" for claude-skills, which is otherwise invisible from
+    "Skipped (dirty)" for the skills repo, which is otherwise invisible from
     here - the skill counts stay green and the repo quietly stops updating.
     (The scheduled sync's `git pull --ff-only` doesn't skip dirty repos; it
     fails only when an incoming commit touches a dirty file.)
@@ -1157,7 +1157,7 @@ def skill_sync():
 def _skill_sync_or_status(sub):
     """Run the rich sync/status view; fall back to the wrapper script if it breaks.
 
-    The wrappers in claude-skills remain fully functional for direct use, so any
+    The wrappers in agent-skills remain fully functional for direct use, so any
     failure in the Python view (odd log encoding, audit hiccup) degrades to the
     old plain-text output instead of leaving the user with a stack trace.
     """
@@ -1286,7 +1286,7 @@ def skill(args):
       publish   Publish new/edited skills via a PR with auto-merge.
 
     list/sync/status/diff render here in Python (rich); publish delegates to
-    the per-OS wrapper script shipped in the claude-skills repo (see
+    the per-OS wrapper script shipped in the agent-skills repo (see
     SKILL_SCRIPTS). sync/status fall back to their wrappers if the rich view
     fails.
     """
@@ -1308,7 +1308,7 @@ def skill(args):
         rc = _check_args(args[1:], f"git skill {sub}")
     if rc is not None:
         return rc
-    # All real subcommands need the claude-skills repo at ~/.claude/skills.
+    # All real subcommands need the agent-skills repo at ~/.claude/skills.
     if not _require_skills_dir():
         return 1
     if sub == "list":

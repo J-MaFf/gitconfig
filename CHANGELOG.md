@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **References follow the `claude-skills` → `agent-skills` repo rename** ([#301](https://github.com/J-MaFf/gitconfig/issues/301)):
+  the `git skill` not-found message now gives `git clone https://github.com/J-MaFf/agent-skills.git ~/.claude/skills`, and comments and docstrings name the `agent-skills` repo (J-MaFf/agent-skills#316). The old URL still redirects, and the `~/.claude/skills` path is unchanged.
+
 ### Added
 - merge-gate caller (`.github/workflows/merge-gate.yml`): the required check that keeps the claude-sandbox App from merging its own PRs; logic in the reusable J-MaFf/.github merge-gate.yml.
 - `.github/workflows/test.yml`: a CI test matrix for every pull request and push to `main`. On GitHub-hosted runners: `windows-latest` runs the Pester unit suite (`tests/run-tests.ps1`) under pwsh 7 and under Windows PowerShell 5.1 (the host the login task and an elevated `install.ps1` use), plus a third job with `-IncludeIntegration` (safe there, since the runner VM is thrown away; non-blocking until two failing integration tests are fixed); `ubuntu-latest` and `macos-latest` run the bats suites and the pytest suite in `tests/shared/`, with macOS using the system `/bin/bash` 3.2. A `ps-lint` job runs the shared `J-MaFf/.github` PSScriptAnalyzer workflow on the self-hosted runner, skipped for pull requests from forks so fork code never reaches that machine. Each job is capped at 20 minutes. Covers the Pester workflow #221 asked for ([#227](https://github.com/J-MaFf/gitconfig/issues/227)).

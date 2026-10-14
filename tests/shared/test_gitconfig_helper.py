@@ -315,7 +315,7 @@ class TestGetGitAliases:
 # --------------------------------------------------------------------------
 
 class TestSkillCrossRepoGuard:
-    """`git skill` depends on the separate claude-skills repo at ~/.claude/skills.
+    """`git skill` depends on the separate agent-skills repo at ~/.claude/skills.
     The guard must allow help/usage and unknown-subcommand handling without it,
     but block the real subcommands with an actionable pointer when it's missing."""
 
@@ -1083,7 +1083,7 @@ class TestSkillDiffWithStubbedAudit:
 
 class TestSkillDispatch:
     """`git skill <sub>` routing; list/diff/sync/status render in Python and
-    publish runs the claude-skills wrapper script."""
+    publish runs the agent-skills wrapper script."""
 
     @pytest.fixture
     def routed(self, helper, tmp_path, monkeypatch):
