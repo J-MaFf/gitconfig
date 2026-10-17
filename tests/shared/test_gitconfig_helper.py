@@ -15,6 +15,7 @@
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -2711,9 +2712,13 @@ class TestAliasBrowserLaunch:
         assert helper.print_aliases() == 0
         out, err = capsys.readouterr()
         assert "Git Aliases" in out
-        assert "is not installed for" in err
-        assert sys.executable in err
-        assert "git alias --plain" in err
+        # Rich styles the note and wraps it to the terminal width (narrow on CI
+        # runners, with the long interpreter path on its own line), so compare
+        # the text with ANSI codes stripped and whitespace collapsed.
+        text = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", err).split())
+        assert "is not installed for" in text
+        assert sys.executable in text
+        assert "git alias --plain" in text
 
     def test_fallback_note_stays_quiet_when_stderr_is_not_a_tty(self, helper, monkeypatch, capsys):
         self._block_textual(monkeypatch)
