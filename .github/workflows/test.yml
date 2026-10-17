@@ -175,7 +175,7 @@ jobs:
             brew install bats-core
           else
             sudo apt-get update -qq
-            sudo apt-get install -y -qq bats
+            sudo apt-get install -y -qq bats zsh
           fi
           bats --version
 

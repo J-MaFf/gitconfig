@@ -463,9 +463,7 @@ def cleanup_branches(force=False, update=True):
 CATEGORY_ORDER = ["Inspect", "Commit", "Branch & Sync", "GitHub", "Maintenance", "Claude Skills", "Other"]
 
 # name -> (category, description). Drives both the static grouped table and the
-# interactive browser. Keep each name and its description on a single source
-# line; the Pester suite greps this source for substrings such as
-# "alias.*List all git aliases".
+# interactive browser.
 ALIAS_METADATA = {
     # Inspect
     "alias": ("Inspect", "List all git aliases in a categorized, searchable table"),
@@ -508,9 +506,6 @@ def get_git_aliases():
     anything else is shown with a preview of its command under "Other". The
     result is sorted by category (per CATEGORY_ORDER) then by alias name.
     """
-    # Exposed under this name because the Pester suite greps for it.
-    alias_descriptions = ALIAS_METADATA
-
     try:
         result = run_git("config", "--get-regexp", "alias", check=True)
     except subprocess.CalledProcessError:
@@ -527,8 +522,8 @@ def get_git_aliases():
         alias_name = match.group(1)
         alias_value = match.group(2)
 
-        if alias_name in alias_descriptions:
-            category, description = alias_descriptions[alias_name]
+        if alias_name in ALIAS_METADATA:
+            category, description = ALIAS_METADATA[alias_name]
         elif alias_value.startswith("!"):
             # Shell command: show a cleaned-up, truncated preview
             command = alias_value[1:]
@@ -1434,13 +1429,7 @@ def start_branch(issue):
         console.print("[red]Error: Not in a git repository[/red]")
         return 1
 
-    view = subprocess.run(
-        ["gh", "issue", "view", number, "--json", "title,labels"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    view = _run_gh("issue", "view", number, "--json", "title,labels")
     if view.returncode != 0:
         console.print(f"[red]Error: could not load issue #{number}[/red]")
         _print_ext(console, view.stderr.strip(), "red")
