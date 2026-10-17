@@ -304,6 +304,29 @@ class TestGetGitAliases:
         # Inspect ("s") must come before Other ("zzz").
         assert aliases[0][0] == "s"
 
+    def test_curated_aliases_keep_their_categories(self, helper, monkeypatch):
+        # The table and the browser both read (name, description, category)
+        # tuples. Category order is CATEGORY_ORDER, not the order git prints.
+        lines = "".join(
+            f"alias.{name} placeholder\n"
+            for name in ("skill", "pr", "pushf", "amend", "s")
+        )
+        self._patch_git_output(helper, monkeypatch, lines)
+        aliases = helper.get_git_aliases()
+        assert [name for name, _, _ in aliases] == ["s", "amend", "pushf", "pr", "skill"]
+        by_name = {name: (description, category) for name, description, category in aliases}
+        expected = {
+            "s": "Inspect",
+            "amend": "Commit",
+            "pushf": "Branch & Sync",
+            "pr": "GitHub",
+            "skill": "Claude Skills",
+        }
+        for name, category in expected.items():
+            description, got = by_name[name]
+            assert got == category
+            assert description == helper.ALIAS_METADATA[name][1]
+
     def test_empty_config_returns_empty_list(self, helper, monkeypatch):
         # `git config --get-regexp alias` exits non-zero when no aliases exist.
         self._patch_git_output(helper, monkeypatch, "", returncode=1)
@@ -1413,7 +1436,11 @@ class TestSwitchToMain:
         before = _git(repo, "rev-parse", "HEAD")
         assert helper.switch_to_main() == 1
         assert _git(repo, "rev-parse", "HEAD") == before  # no merge commit
-        assert "1 commit(s)" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "Could not fast-forward" in out
+        assert "can't be fast-forwarded" in out
+        assert "1 commit(s)" in out
+        assert "[red]" not in out and "[yellow]" not in out
 
     def test_follows_origin_head_not_init_default_branch(self, helper, repo, tmp_path):
         # The remote's default is "trunk"; init.defaultBranch says "main".
@@ -1491,6 +1518,32 @@ class TestSwitchToMain:
         (repo / "[slug].tsx").write_text("x\n")
         assert helper.switch_to_main() == 1
         assert "[slug].tsx" in capsys.readouterr().out
+
+    def test_success_names_each_step_without_raw_markup(self, helper, repo, capsys):
+        _git(repo, "switch", "-q", "-c", "feature")
+        assert helper.switch_to_main() == 0
+        out = capsys.readouterr().out
+        assert "Fetching updates from remote..." in out
+        assert "OK Fetch complete" in out
+        assert "Switching from 'feature' to 'main'..." in out
+        assert "OK Switched to main" in out
+        assert "[cyan]" not in out and "[green]" not in out
+
+    def test_uncommitted_changes_are_named_without_raw_markup(self, helper, repo, capsys):
+        (repo / "wip.txt").write_text("x\n")
+        assert helper.switch_to_main() == 1
+        out = capsys.readouterr().out
+        assert "Uncommitted changes detected" in out
+        assert "commit or stash" in out
+        assert "[red]" not in out and "[yellow]" not in out
+
+    def test_fetch_failure_is_named_without_raw_markup(self, helper, repo, tmp_path, capsys):
+        _git(repo, "remote", "set-url", "origin", str(tmp_path / "missing.git"))
+        assert helper.switch_to_main() == 1
+        out = capsys.readouterr().out
+        assert "Fetching updates from remote..." in out
+        assert "Failed to fetch from remote" in out
+        assert "[red]" not in out
 
 
 class TestFastForwardConflictReport:
@@ -1634,6 +1687,49 @@ class TestStartBranch:
         assert helper.start_branch("7") == 0
         assert _git(repo, "branch", "--show-current") == "fix/7-fix-the-thing"
         assert "old naming" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "labels, prefix",
+        [
+            (["bug"], "fix"),
+            (["enhancement"], "feat"),
+            (["documentation"], "docs"),
+            (["question"], "feat"),
+            (["wontfix", "bug", "enhancement"], "fix"),
+        ],
+    )
+    def test_created_branch_prefix_follows_labels(self, helper, repo, monkeypatch, labels, prefix):
+        # gh goes through _run_gh. The prefix is whatever branch was created,
+        # not the LABEL_PREFIX dict inspected on its own.
+        def fake_gh(*args, cwd=None):
+            body = json.dumps({
+                "title": "Do the thing",
+                "labels": [{"name": name} for name in labels],
+            })
+            return subprocess.CompletedProcess(["gh", *args], 0, stdout=body, stderr="")
+
+        monkeypatch.setattr(helper, "_run_gh", fake_gh)
+        monkeypatch.setattr(helper, "_have", lambda cmd: True)
+        assert helper.start_branch("12") == 0
+        assert _git(repo, "branch", "--show-current") == f"{prefix}/12-do-the-thing"
+
+    def test_cli_start_creates_the_labeled_branch(self, repo, tmp_path, monkeypatch):
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        gh = bindir / "gh"
+        gh.write_text(
+            "#!/bin/sh\n"
+            "printf '%s\\n' '{\"title\":\"Write the docs\",\"labels\":[{\"name\":\"documentation\"}]}'\n",
+            encoding="utf-8",
+        )
+        gh.chmod(0o755)
+        monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ["PATH"])
+        result = subprocess.run(
+            [sys.executable, HELPER_PATH, "start", "15"],
+            cwd=repo, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _git(repo, "branch", "--show-current") == "docs/15-write-the-docs"
 
 
 class TestIssueBranches:
@@ -2121,7 +2217,9 @@ class TestDetachedHeadLabels:
 
         monkeypatch.setattr(helper, "SKILLS_DIR", str(skills_dir))
         monkeypatch.setattr(helper, "_last_background_sync", lambda: None)
-        console = helper.Console(file=io.StringIO(), width=300, record=True)
+        # height as well as width: rich 15 ignores width unless both are set,
+        # and then wraps the header mid-word.
+        console = helper.Console(file=io.StringIO(), width=300, height=40, record=True)
         helper._print_skill_header(console, "Claude skills")
         return console.export_text()
 
@@ -2392,3 +2490,417 @@ class TestUpdateAllMainWorktrees:
         assert calls == ["primary"]
         assert "Skipped (worktree)" in out
         assert "Skipped (dirty)" not in out
+
+
+# --------------------------------------------------------------------------
+# Behaviour that used to be asserted by matching the helper's source (#294)
+# --------------------------------------------------------------------------
+
+class TestMissingRich:
+    """The helper does not install rich itself. A missing import is a clear
+    error and a non-zero exit, before any subcommand runs."""
+
+    def test_missing_rich_exits_with_an_install_hint(self, tmp_path):
+        package = tmp_path / "rich"
+        package.mkdir()
+        (package / "__init__.py").write_text("raise ImportError('blocked')\n", encoding="utf-8")
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(tmp_path) + os.pathsep + env.get("PYTHONPATH", "")
+        result = subprocess.run(
+            [sys.executable, HELPER_PATH, "print_aliases"],
+            capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 1
+        assert "the 'rich' library is not installed" in result.stdout
+        assert "pip install rich" in result.stdout
+        assert result.stderr == ""
+
+
+class TestHelperUnderUserProfile:
+    """The helper reads git's config, not a path baked in from $USERPROFILE."""
+
+    def test_plain_aliases_follow_the_sandboxed_home(self, tmp_path):
+        import site
+        home = tmp_path / "Users" / "alice"
+        home.mkdir(parents=True)
+        cfg = home / ".gitconfig"
+        cfg.write_text("[alias]\n\tst = status -sb\n", encoding="utf-8")
+        env = os.environ.copy()
+        env["HOME"] = str(home)
+        env["USERPROFILE"] = str(home)
+        env["GIT_CONFIG_GLOBAL"] = str(cfg)
+        env["GIT_CONFIG_NOSYSTEM"] = "1"
+        # HOME is the fake profile, so Python would not see the real user site
+        # (where rich is installed). Keep that path explicitly.
+        user_site = site.getusersitepackages()
+        env["PYTHONPATH"] = user_site + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        result = subprocess.run(
+            [sys.executable, HELPER_PATH, "print_aliases", "--plain"],
+            cwd=tmp_path, capture_output=True, text=True, env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "st" in result.stdout
+        assert "status -sb" in result.stdout
+
+
+class TestRunAppOnTty:
+    """The browser is drawn on the controlling terminal when stderr is not one,
+    and that /dev/tty hop is skipped on Windows."""
+
+    class _App:
+        def __init__(self, events):
+            self._events = events
+
+        def run(self):
+            self._events.append("run")
+            return "git st"
+
+    def _patch_fds(self, helper, monkeypatch, events):
+        def fake_open(path, flags):
+            events.append(("open", path))
+            return 70
+
+        def fake_dup(fd):
+            events.append(("dup", fd))
+            return 200 + fd
+
+        def fake_dup2(src, dst):
+            events.append(("dup2", src, dst))
+
+        def fake_close(fd):
+            events.append(("close", fd))
+
+        monkeypatch.setattr(helper.os, "open", fake_open)
+        monkeypatch.setattr(helper.os, "dup", fake_dup)
+        monkeypatch.setattr(helper.os, "dup2", fake_dup2)
+        monkeypatch.setattr(helper.os, "close", fake_close)
+
+    def test_non_windows_routes_stdio_through_dev_tty(self, helper, monkeypatch):
+        events = []
+        monkeypatch.setattr(helper.os, "name", "posix")
+        monkeypatch.setattr(helper.sys.stderr, "isatty", lambda: False)
+        self._patch_fds(helper, monkeypatch, events)
+        assert helper._run_app_on_tty(self._App(events)) == "git st"
+        assert ("open", "/dev/tty") in events
+        run_at = events.index("run")
+        # stdin/stdout/stderr point at /dev/tty while the app runs, then the
+        # originals are put back.
+        assert ("dup2", 70, 0) in events[:run_at]
+        assert ("dup2", 70, 1) in events[:run_at]
+        assert ("dup2", 70, 2) in events[:run_at]
+        assert ("dup2", 200, 0) in events[run_at:]
+        assert ("dup2", 201, 1) in events[run_at:]
+        assert ("dup2", 202, 2) in events[run_at:]
+
+    def test_windows_does_not_open_dev_tty(self, helper, monkeypatch):
+        monkeypatch.setattr(helper.os, "name", "nt")
+        monkeypatch.setattr(helper.sys.stderr, "isatty", lambda: False)
+        monkeypatch.setattr(helper.os, "open", lambda *a, **k: pytest.fail("opened a tty"))
+        assert helper._run_app_on_tty(self._App([])) == "git st"
+
+    def test_a_stderr_tty_is_left_alone(self, helper, monkeypatch):
+        monkeypatch.setattr(helper.os, "name", "posix")
+        monkeypatch.setattr(helper.sys.stderr, "isatty", lambda: True)
+        monkeypatch.setattr(helper.os, "open", lambda *a, **k: pytest.fail("opened a tty"))
+        assert helper._run_app_on_tty(self._App([])) == "git st"
+
+    def test_missing_dev_tty_still_runs_the_app(self, helper, monkeypatch):
+        monkeypatch.setattr(helper.os, "name", "posix")
+        monkeypatch.setattr(helper.sys.stderr, "isatty", lambda: False)
+
+        def fake_open(path, flags):
+            raise OSError("no controlling terminal")
+
+        monkeypatch.setattr(helper.os, "open", fake_open)
+        assert helper._run_app_on_tty(self._App([])) == "git st"
+
+
+class TestClipboardCommandChoice:
+    """Each platform's clipboard tool is the one actually executed."""
+
+    def _install(self, tmp_path, monkeypatch, scripts):
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        for name, body in scripts:
+            tool = bindir / name
+            tool.write_text("#!/bin/sh\nPATH=/usr/bin:/bin\n" + body, encoding="utf-8")
+            tool.chmod(0o755)
+        monkeypatch.setenv("PATH", str(bindir))
+        out = tmp_path / "clipboard"
+        monkeypatch.setenv("FAKE_CLIPBOARD", str(out))
+        return out
+
+    def test_windows_copies_with_clip(self, helper, tmp_path, monkeypatch):
+        # Pretend this is Windows only for the command choice. shutil.which
+        # crashes if it really believes the host is Windows, so the PATH lookup
+        # is stubbed; the clip process itself still runs.
+        monkeypatch.setattr(helper.sys, "platform", "win32")
+        monkeypatch.setattr(helper.os, "name", "nt")
+        monkeypatch.setattr(helper, "_have", lambda cmd: cmd == "clip")
+        out = self._install(tmp_path, monkeypatch, [("clip", 'cat > "$FAKE_CLIPBOARD"\n')])
+        assert helper._copy_to_clipboard("git st") is True
+        assert out.read_text(encoding="utf-8") == "git st"
+
+    def test_macos_copies_with_pbcopy(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper.sys, "platform", "darwin")
+        monkeypatch.setattr(helper.os, "name", "posix")
+        out = self._install(tmp_path, monkeypatch, [("pbcopy", 'cat > "$FAKE_CLIPBOARD"\n')])
+        assert helper._copy_to_clipboard("git st") is True
+        assert out.read_text(encoding="utf-8") == "git st"
+
+    def test_linux_falls_through_to_xclip(self, helper, tmp_path, monkeypatch):
+        monkeypatch.setattr(helper.sys, "platform", "linux")
+        monkeypatch.setattr(helper.os, "name", "posix")
+        out = self._install(tmp_path, monkeypatch, [
+            ("wl-copy", "cat >/dev/null\nexit 1\n"),
+            ("xclip", 'cat > "$FAKE_CLIPBOARD"\n'),
+        ])
+        assert helper._copy_to_clipboard("git st") is True
+        assert out.read_text(encoding="utf-8") == "git st"
+
+
+class TestAliasBrowserLaunch:
+    """TTY gating, the --plain/--out flags as __main__ reads them, and what a
+    selection does when textual is missing or the UI fails."""
+
+    ALIASES = [("st", "short status", "Inspect"), ("cm", "commit", "Commit")]
+
+    @staticmethod
+    def _block_textual(monkeypatch):
+        import builtins
+        real = builtins.__import__
+
+        def fake(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "textual" or (isinstance(name, str) and name.startswith("textual.")):
+                raise ImportError("blocked")
+            return real(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", fake)
+
+    def test_a_tty_launches_the_browser_instead_of_the_table(self, helper, monkeypatch, capsys):
+        seen = {}
+        monkeypatch.setattr(helper.sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(helper, "get_git_aliases", lambda: list(self.ALIASES))
+
+        def fake_launch(aliases, select_out=None):
+            seen["aliases"] = aliases
+            seen["select_out"] = select_out
+            return True, None
+
+        monkeypatch.setattr(helper, "_launch_alias_browser", fake_launch)
+        assert helper.print_aliases() == 0
+        assert seen["select_out"] is None
+        assert seen["aliases"] == self.ALIASES
+        assert "Git Aliases" not in capsys.readouterr().out
+
+    def test_plain_on_a_tty_prints_the_table_and_skips_the_browser(self, helper, monkeypatch, capsys):
+        monkeypatch.setattr(helper.sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(helper, "get_git_aliases", lambda: list(self.ALIASES))
+        monkeypatch.setattr(
+            helper, "_launch_alias_browser", lambda *a, **k: pytest.fail("browser launched")
+        )
+        assert helper.print_aliases(force_plain=True) == 0
+        out = capsys.readouterr().out
+        assert "Git Aliases" in out and "Category" in out and "st" in out
+
+    def test_missing_textual_falls_back_and_explains_on_a_stderr_tty(self, helper, monkeypatch, capsys):
+        self._block_textual(monkeypatch)
+        monkeypatch.setattr(helper.sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(helper.sys.stderr, "isatty", lambda: True)
+        monkeypatch.setattr(helper, "get_git_aliases", lambda: list(self.ALIASES))
+        assert helper.print_aliases() == 0
+        out, err = capsys.readouterr()
+        assert "Git Aliases" in out
+        assert "is not installed for" in err
+        assert sys.executable in err
+        assert "git alias --plain" in err
+
+    def test_fallback_note_stays_quiet_when_stderr_is_not_a_tty(self, helper, monkeypatch, capsys):
+        self._block_textual(monkeypatch)
+        monkeypatch.setattr(helper.sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(helper.sys.stderr, "isatty", lambda: False)
+        monkeypatch.setattr(helper, "get_git_aliases", lambda: list(self.ALIASES))
+        assert helper.print_aliases() == 0
+        out, err = capsys.readouterr()
+        assert "Git Aliases" in out
+        assert err == ""
+
+    def test_ui_failure_names_the_exception_then_shows_the_table(self, helper, monkeypatch, capsys):
+        monkeypatch.setattr(helper.sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(helper.sys.stderr, "isatty", lambda: True)
+        monkeypatch.setattr(helper, "get_git_aliases", lambda: list(self.ALIASES))
+        monkeypatch.setattr(helper, "_build_alias_app", lambda aliases: object())
+
+        def boom(app):
+            raise RuntimeError("display gone")
+
+        monkeypatch.setattr(helper, "_run_app_on_tty", boom)
+        assert helper.print_aliases() == 0
+        out, err = capsys.readouterr()
+        assert "the interactive browser failed" in err
+        assert "RuntimeError" in err and "display gone" in err
+        assert "git alias --plain" in err
+        assert "Git Aliases" in out
+
+    def test_typed_selection_is_copied_to_the_clipboard(self, helper, monkeypatch, capsys):
+        copied = {}
+        monkeypatch.setattr(helper.sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(helper, "get_git_aliases", lambda: list(self.ALIASES))
+        monkeypatch.setattr(helper, "_build_alias_app", lambda aliases: object())
+        monkeypatch.setattr(helper, "_run_app_on_tty", lambda app: "git st")
+        monkeypatch.setattr(
+            helper, "_copy_to_clipboard", lambda text: copied.update(text=text) or True
+        )
+        assert helper.print_aliases() == 0
+        assert copied["text"] == "git st"
+        assert "Copied to clipboard" in capsys.readouterr().out
+
+    def test_selection_with_out_is_written_and_not_copied(self, helper, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr(helper.sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(helper, "get_git_aliases", lambda: list(self.ALIASES))
+        monkeypatch.setattr(helper, "_build_alias_app", lambda aliases: object())
+        monkeypatch.setattr(helper, "_run_app_on_tty", lambda app: "git st")
+        monkeypatch.setattr(
+            helper, "_copy_to_clipboard", lambda text: pytest.fail("clipboard used")
+        )
+        target = tmp_path / "selection.txt"
+        assert helper.print_aliases(select_out=str(target)) == 0
+        assert target.read_text(encoding="utf-8") == "git st"
+        assert capsys.readouterr().out == ""
+
+    def test_module_imports_when_textual_cannot(self, tmp_path):
+        package = tmp_path / "textual"
+        package.mkdir()
+        (package / "__init__.py").write_text("raise ImportError('no textual')\n", encoding="utf-8")
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(tmp_path) + os.pathsep + env.get("PYTHONPATH", "")
+        env["HELPER"] = HELPER_PATH
+        code = (
+            "import importlib.util, os\n"
+            "spec = importlib.util.spec_from_file_location('gitconfig_helper', os.environ['HELPER'])\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(mod)\n"
+            "assert mod._build_alias_app([]) is None\n"
+            "print('imported')\n"
+        )
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+        assert result.returncode == 0, result.stderr
+        assert "imported" in result.stdout
+
+    def _run_main(self, monkeypatch, tmp_path, argv):
+        import runpy
+        cfg = tmp_path / "gitconfig"
+        cfg.write_text("[alias]\n\tst = status -sb\n", encoding="utf-8")
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+        monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        monkeypatch.setenv("COLUMNS", "120")
+        monkeypatch.setattr(sys, "argv", ["gitconfig_helper.py", *argv])
+        with pytest.raises(SystemExit) as exc:
+            runpy.run_path(HELPER_PATH, run_name="__main__")
+        return exc.value.code
+
+    def test_plain_through_main_skips_the_browser_on_a_tty(self, monkeypatch, tmp_path, capsys):
+        import builtins
+        seen = []
+        real = builtins.__import__
+
+        def fake(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "textual" or (isinstance(name, str) and name.startswith("textual.")):
+                seen.append(name)
+                raise ImportError("blocked")
+            return real(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", fake)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+        code = self._run_main(monkeypatch, tmp_path, ["print_aliases", "--plain"])
+        out, err = capsys.readouterr()
+        assert code == 0
+        assert seen == []
+        assert "Git Aliases" in out and "Category" in out and "st" in out
+        assert "git alias:" not in err
+
+    def test_main_on_a_tty_tries_the_browser_then_falls_back(self, monkeypatch, tmp_path, capsys):
+        self._block_textual(monkeypatch)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+        code = self._run_main(monkeypatch, tmp_path, ["print_aliases"])
+        out, err = capsys.readouterr()
+        assert code == 0
+        assert "Git Aliases" in out
+        assert "is not installed for" in err
+        assert "git alias --plain" in err
+
+    def test_out_through_main_is_selection_mode(self, monkeypatch, tmp_path, capsys):
+        self._block_textual(monkeypatch)
+        monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+        monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+        target = tmp_path / "chosen.txt"
+        code = self._run_main(monkeypatch, tmp_path, ["print_aliases", "--out", str(target)])
+        out, err = capsys.readouterr()
+        assert code == 1
+        assert "git alias --out" in err
+        assert "is not installed for" in err
+        assert "not a terminal" not in err
+        assert "Git Aliases" not in out
+        assert not target.exists() or target.read_text(encoding="utf-8") == ""
+
+
+class TestAliasBrowserKeys:
+    """Enter, up/down, and a row click choose "git <alias>" from the table."""
+
+    ALIASES = [
+        ("st", "short status", "Inspect"),
+        ("cm", "commit", "Commit"),
+        ("pr", "open a pull request", "GitHub"),
+    ]
+
+    def _drive(self, helper, drive):
+        pytest.importorskip("textual")
+        import asyncio
+        from textual.widgets import DataTable
+
+        app = helper._build_alias_app(self.ALIASES)
+
+        async def run():
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                await drive(pilot, app.query_one("#table", DataTable))
+                await pilot.pause()
+
+        asyncio.run(run())
+        return app.return_value
+
+    def test_up_and_down_move_the_row_and_enter_inserts_it(self, helper):
+        seen = {}
+
+        async def drive(pilot, table):
+            seen["start"] = table.cursor_row
+            await pilot.press("down")
+            await pilot.pause()
+            seen["down"] = table.cursor_row
+            await pilot.press("up")
+            await pilot.pause()
+            seen["up"] = table.cursor_row
+            await pilot.press("down")
+            await pilot.pause()
+            await pilot.press("enter")
+
+        assert self._drive(helper, drive) == "git cm"
+        assert seen == {"start": 0, "down": 1, "up": 0}
+
+    def test_clicking_the_highlighted_row_emits_a_git_command(self, helper):
+        async def drive(pilot, table):
+            await pilot.click("#table", offset=(2, 1))
+
+        assert self._drive(helper, drive) == "git st"
+
+    def test_clicking_another_row_twice_selects_it(self, helper):
+        # The first click moves the cursor; the click on the highlighted row
+        # is the one that selects.
+        async def drive(pilot, table):
+            await pilot.click("#table", offset=(2, 2))
+            await pilot.pause()
+            await pilot.click("#table", offset=(2, 2))
+
+        assert self._drive(helper, drive) == "git cm"

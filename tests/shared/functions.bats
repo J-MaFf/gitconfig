@@ -722,6 +722,115 @@ backups_of() {
 }
 
 # ---------------------------------------------------------------------------
+# git-alias widgets insert the browser's selection (issue #294)
+# ---------------------------------------------------------------------------
+
+# A git that records its arguments and writes $FAKE_SELECTION to the --out file.
+_fake_alias_git() {
+    mkdir -p "$TESTDIR/bin"
+    cat > "$TESTDIR/bin/git" << 'EOF'
+#!/bin/sh
+printf '%s\n' "$@" >> "$GIT_ALIAS_LOG"
+out=""
+prev=""
+for a in "$@"; do
+    if [ "$prev" = "--out" ]; then
+        out="$a"
+    fi
+    prev="$a"
+done
+if [ -n "$out" ]; then
+    printf '%s' "$FAKE_SELECTION" > "$out"
+fi
+exit 0
+EOF
+    chmod +x "$TESTDIR/bin/git"
+    export GIT_ALIAS_LOG="$TESTDIR/git.log"
+    export PATH="$TESTDIR/bin:$PATH"
+}
+
+# Run CMD with a controlling terminal, so the widgets' /dev/tty redirects work.
+# Returns 0, or 2 when script(1) cannot allocate one.
+_run_with_tty() {
+    if script -qec true /dev/null >/dev/null 2>&1; then
+        script -qec "$1" /dev/null </dev/null
+    elif script -q /dev/null true >/dev/null 2>&1; then
+        script -q /dev/null bash -c "$1" </dev/null
+    else
+        return 2
+    fi
+}
+
+@test "the bash widget runs git alias --out and inserts the selection at the cursor (#294)" {
+    _fake_alias_git
+    export FAKE_SELECTION="git lg"
+    cat > "$TESTDIR/drive-bash.sh" << EOF
+#!/bin/bash
+source "$REPO_ROOT/scripts/shell/git-alias-widget.bash"
+READLINE_LINE='echo  hello'
+READLINE_POINT=5
+__git_alias_insert
+printf 'LINE=[%s] POINT=%s\\n' "\$READLINE_LINE" "\$READLINE_POINT" > "$TESTDIR/result"
+EOF
+    chmod +x "$TESTDIR/drive-bash.sh"
+    run _run_with_tty "bash '$TESTDIR/drive-bash.sh'"
+    if [ "$status" -eq 2 ]; then
+        skip "script(1) cannot allocate a terminal"
+    fi
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TESTDIR/result")" = "LINE=[echo git lg hello] POINT=11" ]
+    [ "$(sed -n '1p' "$TESTDIR/git.log")" = "alias" ]
+    [ "$(sed -n '2p' "$TESTDIR/git.log")" = "--out" ]
+}
+
+@test "the bash widget leaves the line unchanged when nothing is selected (#294)" {
+    _fake_alias_git
+    export FAKE_SELECTION=""
+    cat > "$TESTDIR/drive-bash.sh" << EOF
+#!/bin/bash
+source "$REPO_ROOT/scripts/shell/git-alias-widget.bash"
+READLINE_LINE='echo  hello'
+READLINE_POINT=5
+__git_alias_insert
+printf 'LINE=[%s] POINT=%s\\n' "\$READLINE_LINE" "\$READLINE_POINT" > "$TESTDIR/result"
+EOF
+    chmod +x "$TESTDIR/drive-bash.sh"
+    run _run_with_tty "bash '$TESTDIR/drive-bash.sh'"
+    if [ "$status" -eq 2 ]; then
+        skip "script(1) cannot allocate a terminal"
+    fi
+    [ "$status" -eq 0 ]
+    [ "$(cat "$TESTDIR/result")" = "LINE=[echo  hello] POINT=5" ]
+}
+
+@test "the zsh widget runs git alias --out and inserts the selection at the cursor (#294)" {
+    command -v zsh >/dev/null || skip "zsh is not installed"
+    _fake_alias_git
+    export FAKE_SELECTION="git lg"
+    cat > "$TESTDIR/drive-zsh.zsh" << EOF
+source "$REPO_ROOT/scripts/shell/git-alias-widget.zsh"
+function zle-line-init() {
+    BUFFER='echo  hello'
+    CURSOR=5
+    zle __git_alias_insert
+    print -r -- "LINE=[\$BUFFER] POINT=\$CURSOR" > "$TESTDIR/result"
+    exit
+}
+zle -N zle-line-init
+vared -c unused
+EOF
+    run _run_with_tty "zsh -f '$TESTDIR/drive-zsh.zsh'"
+    if [ "$status" -eq 2 ]; then
+        skip "script(1) cannot allocate a terminal"
+    fi
+    # zsh exits non-zero when the line editor is left from inside zle-line-init.
+    # The result file is what the widget wrote.
+    [ "$(cat "$TESTDIR/result")" = "LINE=[echo git lg hello] POINT=11" ]
+    [ "$(sed -n '1p' "$TESTDIR/git.log")" = "alias" ]
+    [ "$(sed -n '2p' "$TESTDIR/git.log")" = "--out" ]
+}
+
+# ---------------------------------------------------------------------------
 # Update lock (issue #234)
 # ---------------------------------------------------------------------------
 

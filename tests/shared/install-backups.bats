@@ -7,6 +7,9 @@
 # Run with:  bats tests/shared/install-backups.bats
 # Requires:  bats-core and git.
 
+# `run !` needs bats >= 1.5 (see functions.bats).
+bats_require_minimum_version 1.5.0
+
 setup() {
     REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     LINUX_INSTALL="$REPO_ROOT/scripts/linux version/install.sh"
@@ -219,4 +222,33 @@ mac_install() { bash "$MAC_INSTALL" --force --no-launchd "$@"; }
     [ "$(git config --file "$HOME/.gitconfig.local" --get user.signingkey)" = "$HOME/.ssh/my_key" ]
     [ "$(git config --file "$HOME/.gitconfig.local" --get commit.gpgsign)" = true ]
     [ "$(git config --file "$HOME/.gitconfig.local" --get-all core.editor)" = nano ]
+}
+
+@test "install enables the Ctrl-G keybinding once and cleanup removes it (#294)" {
+    printf 'export FOO=1\n' > "$HOME/.bashrc"
+    printf 'export BAR=1\n' > "$HOME/.zshrc"
+    local begin="# >>> gitconfig git-alias browser (Ctrl-G) >>>"
+
+    run linux_install
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Enabled git-alias keybinding (Ctrl-G)"* ]]
+    grep -qF "git-alias-widget.bash" "$HOME/.bashrc"
+    grep -qF "git-alias-widget.zsh" "$HOME/.zshrc"
+    grep -qF 'export FOO=1' "$HOME/.bashrc"
+    [ "$(grep -cF "$begin" "$HOME/.bashrc")" -eq 1 ]
+    [ "$(grep -cF "$begin" "$HOME/.zshrc")" -eq 1 ]
+
+    run linux_install
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"git-alias keybinding already enabled"* ]]
+    [ "$(grep -cF "$begin" "$HOME/.bashrc")" -eq 1 ]
+    [ "$(grep -cF "$begin" "$HOME/.zshrc")" -eq 1 ]
+
+    run bash "$REPO_ROOT/scripts/linux version/cleanup-gitconfig.sh" --force
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Disabled git-alias keybinding"* ]]
+    run ! grep -qF "$begin" "$HOME/.bashrc"
+    run ! grep -qF "$begin" "$HOME/.zshrc"
+    grep -qF 'export FOO=1' "$HOME/.bashrc"
+    grep -qF 'export BAR=1' "$HOME/.zshrc"
 }
