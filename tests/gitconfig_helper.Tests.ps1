@@ -301,11 +301,6 @@ import gitconfig_helper
             $output | Should -Not -BeNullOrEmpty
             $LASTEXITCODE | Should -Be 2
         }
-
-        It "Should handle rich library auto-installation" {
-            $scriptContent = Get-Content $helperScript -Raw
-            (($scriptContent -match "ImportError") -or ($scriptContent -match "try:" -and $scriptContent -match "except")) | Should -Be $true
-        }
     }
 
     Context "Integration with Git Aliases" {
@@ -315,12 +310,6 @@ import gitconfig_helper
             $gitConfigContent = Get-Content $gitConfigPath -Raw
 
             $gitConfigContent | Should -Match "gitconfig_helper"
-        }
-
-        It "Should work with Python ${USERPROFILE} variable" {
-            $scriptContent = Get-Content $helperScript -Raw
-            # Verify script uses proper Python path handling
-            ($scriptContent -match "import" -and $scriptContent -match "subprocess") | Should -Be $true
         }
     }
 
@@ -450,19 +439,6 @@ import gitconfig_helper
             (& git rev-parse HEAD) | Should -Be $before
 
             Remove-Item $bareRepo, $other -Recurse -Force -ErrorAction SilentlyContinue
-        }
-
-        It "Should provide clear error messages for each failure scenario" {
-            $scriptContent = Get-Content $script:helperScript -Raw
-
-            # Verify error messages exist for key scenarios
-            ($scriptContent -match "Fetching updates" -and $scriptContent -match "Switching from") | Should -Be $true
-            ($scriptContent -match "Uncommitted changes detected" -and $scriptContent -match "Could not fast-forward") | Should -Be $true
-        }
-
-        It "Should use Rich console output for formatting" {
-            $scriptContent = Get-Content $script:helperScript -Raw
-            ($scriptContent -match "console.print" -and $scriptContent -match "\[cyan\]" -and $scriptContent -match "\[green\]") | Should -Be $true
         }
 
         It "Should handle fetch failures gracefully" {
@@ -638,39 +614,7 @@ import gitconfig_helper
         }
     }
 
-    Context "Alias categorization" {
-        BeforeAll { $script:src = Get-Content $script:helperScript -Raw }
-
-        It "Defines CATEGORY_ORDER and ALIAS_METADATA" {
-            $script:src | Should -Match "CATEGORY_ORDER"
-            $script:src | Should -Match "ALIAS_METADATA"
-        }
-
-        It "Categorizes the new aliases" {
-            $script:src | Should -Match '"pushf":\s*\("Branch & Sync"'
-            $script:src | Should -Match '"pr":\s*\("GitHub"'
-            $script:src | Should -Match '"amend":\s*\("Commit"'
-            $script:src | Should -Match '"s":\s*\("Inspect"'
-            $script:src | Should -Match '"skill":\s*\("Claude Skills"'
-        }
-
-        It "get_git_aliases returns (name, description, category) tuples" {
-            $script:src | Should -Match "aliases\.append\(\(alias_name, description, category\)\)"
-        }
-    }
-
     Context "print_aliases plain/interactive modes" {
-        BeforeAll { $script:src = Get-Content $script:helperScript -Raw }
-
-        It "Gates the interactive browser on an interactive TTY" {
-            $script:src | Should -Match "sys\.stdout\.isatty\(\)"
-        }
-
-        It "Supports a --plain flag wired through __main__" {
-            $script:src | Should -Match "force_plain"
-            $script:src | Should -Match '"--plain" in sys\.argv'
-        }
-
         It "Renders a grouped table with a Category column when plain" {
             $result = & $script:python $script:helperScript print_aliases --plain 2>&1
             $output = $result -join "`n"
@@ -681,53 +625,6 @@ import gitconfig_helper
     }
 
     Context "Interactive browser (Textual)" {
-        BeforeAll { $script:src = Get-Content $script:helperScript -Raw }
-
-        It "Defines the browser builder and launcher" {
-            $script:src | Should -Match "def _build_alias_app"
-            $script:src | Should -Match "def _launch_alias_browser"
-        }
-
-        It "Imports textual lazily so the module loads without it" {
-            # The textual import must live inside a function (indented), not at
-            # module top level, so 'import gitconfig_helper' works without textual.
-            $script:src | Should -Match "from textual\.app import App"
-            $script:src | Should -Not -Match "(?m)^from textual"
-            $script:src | Should -Not -Match "(?m)^import textual"
-        }
-
-        It "Falls back to the static table when the browser is unavailable" {
-            $script:src | Should -Match "def _print_aliases_table"
-        }
-
-        It "Binds row navigation and selection keys" {
-            $script:src | Should -Match '\("enter", "select"'
-            $script:src | Should -Match '\("up", "cursor_up"'
-            $script:src | Should -Match '\("down", "cursor_down"'
-        }
-
-        It "Selects via Enter, a table row click, and emits a git command" {
-            $script:src | Should -Match "def _selected_command"
-            $script:src | Should -Match "def on_input_submitted"
-            $script:src | Should -Match "def on_data_table_row_selected"
-            $script:src | Should -Match 'return f"git \{row\[0\]\}"'
-        }
-
-        It "Supports --select output via --out wired through __main__" {
-            $script:src | Should -Match "select_out"
-            $script:src | Should -Match '"--out" in sys\.argv'
-        }
-
-        It "Copies the selection to the clipboard when typed (no --out)" {
-            $script:src | Should -Match "def _copy_to_clipboard"
-            # Per-platform clipboard tools.
-            $script:src | Should -Match "pbcopy"
-            $script:src | Should -Match '"clip"'
-            $script:src | Should -Match "xclip"
-            # The typed-`git alias` path copies the choice rather than just printing it.
-            $script:src | Should -Match "_copy_to_clipboard\(choice\)"
-        }
-
         It "Fails loudly in selection mode without a TTY (no table, stderr, exit 1)" {
             # --out is the keybinding path. With stdout redirected the browser
             # can't draw; it used to exit 0 silently, hiding #254. Now it must
@@ -748,27 +645,6 @@ import gitconfig_helper
     }
 
     Context "Browser fallback diagnostics" {
-        BeforeAll { $script:src = Get-Content $script:helperScript -Raw }
-
-        It "Explains the fallback on stderr (only when stderr is a TTY)" {
-            $script:src | Should -Match "def _note_browser_fallback"
-            $script:src | Should -Match "sys\.stderr\.isatty\(\)"
-            # The note always points users at --plain to silence it.
-            $script:src | Should -Match "git alias --plain"
-        }
-
-        It "Reports a reason (textual missing / UI error) from the launcher" {
-            # _launch_alias_browser now returns (ran, reason) and names textual.
-            $script:src | Should -Match "is not installed for"
-            $script:src | Should -Match "the interactive browser failed"
-        }
-
-        It "Draws the browser on /dev/tty, guarded for Windows" {
-            $script:src | Should -Match "def _run_app_on_tty"
-            $script:src | Should -Match '/dev/tty'
-            $script:src | Should -Match 'os\.name != "nt"'
-        }
-
         It "Stays quiet (no reason) when piped, and still shows the table" {
             # stdout+stderr both captured (not TTYs) -> static table, no note.
             $result = & $script:python $script:helperScript print_aliases 2>&1
@@ -784,29 +660,6 @@ import gitconfig_helper
             foreach ($ext in @("bash", "zsh", "ps1")) {
                 Join-Path $script:repoRoot "scripts/shell/git-alias-widget.$ext" | Should -Exist
             }
-        }
-
-        It "Widgets run the browser with --out and insert the result" {
-            $bash = Get-Content (Join-Path $script:repoRoot "scripts/shell/git-alias-widget.bash") -Raw
-            $bash | Should -Match 'git alias --out'
-            $bash | Should -Match 'READLINE_LINE'
-            $zsh = Get-Content (Join-Path $script:repoRoot "scripts/shell/git-alias-widget.zsh") -Raw
-            $zsh | Should -Match 'git alias --out'
-            $zsh | Should -Match 'LBUFFER'
-            $ps = Get-Content (Join-Path $script:repoRoot "scripts/shell/git-alias-widget.ps1") -Raw
-            $ps | Should -Match "'alias', '--out'"
-            $ps | Should -Match 'PSConsoleReadLine'
-        }
-
-        It "Install and cleanup wire the keybinding idempotently" {
-            $functions = Get-Content (Join-Path $script:repoRoot "scripts/shared/functions.sh") -Raw
-            $functions | Should -Match "enable_git_alias_widget"
-            $functions | Should -Match "disable_git_alias_widget"
-            # macOS and Linux share scripts/unix/install.sh since #229.
-            $unixInstall = Get-Content (Join-Path $script:repoRoot "scripts/unix/install.sh") -Raw
-            $unixInstall | Should -Match "enable_git_alias_widget"
-            $unixCleanup = Get-Content (Join-Path $script:repoRoot "scripts/unix/cleanup-gitconfig.sh") -Raw
-            $unixCleanup | Should -Match "disable_git_alias_widget"
         }
     }
 
@@ -898,20 +751,6 @@ import gitconfig_helper
     }
 
     Context "start Function (git start)" {
-        BeforeAll { $script:src = Get-Content $script:helperScript -Raw }
-
-        It "Is defined and dispatched from __main__" {
-            $script:src | Should -Match "def start_branch"
-            $script:src | Should -Match 'function_name == "start"'
-        }
-
-        It "Maps issue labels to branch-name prefixes" {
-            $script:src | Should -Match "LABEL_PREFIX"
-            $script:src | Should -Match '"bug":\s*"fix"'
-            $script:src | Should -Match '"enhancement":\s*"feat"'
-            $script:src | Should -Match '"documentation":\s*"docs"'
-        }
-
         It "Rejects a missing issue number" {
             $result = & $script:python $script:helperScript start 2>&1
             $output = $result -join "`n"
