@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Move the Scripts root out of `~/Documents`** ([#304](https://github.com/J-MaFf/gitconfig/issues/304)) —
+  Google Drive for desktop backs up `~/Documents` on Windows, `.git` folders included, and a sync
+  conflict leaves invalid refs such as `refs/heads/main (1)` that break every fetch. The new
+  `scripts/windows version/Move-ScriptsRoot.ps1` (PowerShell 7 and 5.1) and
+  `scripts/unix/move-scripts-root.sh` (bash 3.2+) move the folder holding every clone from
+  `~/Documents/Scripts` to `~/Scripts` with one same-volume rename (`-From`/`--from`, `-To`/`--to`,
+  `-DryRun`/`--dry-run`, `-Yes`/`--yes`, `-AllowSyncedTarget`/`--allow-synced-target`), then
+  re-point what used the old path: linked worktrees (`git worktree repair`), this repo's generated
+  files (`~/.gitconfig`, the home links, the auto-sync job, the Ctrl-G block), home-folder symlinks and
+  junctions, paths in profiles, rc files and Claude/VS Code config files (every spelling, byte for
+  byte), scheduled tasks, user environment variables and `.lnk` shortcuts (Windows), the crontab,
+  systemd user units and launchd agents (macOS/Linux), and Claude Code project folders. No link is
+  left at the old path. Preflight checks stop before any change (same or nested paths, nothing to
+  move, a non-empty target, another volume, a synced target, a running Drive without confirmation);
+  the full plan is printed and confirmed first; every changed file is backed up to
+  `~/.scripts-move-<timestamp>/backup/` and the run ends with `report.txt` (changes, failures,
+  leftovers, and report-only items such as venvs and system-scope jobs). A second run resumes a
+  partial one and is a no-op after a complete one. Runbook: `docs/MOVE-SCRIPTS-ROOT.md`. Tests:
+  `tests/Move-ScriptsRoot.Tests.ps1` and `tests/shared/move-scripts-root.bats`
 - **`pyproject.toml` dependency manifest** — the helper's Python deps are now declared in one
   place: `rich` (required) under `[project.dependencies]` and `textual` (optional) under the
   `[project.optional-dependencies].tui` extra. Declaration only — the repo is scripts, not a
@@ -35,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The documented install path is now `~/Scripts/gitconfig` (`$HOME\Scripts\gitconfig` on Windows)
+  in `README.md`, `docs/WORKFLOW.md` and the `_scripts_root` docstring; the derived Scripts root
+  follows a moved clone on its own ([#304](https://github.com/J-MaFf/gitconfig/issues/304))
+- `ask_yes_no` (`scripts/shared/functions.sh`) takes an optional second argument naming the option
+  that skips the prompt (default `--force`), so the move tool's "no input" message names `--yes`
+  ([#304](https://github.com/J-MaFf/gitconfig/issues/304))
 - **Consolidated the duplicated Python-dependency install logic** behind one routine per platform
   family that reads the manifest: `install_python_deps` in `scripts/shared/functions.sh` (bash, for
   the mac/linux installers + the login auto-update) and `Install-PythonDeps` in the new

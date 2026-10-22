@@ -1,5 +1,7 @@
 # Spec: Move the Scripts root out of `~/Documents`
 
+> **Completed 2026-10-22** in [#306](https://github.com/J-MaFf/gitconfig/pull/306) (forge, 1 round; all 23 criteria plus C-final passed, CI green).
+
 ## Goal
 Ship a cross-platform tool in this repo that moves the folder holding every
 clone (the "Scripts root", today `~/Documents/Scripts`) to `~/Scripts`. It then

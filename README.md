@@ -11,8 +11,8 @@ Personal Git configuration and utilities for cross-machine synchronization.
 **Requirements:** macOS 12+, [Homebrew](https://brew.sh), Python 3
 
 ```bash
-git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
-cd ~/Documents/Scripts/gitconfig
+git clone https://github.com/J-MaFf/gitconfig.git ~/Scripts/gitconfig
+cd ~/Scripts/gitconfig
 bash scripts/unix/install.sh --force
 ```
 
@@ -28,8 +28,8 @@ bash scripts/unix/install.sh --force
 **Requirements:** PowerShell 5.1+, Administrator privileges, Python 3
 
 ```powershell
-git clone https://github.com/J-MaFf/gitconfig.git "$HOME\Documents\Scripts\gitconfig"
-cd "$HOME\Documents\Scripts\gitconfig"
+git clone https://github.com/J-MaFf/gitconfig.git "$HOME\Scripts\gitconfig"
+cd "$HOME\Scripts\gitconfig"
 & ".\scripts\windows version\install.ps1" -Force
 ```
 
@@ -40,10 +40,12 @@ Use `$HOME`, not `~`, in the clone command: PowerShell before 7.5 doesn't expand
 **Requirements:** bash, Python 3, and a systemd user session or cron (optional, for auto-update)
 
 ```bash
-git clone https://github.com/J-MaFf/gitconfig.git ~/Documents/Scripts/gitconfig
-cd ~/Documents/Scripts/gitconfig
+git clone https://github.com/J-MaFf/gitconfig.git ~/Scripts/gitconfig
+cd ~/Scripts/gitconfig
 bash scripts/unix/install.sh --force
 ```
+
+The clones live in `~/Scripts`, outside `~/Documents`: cloud backup of Documents (Google Drive for desktop on Windows) corrupts `.git` folders with conflict copies such as `refs/heads/main (1)`. A machine set up with the old layout (the Scripts folder inside Documents) is moved over with `scripts/windows version/Move-ScriptsRoot.ps1` or `scripts/unix/move-scripts-root.sh`; see [docs/MOVE-SCRIPTS-ROOT.md](docs/MOVE-SCRIPTS-ROOT.md).
 
 macOS and Linux share one set of scripts in `scripts/unix/`; they detect the OS. The older `scripts/mac version/` and `scripts/linux version/` commands still work: they run the same scripts and refuse to run on the other OS. Pass `--no-scheduler` to skip the auto-update job (`--no-launchd` and `--no-cron` still work too).
 
@@ -190,7 +192,7 @@ git main           # Switch to the default branch: fetch, fast-forward only, bra
 git main --all     # Run the above for every git repo directly under the Scripts root (alias: -a)
 ```
 
-The Scripts root is the folder that holds this repo's clone (`~/Documents/Scripts` on a standard install). To point it somewhere else, set it in your machine-local config: `git localconfig gitconfig.scriptsRoot ~/code`. `git main --all` won't sweep your home folder, its parent (`/home`, `/Users`, `C:\Users`) or a filesystem root. It stops with exit 1 and asks you to set `gitconfig.scriptsRoot`, or to pass `--force` if you really mean it. This guards against a clone at `~/gitconfig`, which would otherwise make the home folder the root.
+The Scripts root is the folder that holds this repo's clone (`~/Scripts` on a standard install). To point it somewhere else, set it in your machine-local config: `git localconfig gitconfig.scriptsRoot ~/code`. `git main --all` won't sweep your home folder, its parent (`/home`, `/Users`, `C:\Users`) or a filesystem root. It stops with exit 1 and asks you to set `gitconfig.scriptsRoot`, or to pass `--force` if you really mean it. This guards against a clone at `~/gitconfig`, which would otherwise make the home folder the root.
 
 A linked worktree directly under the Scripts root (for example a `git worktree add ../repo-feature` sibling) is listed as **Skipped (worktree)** and left untouched; update it from its primary worktree.
 
