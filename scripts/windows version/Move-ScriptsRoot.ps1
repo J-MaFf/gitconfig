@@ -746,6 +746,8 @@ function Get-GeneratorItems {
         foreach ($edition in 'WindowsPowerShell', 'PowerShell') {
             $profilePath = Join-Path (Join-Path $docs $edition) 'profile.ps1'
             if (-not (Test-Path -LiteralPath $profilePath -PathType Leaf)) { continue }
+            # A linked profile belongs to whatever it points at (never edited here).
+            if ((Get-Item -LiteralPath $profilePath -Force).LinkType) { continue }
             $text = (Read-MarkedText -FullPath (Get-Item -LiteralPath $profilePath -Force).FullName).Text
             if ($text.IndexOf($widgetBegin, [StringComparison]::Ordinal) -lt 0) { continue }
             if ((Update-TextFile -Path $profilePath) -gt 0) {

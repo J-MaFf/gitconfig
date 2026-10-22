@@ -20,7 +20,9 @@ setup() {
     REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
     # The physical path: git records worktree paths with symlinks resolved,
     # and macOS's temp folder is under the /var -> /private/var link.
-    SANDBOX="$(cd "$(mktemp -d)" && pwd -P)"
+    SANDBOX="$(mktemp -d)"
+    [ -n "$SANDBOX" ] && [ -d "$SANDBOX" ] || return 1
+    SANDBOX="$(cd "$SANDBOX" && pwd -P)" || return 1
     export HOME="$SANDBOX/home"
     FROM="$HOME/Documents/Scripts"
     TO="$HOME/Scripts"
@@ -46,14 +48,14 @@ case "\$1" in
 esac
 EOF
     # systemctl: no user manager unless USER_MANAGER is set (so scheduler_install
-    # uses cron); is-active succeeds for the units listed in ACTIVE_UNITS.
+    # uses cron); is-active succeeds for the units listed in STUB_ACTIVE_UNITS.
     cat > "$SANDBOX/bin/systemctl" <<EOF
 #!/bin/sh
 echo "\$*" >> "$SANDBOX/systemctl.log"
 [ "\$1" = --user ] || exit 1
 case "\$2" in
     show-environment) [ -n "\$USER_MANAGER" ] ;;
-    is-active) for u in \$ACTIVE_UNITS; do [ "\$u" = "\$4" ] && exit 0; done; exit 3 ;;
+    is-active) for u in \$STUB_ACTIVE_UNITS; do [ "\$u" = "\$4" ] && exit 0; done; exit 3 ;;
     daemon-reload|restart|stop|disable) exit 0 ;;
     enable) [ -n "\$USER_MANAGER" ] ;;
     *) exit 1 ;;
@@ -68,8 +70,9 @@ EOF
 }
 
 teardown() {
-    chmod -R u+w "$SANDBOX" 2>/dev/null
-    rm -rf "$SANDBOX"
+    case "${SANDBOX:-}" in
+        */tmp.*) chmod -R u+w "$SANDBOX" 2>/dev/null; rm -rf "$SANDBOX" ;;
+    esac
 }
 
 _git() { git -c commit.gpgsign=false -c init.defaultBranch=main "$@"; }
@@ -274,7 +277,8 @@ EOF
     before="$(_snapshot "$HOME")"
     run env GITCONFIG_PLATFORM=linux bash "$CLONE/scripts/unix/move-scripts-root.sh" --from "$FROM" --to "$TO" <<< "n"
     [ "$status" -eq 2 ]
-    [[ "$output" == *"Plan"*"Move the Scripts root and make these changes? (y/n)"* ]]
+    # (read -p shows the question only on a terminal.)
+    [[ "$output" == *"Plan"*"Claude project folders to rename:"*"Cancelled. Nothing was changed."* ]]
     [ "$(_snapshot "$HOME")" = "$before" ]
     _move
     [ "$status" -eq 2 ]
@@ -314,7 +318,7 @@ _full_fixture() {
 
 @test "the plan lists every category with its items before any change (R6)" {
     _full_fixture
-    run env GITCONFIG_PLATFORM=linux ACTIVE_UNITS=mine-a.service bash "$CLONE/scripts/unix/move-scripts-root.sh" \
+    run env GITCONFIG_PLATFORM=linux STUB_ACTIVE_UNITS=mine-a.service bash "$CLONE/scripts/unix/move-scripts-root.sh" \
         --from "$FROM" --to "$TO" --dry-run < /dev/null
     [ "$status" -eq 0 ]
     [[ "$output" == *"Move:"*"$FROM -> $TO (one rename)"* ]]
@@ -543,7 +547,7 @@ _text_fixtures() {
 
 @test "crontab, systemd units and launchd agents are rewritten and reloaded as needed (R17)" {
     _full_fixture
-    run env GITCONFIG_PLATFORM=linux ACTIVE_UNITS=mine-a.service bash "$CLONE/scripts/unix/move-scripts-root.sh" \
+    run env GITCONFIG_PLATFORM=linux STUB_ACTIVE_UNITS=mine-a.service bash "$CLONE/scripts/unix/move-scripts-root.sh" \
         --from "$FROM" --to "$TO" --yes < /dev/null
     [ "$status" -eq 0 ]
     # The user's own line, rewritten; nothing left with the old root.

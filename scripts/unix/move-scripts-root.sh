@@ -305,7 +305,9 @@ _rewrite() {
         envargs+=("MSR_O$((i + 1))=${FORM_OLD[$i]}" "MSR_R$((i + 1))=${FORM_NEW[$i]}")
     done
     if [ "$file" != - ] && [ -s "$file" ] && [ "$(tail -c 1 "$file" | od -An -c | tr -d ' ')" != '\n' ]; then nonl=1; fi
-    env "${envargs[@]}" LC_ALL=C awk -v mode="$mode" -v ci="$CI_PATHS" -v nonl="$nonl" "$_REWRITE_AWK" "$file"
+    # BINMODE=3: a gawk built for Windows (Git Bash) would otherwise drop the
+    # CRs; other awks ignore it.
+    env "${envargs[@]}" LC_ALL=C awk -v BINMODE=3 -v mode="$mode" -v ci="$CI_PATHS" -v nonl="$nonl" "$_REWRITE_AWK" "$file"
 }
 
 # Old-root matches in FILE (forms chosen for the file).
@@ -509,7 +511,8 @@ build_plan() {
             PLAN_GEN+=(scheduler); PLAN_GEN_TEXT+=("scheduler_install (the $(scheduler_name "$TARGET_OS") for $CLONE_NEW)")
         fi
         for f in "$HOME_N/.bashrc" "$HOME_N/.zshrc"; do
-            if [ -f "$f" ] && grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$f" 2>/dev/null && [ "$(_count_file "$f")" -gt 0 ]; then
+            # A linked rc file belongs to the repo it points at (never edited).
+            if [ -f "$f" ] && [ ! -L "$f" ] && grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$f" 2>/dev/null && [ "$(_count_file "$f")" -gt 0 ]; then
                 PLAN_GEN+=(widget); PLAN_GEN_TEXT+=("enable_git_alias_widget (the Ctrl-G block; its path is rewritten with the rc file)")
                 break
             fi
@@ -724,7 +727,7 @@ CHANGES=()
 FAILURES=()
 
 _unit_was_active() {
-    case "$ACTIVE_UNITS" in *"|$1|"*) return 0 ;; esac
+    case "$MOVE_ACTIVE_UNITS" in *"|$1|"*) return 0 ;; esac
     return 1
 }
 
@@ -770,7 +773,7 @@ repair_links() {
 }
 
 run_generators() {
-    local g f rc
+    local g f rc widget_ok
     for g in "${PLAN_GEN[@]}"; do
         case "$g" in
             gitconfig)
@@ -807,9 +810,22 @@ run_generators() {
                 fi
                 ;;
             widget)
-                # SHELL unset: only rc files that already have the block are
-                # touched, none is created.
-                SHELL='' enable_git_alias_widget "$CLONE_NEW" "$HOME_N"
+                # enable_git_alias_widget keeps an existing block as it is (its
+                # path is rewritten with the rc file, below) and appends one to
+                # an rc file that lacks it, writing through a symlinked rc into
+                # whatever repo it points at. So it runs only when every rc
+                # file it would visit already has the block, and then just
+                # confirms them. SHELL unset: no rc file is created.
+                widget_ok=true
+                for f in "$HOME_N/.zshrc" "$HOME_N/.bashrc"; do
+                    [ -e "$f" ] || [ -L "$f" ] || continue
+                    if [ -L "$f" ] || ! grep -qF "$GIT_ALIAS_WIDGET_BEGIN" "$f" 2>/dev/null; then widget_ok=false; fi
+                done
+                if [ "$widget_ok" = true ]; then
+                    SHELL='' enable_git_alias_widget "$CLONE_NEW" "$HOME_N"
+                else
+                    echo "[INFO] Not running enable_git_alias_widget: an rc file without the Ctrl-G block (or a linked one) would be changed; the existing block's path is rewritten with its rc file"
+                fi
                 ;;
         esac
     done
@@ -981,12 +997,12 @@ fi
 if [ "$MOVE_NEEDED" = true ]; then SCAN_ROOT="$FROM"; else SCAN_ROOT="$TO"; fi
 # Units running now are restarted after their files are rewritten; the others
 # are only reloaded.
-ACTIVE_UNITS="|"
+MOVE_ACTIVE_UNITS="|"
 if [ -d "$(_systemd_unit_dir)" ] && command -v systemctl >/dev/null 2>&1; then
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         unit="$(_unit_name "$f")"
-        if systemctl --user is-active --quiet "$unit" >/dev/null 2>&1; then ACTIVE_UNITS="$ACTIVE_UNITS$unit|"; fi
+        if systemctl --user is-active --quiet "$unit" >/dev/null 2>&1; then MOVE_ACTIVE_UNITS="$MOVE_ACTIVE_UNITS$unit|"; fi
     done < <(find "$(_systemd_unit_dir)" -type f 2>/dev/null)
 fi
 build_plan "$SCAN_ROOT"
@@ -1047,7 +1063,7 @@ echo "[STEP] Renaming Claude projects...";  rename_projects
 cd "$HOME_N" || true
 
 # --- Rescan and report (R18) -------------------------------------------------------
-ACTIVE_UNITS="|"
+MOVE_ACTIVE_UNITS="|"
 build_plan "$TO"
 REMAINING=()
 if [ -n "$PLAN_WT" ]; then
