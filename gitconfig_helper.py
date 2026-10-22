@@ -1714,10 +1714,12 @@ def _scripts_root():
 
     The `gitconfig.scriptsRoot` git config key wins when set (put it in the
     machine-local ~/.gitconfig.local, e.g. `git localconfig
-    gitconfig.scriptsRoot ~/Documents/Scripts`); `~` is expanded. Otherwise
-    the root is derived: gitconfig_helper.py lives in <ScriptsRoot>/gitconfig/,
-    so the root is this file's grandparent directory -- ~/Documents/Scripts on
-    a standard install on any OS (#241).
+    gitconfig.scriptsRoot ~/code`); `~` is expanded. Otherwise the root is
+    derived: gitconfig_helper.py lives in <ScriptsRoot>/gitconfig/, so the
+    root is this file's grandparent directory -- ~/Scripts (the install path
+    ~/Scripts/gitconfig) on a standard install on any OS (#241). It follows a
+    move of the root once ~/gitconfig_helper.py points at the moved clone
+    (#304).
 
     Both paths are resolved with realpath: install symlinks the helper into the
     home folder as ~/gitconfig_helper.py, and deriving from the unresolved link

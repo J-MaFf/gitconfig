@@ -5,13 +5,14 @@
 # Ask a yes/no question and succeed only on y or Y. With no input to read
 # (stdin at end of file: cron, CI, `< /dev/null`), `read` fails, which under
 # set -e used to end the calling script on the spot with no message (#258).
-# Here no input counts as "no", and the user is told how to skip the prompt.
-# Usage: ask_yes_no QUESTION
+# Here no input counts as "no", and the user is told how to skip the prompt:
+# with SKIP_FLAG (default --force), the option that answers yes for them.
+# Usage: ask_yes_no QUESTION [SKIP_FLAG]
 ask_yes_no() {
     REPLY=
     if ! read -p "$1 (y/n) " -n 1 -r; then
         echo
-        echo "[INFO] No answer (no input to read), so: no. Pass --force to skip this prompt."
+        echo "[INFO] No answer (no input to read), so: no. Pass ${2:---force} to skip this prompt."
         return 1
     fi
     echo

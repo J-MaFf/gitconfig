@@ -4,7 +4,7 @@
 param(
     [string]$ScriptPath = "",
     # Repo the task syncs. Defaults to the repo this script lives in, so a clone
-    # outside ~/Documents/Scripts/gitconfig is synced too.
+    # anywhere (not only ~/Scripts/gitconfig) is synced.
     [string]$RepoPath = "",
     # Account the task runs for (DOMAIN\user). Defaults to the current account;
     # install.ps1 passes the account that started it, which differs after an
