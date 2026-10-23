@@ -2494,6 +2494,64 @@ class TestUpdateAllMainWorktrees:
 
 
 # --------------------------------------------------------------------------
+# Sweeps run from inside a linked worktree (#307)
+# --------------------------------------------------------------------------
+
+class TestSweepsIgnoreInvokingRepoEnv:
+    """Git exports GIT_DIR to a shell alias run inside a linked worktree, and
+    every git call the sweep made obeyed it: `git main --all` saw each repo as
+    the invoking worktree and skipped all of them."""
+
+    @pytest.fixture
+    def worktree_git_dir(self, git_env):
+        root = git_env / "scripts"
+        primary = root / "primary"
+        primary.mkdir(parents=True)
+        _git(primary, "init", "-q")
+        _commit(primary, "a.txt", "first")
+        _git(primary, "worktree", "add", "-q", "-b", "feature", str(git_env / "wt"))
+        return root, _git(git_env / "wt", "rev-parse", "--absolute-git-dir")
+
+    def test_main_all_sweeps_each_repo_not_the_invoking_worktree(
+        self, helper, worktree_git_dir, monkeypatch, capsys
+    ):
+        root, git_dir = worktree_git_dir
+        seen = []
+
+        def fake_switch():
+            seen.append((os.path.basename(os.getcwd()), os.environ.get("GIT_DIR")))
+            return 0
+
+        monkeypatch.setattr(helper, "_scripts_root_repos", lambda: (str(root), ["primary"]))
+        monkeypatch.setattr(helper, "_unsafe_scripts_root", lambda r: None)
+        monkeypatch.setattr(helper, "switch_to_main", fake_switch)
+        monkeypatch.setenv("GIT_DIR", git_dir)
+        monkeypatch.setenv("GIT_WORK_TREE", str(root.parent / "wt"))
+
+        assert helper.update_all_main() == 0
+        assert seen == [("primary", None)]
+        assert "Skipped (worktree)" not in capsys.readouterr().out
+
+    def test_issues_all_local_runs_gh_without_the_invoking_repo(
+        self, helper, worktree_git_dir, monkeypatch, capsys
+    ):
+        root, git_dir = worktree_git_dir
+        seen = []
+
+        def run_gh(*args, cwd=None):
+            seen.append((os.path.basename(cwd), os.environ.get("GIT_DIR")))
+            return _Result(stdout="[]")
+
+        monkeypatch.setattr(helper, "_have", lambda cmd: True)
+        monkeypatch.setattr(helper, "_scripts_root_repos", lambda: (str(root), ["primary"]))
+        monkeypatch.setattr(helper, "_run_gh", run_gh)
+        monkeypatch.setenv("GIT_DIR", git_dir)
+
+        assert helper.list_issues(["--all", "--local"]) == 0
+        assert seen == [("primary", None)]
+
+
+# --------------------------------------------------------------------------
 # Behaviour that used to be asserted by matching the helper's source (#294)
 # --------------------------------------------------------------------------
 
