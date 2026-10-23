@@ -71,6 +71,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`git main --all` and `git issues --all --local` checked the wrong repo when run from a linked
+  worktree** ([#307](https://github.com/J-MaFf/gitconfig/issues/307)). Git exports `GIT_DIR` to a
+  shell alias run inside a linked worktree, and every git (and gh) call the sweep made obeyed it,
+  so `git main --all` reported each repo as `Skipped (worktree)` and updated none. Both sweeps now
+  drop the repository-pinning git variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+  `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE`,
+  `GIT_PREFIX`) before visiting the repos.
+
 - `scripts/windows version/Initialize-LocalConfig.ps1` — fixed a spurious `[WARN] Git may
   have issues reading the configuration` printed by `install.ps1`. The verification step
   used `git config --local --list`, which reads the *repository* `.git/config` (unrelated to

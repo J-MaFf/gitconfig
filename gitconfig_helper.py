@@ -1755,6 +1755,33 @@ def _unsafe_scripts_root(root):
     return None
 
 
+# Environment variables that tie every git call to one repository, whatever the
+# working directory. Git exports GIT_DIR (and GIT_PREFIX) to a shell alias run
+# inside a linked worktree, so a sweep started there used to see every repo as
+# that worktree (#307).
+REPO_PINNING_GIT_ENV = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+)
+
+
+def _drop_repo_pinning_env():
+    """Clear REPO_PINNING_GIT_ENV so git (and gh) find each repo from its own directory.
+
+    Called by the sweeps over the Scripts root before they visit any repo. The
+    helper is a one-shot process, so changing os.environ affects only this run
+    and its children.
+    """
+    for name in REPO_PINNING_GIT_ENV:
+        os.environ.pop(name, None)
+
+
 def _scripts_root_repos():
     """Return (scripts_root, repo_names) for git repos under the Scripts root.
 
@@ -1800,6 +1827,7 @@ def update_all_main(force=False):
 
     original_cwd = os.getcwd()
 
+    _drop_repo_pinning_env()
     root, repos = _scripts_root_repos()
 
     if not os.path.isdir(root):
@@ -2091,6 +2119,7 @@ def list_issues(args):
 
     # --all --local: scan the Scripts root's git repos on disk.
     if local:
+        _drop_repo_pinning_env()
         root, repos = _scripts_root_repos()
         if not repos:
             console.print(
