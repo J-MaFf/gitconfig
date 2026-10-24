@@ -2441,10 +2441,6 @@ class TestPrintAliasesSelectionMode:
         assert capsys.readouterr().err == ""
 
 
-if __name__ == "__main__":
-    sys.exit(pytest.main([__file__, "-v"]))
-
-
 # --------------------------------------------------------------------------
 # git main --all: linked worktrees (#299)
 # --------------------------------------------------------------------------
@@ -2481,6 +2477,8 @@ class TestUpdateAllMainWorktrees:
         out = capsys.readouterr().out
         assert calls == ["primary"]
         assert "Skipped (worktree)" in out
+        assert "SKIPPED: linked worktree" in out
+        assert "skipped 1" in out
         assert "Failed" not in out
 
     def test_dirty_worktree_reports_worktree_not_dirty(self, helper, sweep, capsys):
@@ -2967,3 +2965,7 @@ class TestAliasBrowserKeys:
             await pilot.click("#table", offset=(2, 2))
 
         assert self._drive(helper, drive) == "git cm"
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, "-v"]))
