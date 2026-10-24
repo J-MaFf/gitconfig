@@ -1816,8 +1816,11 @@ def update_all_main(force=False):
     triage report (branch position vs origin/main, last-commit age, working-tree
     breakdown) is printed so the user can judge stale-vs-active themselves. The working tree is never
     mutated. A linked worktree (its `.git` is a file) is reported as Skipped
-    (worktree) and never touched, since its default branch is checked out in
-    the primary worktree.
+    (worktree) and never touched. Its default branch is checked out in the
+    primary worktree, so a switch here would only hand off to
+    _update_default_in_worktree; skipping means a linked worktree whose primary
+    worktree is outside the Scripts root no longer has its default branch
+    fast-forwarded by the sweep.
 
     Prints a per-repo header and a final summary table classifying each repo as
     OK, Skipped (dirty), Skipped (worktree), or Failed. Returns 0 if no repo failed (skips don't
@@ -1858,8 +1861,10 @@ def update_all_main(force=False):
         try:
             os.chdir(os.path.join(root, repo))
             if _is_linked_worktree():
-                # Its default branch is checked out in the primary worktree, so
-                # checkout here can only fail. Leave it untouched.
+                # Leave it untouched: switch_to_main would hand off to the
+                # primary worktree. The cost is that a linked worktree whose
+                # primary worktree is outside the Scripts root no longer gets
+                # its default branch fast-forwarded by the sweep.
                 console.print(
                     "[yellow]SKIPPED: linked worktree[/yellow] "
                     "(update its primary worktree instead)"
