@@ -4,11 +4,11 @@ Move the Scripts root out of Documents and re-point everything that uses it.
 
 .DESCRIPTION
 Moves the folder that holds every clone (the Scripts root, by default
-$HOME\Documents\Scripts) to $HOME\Scripts with one same-volume rename, then
-repairs what depends on the old path (#304). Google Drive for desktop backs up
-Documents, .git folders included, and a sync conflict leaves invalid refs such
-as "refs/heads/main (1)" that break every fetch; Drive can't exclude a
-subfolder, so the repos have to live outside Documents.
+$HOME\Documents\Scripts) to $HOME\dev\repos with one same-volume rename,
+then repairs what depends on the old path (#304, #311). Google Drive for
+desktop backs up Documents, .git folders included, and a sync conflict leaves
+invalid refs such as "refs/heads/main (1)" that break every fetch; Drive can't
+exclude a subfolder, so the repos have to live outside Documents.
 
 After the move it repairs: linked git worktrees; this repo's generated files
 (~/.gitconfig, the ~/.gitignore_global and ~/gitconfig_helper.py links, the
@@ -17,6 +17,10 @@ junctions in the home folder; paths in a fixed set of config files; scheduled
 tasks; user environment variables; .lnk shortcuts; and Claude Code's
 per-project folders. No link is left at the old path: on a machine where Drive
 backs up Documents, one would bring the repos back into the backup.
+
+Folders above -To that don't exist yet (usually $HOME\dev) are created just
+before the rename, and removed again if the rename fails; a dry run creates
+nothing.
 
 The full plan is printed, and confirmed, before anything changes. Every file
 it rewrites is first copied to ~/.scripts-move-<timestamp>/backup/, and the
@@ -27,7 +31,8 @@ skips the move and finishes the repairs. Runbook: docs/MOVE-SCRIPTS-ROOT.md.
 The Scripts root to move. Default: $HOME\Documents\Scripts.
 
 .PARAMETER To
-Where the Scripts root goes. Default: $HOME\Scripts.
+Where the Scripts root goes. Default: $HOME\dev\repos. Missing parent
+folders are created.
 
 .PARAMETER DryRun
 Print the plan and exit 0 without changing anything.
@@ -53,7 +58,7 @@ Display the usage text.
 [CmdletBinding()]
 param(
     [string]$From = "$env:USERPROFILE\Documents\Scripts",
-    [string]$To = "$env:USERPROFILE\Scripts",
+    [string]$To = "$env:USERPROFILE\dev\repos",
     [switch]$DryRun,
     [switch]$Yes,
     [switch]$AllowSyncedTarget,
@@ -68,7 +73,8 @@ USAGE:
 
 OPTIONS:
     -From <path>         The Scripts root to move (default: `$HOME\Documents\Scripts)
-    -To <path>           Where it goes (default: `$HOME\Scripts)
+    -To <path>           Where it goes (default: `$HOME\dev\repos); missing
+                         parent folders are created
     -DryRun              Print the plan and exit 0 without changing anything
     -Yes                 Answer yes to every confirmation
     -AllowSyncedTarget   Allow a -To inside a synced folder (Documents, Desktop,
@@ -76,8 +82,10 @@ OPTIONS:
     -Help, -?            Display this help message
 
 DESCRIPTION:
-    Renames From to To (one same-volume rename, never a copy), then repairs
-    what used the old path: linked git worktrees, ~/.gitconfig and the other
+    Renames From to To (one same-volume rename, never a copy), creating
+    To's missing parent folders first (removed again if the rename fails;
+    never in a dry run), then repairs what used the old path: linked git
+    worktrees, ~/.gitconfig and the other
     files this repo generates, home-folder symlinks and junctions, paths in
     shell/PowerShell profiles and Claude/VS Code config files, scheduled tasks,
     user environment variables, .lnk shortcuts and Claude Code project folders.
@@ -812,8 +820,12 @@ function Write-Plan($Plan, [bool]$MoveNeeded) {
     Write-Host ''
     Write-Host 'Plan' -ForegroundColor Cyan
     Write-Host '====' -ForegroundColor Cyan
-    $moveLine = if ($MoveNeeded) { "$From -> $To (one rename)" } else { "already moved to $To; resuming repairs" }
-    Write-Section 'Move:' @($moveLine)
+    $moveLines = if ($MoveNeeded) {
+        foreach ($d in $missingParents) { "create $d" }
+        "$From -> $To (one rename)"
+    }
+    else { "already moved to $To; resuming repairs" }
+    Write-Section 'Move:' @($moveLines)
     Write-Section 'Repos and worktrees to repair:' @(foreach ($r in $Plan.Worktrees) {
             "$($r.Repo): git worktree repair"
             foreach ($w in $r.Worktrees) { "    worktree $w" }
@@ -1103,12 +1115,22 @@ if ($fromItem -and $toItem) {
     $toEmpty = $toItem.PSIsContainer -and -not $toItem.LinkType -and -not (Get-ChildItem -LiteralPath $To -Force -ErrorAction SilentlyContinue | Select-Object -First 1)
     if (-not $toEmpty) { Stop-Preflight "Both From and To exist, and To ($To) is not an empty folder. Move its contents away or pick another -To." }
 }
+# The folders above To that don't exist yet (outermost first; created just
+# before the rename), and the nearest one that does, which the checks inspect.
+$missingParents = New-Object System.Collections.Generic.List[string]
 if ($fromItem) {
-    $toParent = Split-Path -Parent $To
-    if (-not [string]::Equals([IO.Path]::GetPathRoot($From), [IO.Path]::GetPathRoot($toParent), $cmp)) {
-        Stop-Preflight "From ($From) and To's parent ($toParent) are on different volumes. The move is one rename; it never copies across volumes."
+    $toAnchor = Split-Path -Parent $To
+    while ($toAnchor -and -not (Test-Path -LiteralPath $toAnchor)) {
+        $missingParents.Insert(0, $toAnchor)
+        $toAnchor = Split-Path -Parent $toAnchor
     }
-    if (-not (Test-Path -LiteralPath $toParent -PathType Container)) { Stop-Preflight "To's parent folder ($toParent) does not exist." }
+    $anchorRoot = if ($toAnchor) { [IO.Path]::GetPathRoot($toAnchor) } else { [IO.Path]::GetPathRoot($To) }
+    if (-not [string]::Equals([IO.Path]::GetPathRoot($From), $anchorRoot, $cmp)) {
+        $where = if ($toAnchor) { $toAnchor } else { $To }
+        Stop-Preflight "From ($From) and the nearest existing folder above To ($where) are on different volumes. The move is one rename; it never copies across volumes."
+    }
+    if (-not $toAnchor) { Stop-Preflight "No folder above To ($To) exists." }
+    if (-not (Test-Path -LiteralPath $toAnchor -PathType Container)) { Stop-Preflight "$toAnchor, above To, is a file, not a folder." }
 }
 if (-not $AllowSyncedTarget) {
     $synced = @(
@@ -1179,17 +1201,46 @@ if (-not $Yes) {
 # hold the folder open and the rename would fail.
 Set-Location -LiteralPath $homeDir
 [Environment]::CurrentDirectory = $homeDir
+# Remove the folders above To that this run created (deepest first, and only
+# while still empty), so a failed run leaves the machine as it was.
+function Remove-CreatedParents($Created) {
+    for ($i = $Created.Count - 1; $i -ge 0; $i--) {
+        $d = $Created[$i]
+        try {
+            if (-not (Get-ChildItem -LiteralPath $d -Force -ErrorAction Stop | Select-Object -First 1)) { [IO.Directory]::Delete($d, $false) }
+            else { Write-Host "[WARN] Left $d in place: it is no longer empty" -ForegroundColor Yellow }
+        }
+        catch { Write-Host "[WARN] Could not remove $d, which this run created: $($_.Exception.Message)" -ForegroundColor Yellow }
+    }
+}
+
+$createdParents = New-Object System.Collections.Generic.List[string]
 if ($moveNeeded) {
+    $step = 'create'
     try {
+        foreach ($d in $missingParents) {
+            if (Test-Path -LiteralPath $d) { continue }
+            [void][IO.Directory]::CreateDirectory($d)
+            $createdParents.Add($d)
+            Write-Host "[OK] Created $d" -ForegroundColor Green
+        }
+        $step = 'rename'
         if ($toEmpty) { [IO.Directory]::Delete($To, $false) }
         # One rename. Directory.Move never copies: across volumes it throws.
         [IO.Directory]::Move($From, $To)
     }
     catch {
+        $message = $_.Exception.Message
         if ($toEmpty -and -not (Test-Path -LiteralPath $To)) { New-Item -ItemType Directory -Path $To -Force | Out-Null }
-        Write-Host "[ERROR] Could not rename $From to $To : $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host '        Close the programs and terminals that use files under it (editors,' -ForegroundColor Red
-        Write-Host '        Claude Code, shells whose current folder is inside it), then run this again.' -ForegroundColor Red
+        Remove-CreatedParents $createdParents
+        if ($step -eq 'create') {
+            Write-Host "[ERROR] Could not create the folders above $To : $message" -ForegroundColor Red
+        }
+        else {
+            Write-Host "[ERROR] Could not rename $From to $To : $message" -ForegroundColor Red
+            Write-Host '        Close the programs and terminals that use files under it (editors,' -ForegroundColor Red
+            Write-Host '        Claude Code, shells whose current folder is inside it), then run this again.' -ForegroundColor Red
+        }
         Write-Host 'Nothing was changed.' -ForegroundColor Red
         exit 1
     }
@@ -1205,6 +1256,7 @@ New-Item -ItemType Directory -Path $script:backupDir -Force | Out-Null
 
 $changes = New-Object System.Collections.Generic.List[string]
 $failures = New-Object System.Collections.Generic.List[string]
+foreach ($d in $createdParents) { $changes.Add("created $d") }
 if ($moveNeeded) { $changes.Add("moved $From -> $To") }
 
 # --- Repairs (R11-R17) -----------------------------------------------------------

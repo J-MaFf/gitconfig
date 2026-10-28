@@ -3,10 +3,11 @@
 # Move the Scripts root out of ~/Documents - macOS and Linux (#304).
 #
 # Moves the folder that holds every clone (the Scripts root, by default the
-# Scripts folder in ~/Documents) to ~/Scripts with one same-filesystem rename, then
-# re-points what depends on the old path: linked git worktrees, this repo's
-# generated files (~/.gitconfig, the home links, the auto-sync job, the Ctrl-G
-# rc block), symlinks in the home folder, paths in a fixed set of config files,
+# Scripts folder in ~/Documents) to ~/dev/repos with one same-filesystem rename
+# (#311), creating the folders above it that don't exist yet, then re-points
+# what depends on the old path: linked git worktrees, this repo's generated
+# files (~/.gitconfig, the home links, the auto-sync job, the Ctrl-G rc
+# block), symlinks in the home folder, paths in a fixed set of config files,
 # the user crontab, systemd user units, launchd agents and Claude Code's
 # per-project folders. No link is left at the old path: on a machine where a
 # cloud client backs up Documents, one would bring the repos back into it.
@@ -18,7 +19,7 @@
 # failures are collected for the report.
 
 FROM="$HOME/Documents/Scripts"
-TO="$HOME/Scripts"
+TO="$HOME/dev/repos"
 DRY_RUN=false
 YES=false
 ALLOW_SYNCED=false
@@ -31,7 +32,8 @@ USAGE: scripts/unix/move-scripts-root.sh [OPTIONS]
 
 OPTIONS:
     --from PATH              The Scripts root to move (default: $HOME/Documents/Scripts)
-    --to PATH                Where it goes (default: $HOME/Scripts)
+    --to PATH                Where it goes (default: $HOME/dev/repos); missing
+                             parent folders are created
     --dry-run                Print the plan and exit 0 without changing anything
     -y, --yes                Answer yes to every confirmation
     --allow-synced-target    Allow a --to inside a synced folder (Documents,
@@ -40,11 +42,13 @@ OPTIONS:
     -h, --help               Display this help message
 
 DESCRIPTION:
-    Renames FROM to TO (one rename on one filesystem, never a copy), then
-    repairs what used the old path: linked git worktrees, ~/.gitconfig and the
-    other files this repo generates, symlinks in the home folder, paths in
-    shell rc files and Claude/VS Code config files, the user crontab, systemd
-    user units, launchd agents and Claude Code project folders. No link is
+    Renames FROM to TO (one rename on one filesystem, never a copy),
+    creating TO's missing parent folders first (removed again if the rename
+    fails; never in a dry run), then repairs what used the old path: linked
+    git worktrees, ~/.gitconfig and the other files this repo generates,
+    symlinks in the home folder, paths in shell rc files and Claude/VS Code
+    config files, the user crontab, systemd user units, launchd agents and
+    Claude Code project folders. No link is
     left at the old path. The plan is printed and confirmed first; files are
     backed up to ~/.scripts-move-<timestamp>/backup/ before they are changed,
     and the report is written to ~/.scripts-move-<timestamp>/report.txt.
@@ -631,7 +635,11 @@ print_plan() {
     echo ""
     echo "Plan"
     echo "===="
-    if [ "$MOVE_NEEDED" = true ]; then _section "Move:" "$FROM -> $TO (one rename)"
+    if [ "$MOVE_NEEDED" = true ]; then
+        lines=()
+        for i in "${!TO_MISSING[@]}"; do lines+=("create ${TO_MISSING[$i]}"); done
+        _section "Move:" "${lines[@]}" "$FROM -> $TO (one rename)"
+        lines=()
     else _section "Move:" "already moved to $TO; resuming repairs"; fi
 
     if [ -n "$PLAN_WT" ]; then
@@ -949,10 +957,18 @@ if [ -d "$FROM" ] && { [ -e "$TO" ] || [ -L "$TO" ]; }; then
     if [ -d "$TO" ] && [ ! -L "$TO" ] && [ -z "$(ls -A "$TO" 2>/dev/null)" ]; then TO_EMPTY=true
     else stop_preflight "Both From and To exist, and To ($TO) is not an empty folder. Move its contents away or pick another --to."; fi
 fi
+# The folders above To that don't exist yet (outermost first; created just
+# before the rename), and the nearest one that does, which the checks inspect.
+TO_MISSING=()
+TO_ANCHOR=""
 if [ -d "$FROM" ]; then
-    TO_PARENT="$(dirname "$TO")"
-    if [ "$(_device_of "$FROM")" != "$(_device_of "$TO_PARENT")" ]; then
-        stop_preflight "From ($FROM) and To's parent ($TO_PARENT) are on different filesystems. The move is one rename; it never copies across filesystems."
+    TO_ANCHOR="$(dirname "$TO")"
+    while [ ! -e "$TO_ANCHOR" ] && [ ! -L "$TO_ANCHOR" ]; do
+        TO_MISSING=("$TO_ANCHOR" "${TO_MISSING[@]}")
+        TO_ANCHOR="$(dirname "$TO_ANCHOR")"
+    done
+    if [ "$(_device_of "$FROM")" != "$(_device_of "$TO_ANCHOR")" ]; then
+        stop_preflight "From ($FROM) and the nearest existing folder above To ($TO_ANCHOR) are on different filesystems. The move is one rename; it never copies across filesystems."
     fi
 fi
 if [ "$ALLOW_SYNCED" = false ]; then
@@ -964,7 +980,7 @@ if [ "$ALLOW_SYNCED" = false ]; then
         fi
     done
 fi
-if [ -d "$FROM" ] && [ ! -d "$TO_PARENT" ]; then stop_preflight "To's parent folder ($TO_PARENT) does not exist."; fi
+if [ -d "$FROM" ] && [ ! -d "$TO_ANCHOR" ]; then stop_preflight "$TO_ANCHOR, above To, is not a folder."; fi
 
 MOVE_NEEDED=false
 [ -d "$FROM" ] && MOVE_NEEDED=true
@@ -1027,12 +1043,35 @@ fi
 # --- Move (R8, R9) -------------------------------------------------------------
 # Leave the old root first, so nothing here runs from inside it.
 cd "$HOME_N" || stop_preflight "Could not change to $HOME_N."
+# Remove the folders above To that this run created (deepest first; rmdir
+# only removes a folder that is still empty), so a failed run leaves the
+# machine as it was.
+CREATED_PARENTS=()
+_remove_created_parents() {
+    local i
+    for (( i = ${#CREATED_PARENTS[@]} - 1; i >= 0; i-- )); do
+        rmdir -- "${CREATED_PARENTS[$i]}" 2>/dev/null ||
+            echo "[WARN] Could not remove ${CREATED_PARENTS[$i]}, which this run created (is it still empty?)"
+    done
+}
 if [ "$MOVE_NEEDED" = true ]; then
+    for d in "${TO_MISSING[@]}"; do
+        [ -e "$d" ] && continue
+        if ! mkdir_err="$(mkdir -- "$d" 2>&1)"; then
+            _remove_created_parents
+            echo "[ERROR] Could not create $d: $mkdir_err"
+            echo "Nothing was changed."
+            exit 1
+        fi
+        CREATED_PARENTS+=("$d")
+        echo "[OK] Created $d"
+    done
     [ "$TO_EMPTY" = true ] && rmdir "$TO" 2>/dev/null
-    # One rename(2): the device check above put From and To's parent on one
-    # filesystem, and mv only falls back to copying across filesystems.
+    # One rename(2): the device check above put From and To's nearest existing
+    # parent on one filesystem, and mv only falls back to copying across filesystems.
     if ! mv_err="$(mv -- "$FROM" "$TO" 2>&1)"; then
         [ "$TO_EMPTY" = true ] && [ ! -e "$TO" ] && mkdir "$TO"
+        _remove_created_parents
         echo "[ERROR] Could not rename $FROM to $TO: $mv_err"
         echo "        Close the programs and terminals that use files under it (editors,"
         echo "        Claude Code, shells whose current folder is inside it), then run this again."
@@ -1048,6 +1087,7 @@ n=1
 while [ -e "$RUN_DIR" ]; do RUN_DIR="$(printf '%s/.scripts-move-%s-%02d' "$HOME_N" "$STAMP" "$n")"; n=$((n + 1)); done
 BACKUP_DIR="$RUN_DIR/backup"
 mkdir -p "$BACKUP_DIR"
+for d in "${CREATED_PARENTS[@]}"; do CHANGES+=("created $d"); done
 [ "$MOVE_NEEDED" = true ] && CHANGES+=("moved $FROM -> $TO")
 
 # --- Repairs (R11-R17) -----------------------------------------------------------

@@ -368,7 +368,7 @@ Automatic repository synchronization and maintenance.
 **Log location**:
 
 ```
-C:\Users\{username}\Scripts\gitconfig\docs\update-gitconfig.log
+C:\Users\{username}\dev\repos\gitconfig\docs\update-gitconfig.log
 ```
 
 The log is UTF-8. When it passes 1 MB, the next run moves it to `update-gitconfig.log.1`
@@ -390,10 +390,10 @@ is moved aside the same way.
 
 ```powershell
 # Run manually anytime
-& "$env:USERPROFILE\Scripts\gitconfig\scripts\windows version\Update-GitConfig.ps1"
+& "$env:USERPROFILE\dev\repos\gitconfig\scripts\windows version\Update-GitConfig.ps1"
 
 # Or from a non-PowerShell shell
-pwsh -File "C:\Users\{username}\Scripts\gitconfig\scripts\windows version\Update-GitConfig.ps1"
+pwsh -File "C:\Users\{username}\dev\repos\gitconfig\scripts\windows version\Update-GitConfig.ps1"
 ```
 
 ### Scheduled Task Management
@@ -420,7 +420,7 @@ Get-ScheduledTaskInfo -TaskName "GitConfig Pull at Login"
 
 ```powershell
 # Look for recent log entries
-Get-Content "$env:USERPROFILE\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 20
+Get-Content "$env:USERPROFILE\dev\repos\gitconfig\docs\update-gitconfig.log" -Tail 20
 ```
 
 ### Customizing Auto-Sync
@@ -456,7 +456,7 @@ Typical workflow from feature creation to merge.
 
 ```powershell
 # 1. Automated sync already ran (or run manually)
-& "$env:USERPROFILE\Scripts\gitconfig\scripts\windows version\Update-GitConfig.ps1"
+& "$env:USERPROFILE\dev\repos\gitconfig\scripts\windows version\Update-GitConfig.ps1"
 
 # 2. Check latest branches
 git branches
@@ -639,7 +639,7 @@ cmd /c dir "$env:USERPROFILE\gitconfig_helper.py" /AL
 elevated PowerShell, or `install.ps1`, which elevates itself):
 
 ```powershell
-cd "$HOME\Scripts\gitconfig"
+cd "$HOME\dev\repos\gitconfig"
 & ".\scripts\windows version\Initialize-Symlinks.ps1" -Force   # symlinks only
 & ".\scripts\windows version\install.ps1" -Force                # or the full setup
 ```
@@ -657,7 +657,7 @@ cd "$HOME\Scripts\gitconfig"
 git config --global --get alias.alias
 
 # The aliases run gitconfig_helper.py from the repo, not from PATH; check it is there
-Test-Path "$HOME\Scripts\gitconfig\gitconfig_helper.py"
+Test-Path "$HOME\dev\repos\gitconfig\gitconfig_helper.py"
 
 # Regenerate ~/.gitconfig from the template
 git selfupdate
@@ -690,14 +690,14 @@ Get-ScheduledTaskInfo -TaskName "GitConfig Pull at Login" | Select-Object LastRu
 Start-ScheduledTask -TaskName "GitConfig Pull at Login"
 
 # Check log immediately
-Get-Content "~\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 10
+Get-Content "~\dev\repos\gitconfig\docs\update-gitconfig.log" -Tail 10
 ```
 
 **Re-register task if needed** (for example after moving the repo), from an elevated
 PowerShell, as `install.ps1` does:
 
 ```powershell
-cd "$HOME\Scripts\gitconfig"
+cd "$HOME\dev\repos\gitconfig"
 & ".\scripts\windows version\Register-LoginTask.ps1" -Force
 ```
 
@@ -749,7 +749,7 @@ installer and cleanup use `launchctl bootstrap gui/<uid>` and
 py --version
 
 # Check gitconfig_helper.py compiles
-py -m py_compile "$HOME\Scripts\gitconfig\gitconfig_helper.py"
+py -m py_compile "$HOME\dev\repos\gitconfig\gitconfig_helper.py"
 
 # Reinstall rich (setup and git selfupdate install it, but you can force it)
 py -m pip install --upgrade rich
@@ -811,7 +811,7 @@ git branch -vv
 Get-ScheduledTask -TaskName "GitConfig Pull at Login" | Select-Object State
 
 # 6. View logs
-Get-Content "$HOME\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 5
+Get-Content "$HOME\dev\repos\gitconfig\docs\update-gitconfig.log" -Tail 5
 ```
 
 **If everything shows green** ✅ - Your setup is working correctly!
@@ -839,7 +839,7 @@ git cleanup
 git alias
 
 # Check automated sync
-Get-Content "~\Scripts\gitconfig\docs\update-gitconfig.log" -Tail 10
+Get-Content "~\dev\repos\gitconfig\docs\update-gitconfig.log" -Tail 10
 
 # Manual sync
 & ".\scripts\windows version\Update-GitConfig.ps1"

@@ -54,6 +54,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The standard Scripts root is now `~/dev/repos`** (`$HOME\dev\repos` on Windows), replacing
+  `~/Scripts` ([#311](https://github.com/J-MaFf/gitconfig/issues/311)): all development material
+  lives under `~/dev`, and the folder holding every clone is `~/dev/repos`, lowercase because
+  Linux paths are case-sensitive. `Move-ScriptsRoot.ps1 -To` and `move-scripts-root.sh --to`
+  default to it, and `README.md`, `docs/WORKFLOW.md`, `docs/MOVE-SCRIPTS-ROOT.md` and the
+  `_scripts_root` docstring give the install path as `~/dev/repos/gitconfig`. Because `~/dev`
+  usually doesn't exist yet, the move tool now creates the target's missing parent folders after
+  the plan is confirmed and just before the rename (the plan lists each as `create <folder>`; a dry
+  run creates nothing), runs its same-volume check against the nearest existing folder above the
+  target, and removes the folders it created (only while still empty) if the rename fails. The
+  `gitconfig.scriptsRoot` key is unchanged
 - The documented install path is now `~/Scripts/gitconfig` (`$HOME\Scripts\gitconfig` on Windows)
   in `README.md`, `docs/WORKFLOW.md` and the `_scripts_root` docstring; the derived Scripts root
   follows a moved clone on its own ([#304](https://github.com/J-MaFf/gitconfig/issues/304))
