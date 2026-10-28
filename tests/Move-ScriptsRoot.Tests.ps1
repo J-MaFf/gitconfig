@@ -289,7 +289,7 @@ Describe 'Move-ScriptsRoot.ps1' {
             foreach ($p in $ast.ParamBlock.Parameters) { $params[$p.Name.VariablePath.UserPath] = $p }
             foreach ($name in 'From', 'To', 'DryRun', 'Yes', 'AllowSyncedTarget') { $params.ContainsKey($name) | Should -BeTrue }
             $params['From'].DefaultValue.Extent.Text | Should -Be '"$env:USERPROFILE\Documents\Scripts"'
-            $params['To'].DefaultValue.Extent.Text | Should -Be '"$env:USERPROFILE\Scripts"'
+            $params['To'].DefaultValue.Extent.Text | Should -Be '"$env:USERPROFILE\dev\repos"'
             foreach ($name in 'DryRun', 'Yes', 'AllowSyncedTarget') {
                 $params[$name].StaticType | Should -Be ([System.Management.Automation.SwitchParameter])
             }
@@ -302,6 +302,7 @@ Describe 'Move-ScriptsRoot.ps1' {
                 $out | Should -Match 'USAGE:'
                 $out | Should -Match '-AllowSyncedTarget'
                 $out | Should -Match ([regex]::Escape('$HOME\Documents\Scripts'))
+                $out | Should -Match ([regex]::Escape('(default: $HOME\dev\repos)'))
             }
         }
 
@@ -486,6 +487,97 @@ Describe 'Move-ScriptsRoot.ps1' {
             $gitconfig = [IO.File]::ReadAllText((Join-Path $sb.Home '.gitconfig'))
             $gitconfig | Should -Match ([regex]::Escape(($sb.To -replace '\\', '/') + '/gitconfig'))
             $gitconfig | Should -Not -Match ([regex]::Escape(($sb.From -replace '\\', '/')))
+        }
+    }
+
+    Context 'Missing parent folders above To (#311)' {
+        It 'creates the missing parents after the confirmation and moves (a)' {
+            $sb = New-MoveSandbox
+            Set-Content -LiteralPath (Join-Path $sb.From 'keep.txt') -Value 'data'
+            $dev = Join-Path $sb.Home 'dev'
+            $to = Join-Path $dev 'repos'
+            $r = Invoke-Move -Sb $sb -Tool $script:realTool -Answer 'y' -Arguments ([ordered]@{ From = $sb.From; To = $to })
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match ([regex]::Escape("create $dev"))
+            $r.Output | Should -Match ([regex]::Escape("[OK] Created $dev"))
+            # Created after the plan was confirmed, not before.
+            $r.Output.IndexOf("[OK] Created $dev") | Should -BeGreaterThan $r.Output.IndexOf('Plan')
+            Test-Path -LiteralPath (Join-Path $to 'keep.txt') | Should -BeTrue
+            Test-Path -LiteralPath $sb.From | Should -BeFalse
+            Get-Report $sb | Should -Match ([regex]::Escape("created $dev"))
+        }
+
+        It 'creates nothing in a dry run (b)' {
+            $sb = New-MoveSandbox
+            Install-Clone $sb
+            $dev = Join-Path $sb.Home 'dev'
+            $before = Get-TreeSnapshot $sb.Root
+            $r = Invoke-Move -Sb $sb -Arguments ([ordered]@{ From = $sb.From; To = (Join-Path $dev 'nested\repos'); DryRun = $true })
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match ([regex]::Escape("create $dev"))
+            $r.Output | Should -Match ([regex]::Escape("create $(Join-Path $dev 'nested')"))
+            $r.Output | Should -Match 'Dry run: nothing was changed'
+            Test-Path -LiteralPath $dev | Should -BeFalse
+            Get-TreeSnapshot $sb.Root | Should -Be $before
+            @(Get-RunDir $sb).Count | Should -Be 0
+        }
+
+        It 'removes the parents it created when the rename fails (c)' {
+            $sb = New-MoveSandbox
+            Install-Clone $sb
+            $dev = Join-Path $sb.Home 'dev'
+            $to = Join-Path $dev 'nested\repos'
+            $before = Get-TreeSnapshot $sb.Home
+            # A file held open under From blocks a directory rename on Windows.
+            $held = [IO.File]::Open((Join-Path $sb.Clone 'pyproject.toml'), 'Open', 'Read', 'None')
+            try {
+                $r = Invoke-Move -Sb $sb -Arguments ([ordered]@{ From = $sb.From; To = $to; Yes = $true })
+            }
+            finally { $held.Dispose() }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match ([regex]::Escape("[OK] Created $(Join-Path $dev 'nested')"))
+            $r.Output | Should -Match 'Close the programs and terminals'
+            Test-Path -LiteralPath $dev | Should -BeFalse
+            Get-TreeSnapshot $sb.Home | Should -Be $before
+            @(Get-RunDir $sb).Count | Should -Be 0
+        }
+
+        It 'leaves a parent that existed before the run when the rename fails' {
+            $sb = New-MoveSandbox
+            Install-Clone $sb
+            $dev = Join-Path $sb.Home 'dev'
+            New-Item -ItemType Directory -Path $dev | Out-Null
+            $held = [IO.File]::Open((Join-Path $sb.Clone 'pyproject.toml'), 'Open', 'Read', 'None')
+            try {
+                $r = Invoke-Move -Sb $sb -Arguments ([ordered]@{ From = $sb.From; To = (Join-Path $dev 'repos'); Yes = $true })
+            }
+            finally { $held.Dispose() }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Not -Match 'Created'
+            Test-Path -LiteralPath $dev -PathType Container | Should -BeTrue
+        }
+
+        It 'aborts with exit 1 when a file is in the way above To' {
+            $sb = New-MoveSandbox
+            Set-Content -LiteralPath (Join-Path $sb.From 'keep.txt') -Value 'data'
+            Set-Content -LiteralPath (Join-Path $sb.Home 'dev') -Value 'a file'
+            $before = Get-TreeSnapshot $sb.Home
+            $r = Invoke-Move -Sb $sb -Tool $script:realTool -Arguments ([ordered]@{ From = $sb.From; To = (Join-Path $sb.Home 'dev\repos'); Yes = $true })
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'is a file, not a folder'
+            Get-TreeSnapshot $sb.Home | Should -Be $before
+        }
+
+        It 'rolls back to Documents with -AllowSyncedTarget' {
+            $sb = New-MoveSandbox
+            Set-Content -LiteralPath (Join-Path $sb.From 'keep.txt') -Value 'data'
+            $to = Join-Path $sb.Home 'dev\repos'
+            $r = Invoke-Move -Sb $sb -Tool $script:realTool -Arguments ([ordered]@{ From = $sb.From; To = $to; Yes = $true })
+            $r.ExitCode | Should -Be 0
+            $r = Invoke-Move -Sb $sb -Tool $script:realTool -Arguments ([ordered]@{ From = $to; To = $sb.From; Yes = $true; AllowSyncedTarget = $true })
+            $r.ExitCode | Should -Be 0
+            Test-Path -LiteralPath (Join-Path $sb.From 'keep.txt') | Should -BeTrue
+            Test-Path -LiteralPath $to | Should -BeFalse
         }
     }
 

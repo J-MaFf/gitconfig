@@ -140,15 +140,15 @@ _fold() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
             [[ "$output" == *"$opt"* ]]
         done
         [[ "$output" == *'(default: $HOME/Documents/Scripts)'* ]]
-        [[ "$output" == *'(default: $HOME/Scripts)'* ]]
+        [[ "$output" == *'(default: $HOME/dev/repos)'* ]]
     done
 }
 
-@test "defaults are \$HOME/Documents/Scripts and \$HOME/Scripts; an unknown option exits 1" {
+@test "defaults are \$HOME/Documents/Scripts and \$HOME/dev/repos; an unknown option exits 1" {
     rmdir "$FROM"
     run env GITCONFIG_PLATFORM=linux bash "$REPO_ROOT/scripts/unix/move-scripts-root.sh" --dry-run < /dev/null
     [[ "$output" == *"From: $HOME/Documents/Scripts"* ]]
-    [[ "$output" == *"To:   $HOME/Scripts"* ]]
+    [[ "$output" == *"To:   $HOME/dev/repos"* ]]
     run bash "$REPO_ROOT/scripts/unix/move-scripts-root.sh" --dry-rn
     [ "$status" -eq 1 ]
     [[ "$output" == *"Unknown option: --dry-rn"* ]]
@@ -218,6 +218,13 @@ EOF
     [[ "$output" == *"on different filesystems"* ]]
     [ "$(_snapshot "$HOME")" = "$before" ]
     [ ! -e "$SANDBOX/other-fs/Scripts" ]
+    # With missing parents, the nearest existing folder above To is checked,
+    # and nothing is created.
+    run env PATH="$SANDBOX/statbin:$PATH" bash "$REPO_ROOT/scripts/unix/move-scripts-root.sh" \
+        --from "$FROM" --to "$SANDBOX/other-fs/dev/repos" --yes < /dev/null
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"the nearest existing folder above To ($SANDBOX/other-fs) are on different filesystems"* ]]
+    [ ! -e "$SANDBOX/other-fs/dev" ]
 }
 
 @test "a To under ~/Documents is refused, and moved with --allow-synced-target (R4)" {
@@ -368,6 +375,86 @@ _full_fixture() {
     [ ! -e "$TO" ]
     [ "$(_snapshot "$HOME")" = "$before" ]
     [ -z "$(_run_dir)" ]
+}
+
+@test "missing parent folders above To are created after the plan, and the move succeeds (#311)" {
+    echo data > "$FROM/keep.txt"
+    TO="$HOME/dev/repos"
+    TOOL="$REPO_ROOT/scripts/unix/move-scripts-root.sh" _move --yes
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"  create $HOME/dev"* ]]
+    [[ "$output" == *"[OK] Created $HOME/dev"* ]]
+    # Created after the plan was printed, not before.
+    [[ "${output%%"[OK] Created"*}" == *"Plan"* ]]
+    [ -f "$TO/keep.txt" ]
+    [ ! -e "$FROM" ]
+    grep -qF "created $HOME/dev" "$(_run_dir)/report.txt"
+}
+
+@test "--dry-run with missing parent folders above To creates nothing (#311)" {
+    _make_clone
+    TO="$HOME/dev/nested/repos"
+    before="$(_snapshot "$HOME")"
+    _move --dry-run
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"  create $HOME/dev"* ]]
+    [[ "$output" == *"  create $HOME/dev/nested"* ]]
+    [[ "$output" == *"Dry run: nothing was changed."* ]]
+    [ ! -e "$HOME/dev" ]
+    [ "$(_snapshot "$HOME")" = "$before" ]
+    [ -z "$(_run_dir)" ]
+}
+
+@test "a failed rename removes the parent folders the run created (#311)" {
+    _make_clone
+    TO="$HOME/dev/nested/repos"
+    before="$(_snapshot "$HOME")"
+    # Without write access to From's parent the rename fails.
+    chmod 555 "$HOME/Documents"
+    _move --yes
+    chmod 755 "$HOME/Documents"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[OK] Created $HOME/dev/nested"* ]]
+    [[ "$output" == *"Close the programs and terminals that use files under it"* ]]
+    [ ! -e "$HOME/dev" ]
+    [ -d "$CLONE" ]
+    [ "$(_snapshot "$HOME")" = "$before" ]
+    [ -z "$(_run_dir)" ]
+}
+
+@test "a failed rename leaves a parent folder that existed before the run (#311)" {
+    _make_clone
+    mkdir "$HOME/dev"
+    TO="$HOME/dev/repos"
+    chmod 555 "$HOME/Documents"
+    _move --yes
+    chmod 755 "$HOME/Documents"
+    [ "$status" -eq 1 ]
+    [[ "$output" != *"Created"* ]]
+    [ -d "$HOME/dev" ]
+}
+
+@test "a file in the way above To: exit 1 and nothing changes (#311)" {
+    echo data > "$FROM/keep.txt"
+    echo file > "$HOME/dev"
+    before="$(_snapshot "$HOME")"
+    TO="$HOME/dev/repos"
+    TOOL="$REPO_ROOT/scripts/unix/move-scripts-root.sh" _move --yes
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"$HOME/dev, above To, is not a folder."* ]]
+    [ "$(_snapshot "$HOME")" = "$before" ]
+}
+
+@test "a rollback to ~/Documents works with --allow-synced-target (#311)" {
+    echo data > "$FROM/keep.txt"
+    TO="$HOME/dev/repos"
+    TOOL="$REPO_ROOT/scripts/unix/move-scripts-root.sh" _move --yes
+    [ "$status" -eq 0 ]
+    run env GITCONFIG_PLATFORM="$MOVE_OS" bash "$REPO_ROOT/scripts/unix/move-scripts-root.sh" \
+        --from "$TO" --to "$FROM" --yes --allow-synced-target < /dev/null
+    [ "$status" -eq 0 ]
+    [ -f "$FROM/keep.txt" ]
+    [ ! -e "$TO" ]
 }
 
 @test "the move is one mv of From to To, never a copy (R8)" {

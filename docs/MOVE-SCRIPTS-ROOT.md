@@ -1,9 +1,13 @@
 # Moving the Scripts root out of Documents
 
 The Scripts root is the folder that holds every clone, this repo's included. It
-used to be `~/Documents/Scripts`; it is now `~/Scripts` on every OS. This
-runbook moves an existing machine over with the migration tool
-([#304](https://github.com/J-MaFf/gitconfig/issues/304)):
+used to be `~/Documents/Scripts`; it is now `~/dev/repos` on every OS
+(`$HOME\dev\repos` on Windows), so all development material lives under `~/dev`
+and the folder holding every git clone is `~/dev/repos` (lowercase, since Linux
+paths are case-sensitive). This runbook moves an existing machine over with the
+migration tool ([#304](https://github.com/J-MaFf/gitconfig/issues/304),
+[#311](https://github.com/J-MaFf/gitconfig/issues/311)), whose default target
+is `~/dev/repos`:
 
 - Windows: `scripts/windows version/Move-ScriptsRoot.ps1` (PowerShell 7 or
   Windows PowerShell 5.1)
@@ -16,6 +20,14 @@ copy), then re-point everything on the machine that used the old path. They
 leave **no link, junction or alias at the old path**. Every file they change is
 first copied to `~/.scripts-move-<yyyyMMdd-HHmmss>/backup/`, and they end with
 a report in that folder, `report.txt`.
+
+The rename needs the target's parent folder to exist, and `~/dev` usually
+doesn't yet. After you confirm the plan, the tool creates the missing folders
+above the target just before the rename (the plan lists each one as
+`create <folder>`). A dry run creates nothing. If the rename fails, the tool
+removes the folders it just created (only while they are still empty), so a
+failed run leaves the machine as it was. The same-volume check looks at the
+nearest folder above the target that already exists.
 
 ## Why
 
@@ -95,7 +107,8 @@ Set-Location $HOME
 & "$HOME\Documents\Scripts\gitconfig\scripts\windows version\Move-ScriptsRoot.ps1" -DryRun
 ```
 
-Read the plan. Each section lists what will change: the move itself, repos and
+Read the plan. Each section lists what will change: the move itself (with any
+folder it creates above the target, such as `~/dev`), repos and
 worktrees, this repo's generators, files with their match counts, links,
 scheduled tasks, environment variables, shortcuts, Claude project folders, and
 what is only reported. Then the real run:
@@ -142,7 +155,7 @@ terminal afterwards so your shell rc changes take effect.
   so after a move its scripts point at the old location:
 
   ```sh
-  cd ~/Scripts/<repo>
+  cd ~/dev/repos/<repo>
   rm -rf .venv
   python3 -m venv .venv
   .venv/bin/pip install -r requirements.txt   # or whatever the repo installs from
@@ -151,7 +164,7 @@ terminal afterwards so your shell rc changes take effect.
   On Windows use `py -m venv .venv` and `.venv\Scripts\pip`.
 - **Re-approve Claude Code's folder permissions.** Claude Code remembers which
   folders you trusted by path, so the first time you open a project under
-  `~/Scripts` it asks again. The project folders under `~/.claude/projects/`
+  `~/dev/repos` it asks again. The project folders under `~/.claude/projects/`
   were renamed, so your history and memory are still there.
 - **Fix what the report lists under (d)** that you rely on: a system-scope task
   or job (edit it as administrator or with `sudo`), a machine-scope `PATH`
@@ -171,20 +184,21 @@ terminal afterwards so your shell rc changes take effect.
 To move back, run the tool again with `--from`/`--to` (`-From`/`-To`)
 swapped. `--allow-synced-target` (`-AllowSyncedTarget`) is needed because the
 destination is inside Documents again. It repairs everything the same way, in
-the other direction.
+the other direction. The `~/dev` folder it created stays; remove it if it is
+empty and you don't use it.
 
 Windows:
 
 ```powershell
 Set-Location $HOME
-& "$HOME\Scripts\gitconfig\scripts\windows version\Move-ScriptsRoot.ps1" -From "$HOME\Scripts" -To "$HOME\Documents\Scripts" -AllowSyncedTarget
+& "$HOME\dev\repos\gitconfig\scripts\windows version\Move-ScriptsRoot.ps1" -From "$HOME\dev\repos" -To "$HOME\Documents\Scripts" -AllowSyncedTarget
 ```
 
 macOS / Linux:
 
 ```sh
 cd ~
-bash ~/Scripts/gitconfig/scripts/unix/move-scripts-root.sh --from ~/Scripts --to ~/Documents/Scripts --allow-synced-target
+bash ~/dev/repos/gitconfig/scripts/unix/move-scripts-root.sh --from ~/dev/repos --to ~/Documents/Scripts --allow-synced-target
 ```
 
 Or restore by hand from the backup folder:
