@@ -461,8 +461,8 @@ _grep_old() {
     grep -s "$flags" -- "$FROM" "$@" 2>/dev/null
 }
 
-# Fill the PLAN_* variables for the folder SCAN_ROOT (FROM before the move,
-# TO after it).
+# Fill the PLAN_* variables for the folder SCAN_ROOT (the move source before
+# the move, TO after it).
 build_plan() {
     local scan_root="$1" f n t abs new link unit name label enc_old enc_new dest target sysroot
     PLAN_WT="$(_worktree_pairs "$scan_root")"
@@ -932,12 +932,23 @@ stop_preflight() {
 HOME_N="$(_norm_path "$HOME")"
 FROM="$(_norm_path "$FROM")"
 TO="$(_norm_path "$TO")"
-# From's parent outlives the move, so its physical path is known on a resume too.
+# From itself, resolved -- this is what makes a From that is itself a symlink
+# (not just an ancestor) recognized by _under_old/_to_new/_claude_name below.
+# Falls back to resolving just From's parent when From no longer exists (a
+# resume after the move already happened): From's parent outlives the move,
+# so its physical path is still known then.
 FROM_REAL=""
-if from_parent="$(cd -P "$(dirname "$FROM")" 2>/dev/null && pwd)"; then
+if from_real="$(cd -P "$FROM" 2>/dev/null && pwd)"; then
+    FROM_REAL="$from_real"
+elif from_parent="$(cd -P "$(dirname "$FROM")" 2>/dev/null && pwd)"; then
     FROM_REAL="${from_parent%/}/$(basename "$FROM")"
-    [ "$FROM_REAL" = "$FROM" ] && FROM_REAL=""
 fi
+[ "$FROM_REAL" = "$FROM" ] && FROM_REAL=""
+# What actually gets moved: From itself, or -- when From is a symlink -- what
+# it points to, since `mv` on a symlink renames the link rather than moving
+# its target (#315). The dangling symlink is removed once the real move lands.
+MOVE_SRC="$FROM"
+[ -L "$FROM" ] && [ -n "$FROM_REAL" ] && MOVE_SRC="$FROM_REAL"
 
 echo "Move the Scripts root ($(os_display_name "$TARGET_OS"))"
 echo "====================================="
@@ -967,7 +978,7 @@ if [ -d "$FROM" ]; then
         TO_MISSING=("$TO_ANCHOR" "${TO_MISSING[@]}")
         TO_ANCHOR="$(dirname "$TO_ANCHOR")"
     done
-    if [ "$(_device_of "$FROM")" != "$(_device_of "$TO_ANCHOR")" ]; then
+    if [ "$(_device_of "$MOVE_SRC")" != "$(_device_of "$TO_ANCHOR")" ]; then
         stop_preflight "From ($FROM) and the nearest existing folder above To ($TO_ANCHOR) are on different filesystems. The move is one rename; it never copies across filesystems."
     fi
 fi
@@ -1010,7 +1021,10 @@ if [ "$MOVE_NEEDED" = true ] && [ "$TARGET_OS" = macos ] && command -v pgrep >/d
 fi
 
 # --- Plan (R6) ---------------------------------------------------------------
-if [ "$MOVE_NEEDED" = true ]; then SCAN_ROOT="$FROM"; else SCAN_ROOT="$TO"; fi
+# MOVE_SRC, not FROM: find's default -P never follows a symlink given as its
+# own starting argument, so scanning through a symlinked From would see
+# nothing below it (#315).
+if [ "$MOVE_NEEDED" = true ]; then SCAN_ROOT="$MOVE_SRC"; else SCAN_ROOT="$TO"; fi
 # Units running now are restarted after their files are rewritten; the others
 # are only reloaded.
 MOVE_ACTIVE_UNITS="|"
@@ -1067,16 +1081,22 @@ if [ "$MOVE_NEEDED" = true ]; then
         echo "[OK] Created $d"
     done
     [ "$TO_EMPTY" = true ] && rmdir "$TO" 2>/dev/null
-    # One rename(2): the device check above put From and To's nearest existing
-    # parent on one filesystem, and mv only falls back to copying across filesystems.
-    if ! mv_err="$(mv -- "$FROM" "$TO" 2>&1)"; then
+    # One rename(2): the device check above put the move source and To's
+    # nearest existing parent on one filesystem, and mv only falls back to
+    # copying across filesystems. MOVE_SRC is From itself, or -- when From is
+    # a symlink -- its resolved target, so To ends up holding the real files
+    # instead of a symlink to wherever From used to point (#315).
+    if ! mv_err="$(mv -- "$MOVE_SRC" "$TO" 2>&1)"; then
         [ "$TO_EMPTY" = true ] && [ ! -e "$TO" ] && mkdir "$TO"
         _remove_created_parents
-        echo "[ERROR] Could not rename $FROM to $TO: $mv_err"
+        echo "[ERROR] Could not rename $MOVE_SRC to $TO: $mv_err"
         echo "        Close the programs and terminals that use files under it (editors,"
         echo "        Claude Code, shells whose current folder is inside it), then run this again."
         echo "Nothing was changed."
         exit 1
+    fi
+    if [ "$MOVE_SRC" != "$FROM" ] && ! rm -- "$FROM" 2>/dev/null; then
+        echo "[WARN] Moved, but could not remove the old symlink $FROM (it pointed at $MOVE_SRC, now at $TO)."
     fi
     echo "[OK] Moved $FROM -> $TO"
 fi
