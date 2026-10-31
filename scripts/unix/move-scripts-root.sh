@@ -1096,7 +1096,7 @@ if [ "$MOVE_NEEDED" = true ]; then
         exit 1
     fi
     if [ "$MOVE_SRC" != "$FROM" ] && ! rm -- "$FROM" 2>/dev/null; then
-        echo "[WARN] Moved, but could not remove the old symlink $FROM (it pointed at $MOVE_SRC, now at $TO)."
+        FAILURES+=("could not remove the old symlink $FROM (it pointed at $MOVE_SRC, now moved to $TO)")
     fi
     echo "[OK] Moved $FROM -> $TO"
 fi
