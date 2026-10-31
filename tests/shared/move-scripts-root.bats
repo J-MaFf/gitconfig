@@ -458,7 +458,7 @@ _full_fixture() {
 }
 
 @test "the move is one mv of From to To, never a copy (R8)" {
-    [ "$(grep -c 'mv -- "$FROM" "$TO"' "$REPO_ROOT/scripts/unix/move-scripts-root.sh")" -eq 1 ]
+    [ "$(grep -c 'mv -- "$MOVE_SRC" "$TO"' "$REPO_ROOT/scripts/unix/move-scripts-root.sh")" -eq 1 ]
     run ! grep -nE '(cp -[a-zA-Z]*R|rsync|ditto)[^#]*FROM' "$REPO_ROOT/scripts/unix/move-scripts-root.sh"
 }
 
@@ -515,6 +515,25 @@ _full_fixture() {
     list="$(git -C "$TO/gitconfig" worktree list --porcelain)"
     [[ "$list" != *prunable* ]]
     [[ "$list" != *"$FROM"* ]]
+    [[ "$list" == *"worktree $TO/gitconfig-wt"* ]]
+}
+
+@test "a From that is itself a symlink: To holds the real files and its worktrees are repaired (#315)" {
+    rmdir "$FROM"
+    REAL_FROM="$SANDBOX/real-scripts"
+    mkdir -p "$REAL_FROM"
+    ln -s "$REAL_FROM" "$FROM"
+    _make_clone
+    _git -C "$CLONE" worktree add -q -b wt-out "$FROM/gitconfig-wt"
+    _move --yes
+    [ "$status" -eq 0 ]
+    [ -d "$TO" ]
+    [ ! -L "$TO" ]
+    [ ! -e "$FROM" ]
+    git -C "$TO/gitconfig-wt" status --short
+    list="$(git -C "$TO/gitconfig" worktree list --porcelain)"
+    [[ "$list" != *prunable* ]]
+    [[ "$list" != *"$REAL_FROM"* ]]
     [[ "$list" == *"worktree $TO/gitconfig-wt"* ]]
 }
 
