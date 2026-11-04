@@ -318,7 +318,8 @@ function Get-LocalSshCommandSection {
     $note += "`n`t# over git+ssh://) authenticates with the agent's keys (issue #317)."
     $command = Get-WindowsOpenSshCommand
     if ($command) {
-        Write-Host "[INFO] The 1Password SSH agent is running; git will use Windows OpenSSH ($command)" -ForegroundColor Yellow
+        Write-Host "[INFO] An SSH agent (1Password, or Windows' ssh-agent) is listening on \\.\pipe\openssh-ssh-agent;" -ForegroundColor Yellow
+        Write-Host "       git will use Windows OpenSSH ($command)" -ForegroundColor Yellow
         return "$note`n`tsshCommand = $(ConvertTo-GitConfigValue $command)"
     }
     return "$note`n`t# Not set: Windows OpenSSH or the agent's pipe (\\.\pipe\openssh-ssh-agent)`n`t# wasn't found, so git uses its bundled ssh. Re-run with -Force once it is.`n`t# sshCommand = C:/Windows/System32/OpenSSH/ssh.exe"
@@ -334,8 +335,8 @@ try {
         if ($LASTEXITCODE -ne 0) {
             $command = Get-WindowsOpenSshCommand
             if ($command) {
-                Write-Host "[INFO] The 1Password SSH agent is running but .gitconfig.local has no core.sshCommand, so git's" -ForegroundColor Yellow
-                Write-Host "       bundled ssh can't use it. Re-run with -Force, or: git config --file ~/.gitconfig.local core.sshCommand $command" -ForegroundColor Yellow
+                Write-Host "[INFO] An SSH agent is listening on \\.\pipe\openssh-ssh-agent but .gitconfig.local has no core.sshCommand," -ForegroundColor Yellow
+                Write-Host "       so git's bundled ssh can't use it. Re-run with -Force, or: git config --file ~/.gitconfig.local core.sshCommand $command" -ForegroundColor Yellow
             }
         }
     }
@@ -405,7 +406,7 @@ $safeSection
         Write-Host "Local configuration includes:" -ForegroundColor Cyan
         Write-Host "  - Commit signing (signing key and gpgsign, when a key is configured)" -ForegroundColor Gray
         Write-Host "  - Editor (core.editor) when VS Code is available" -ForegroundColor Gray
-        Write-Host "  - Windows OpenSSH (core.sshCommand) when the 1Password SSH agent is running" -ForegroundColor Gray
+        Write-Host "  - Windows OpenSSH (core.sshCommand) when an SSH agent (1Password) listens on its pipe" -ForegroundColor Gray
         Write-Host "  - Allowed signers file for local signature verification" -ForegroundColor Gray
         Write-Host "  - Long path support (core.longpaths) for deeply nested repos" -ForegroundColor Gray
         Write-Host "  - Safe directories: this repo, plus any listed in ~/.config/gitconfig/safe-directories" -ForegroundColor Gray

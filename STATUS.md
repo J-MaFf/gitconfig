@@ -6,7 +6,7 @@ A cross-platform tool that generates a portable `~/.gitconfig` from a version-co
 
 ## Current State — 2026-11-04
 
-Healthy. In review: [#317](https://github.com/J-MaFf/gitconfig/issues/317), Windows `Initialize-LocalConfig.ps1` writes `core.sshCommand` for Windows OpenSSH when the 1Password SSH agent's pipe is present (Git for Windows' bundled ssh can't reach it, which broke `bd dolt push`/`pull` over `git+ssh://` on a new work PC) and keeps an existing `core.sshCommand` across `-Force`.
+Healthy. In review: [#317](https://github.com/J-MaFf/gitconfig/issues/317) ([PR #318](https://github.com/J-MaFf/gitconfig/pull/318)), Windows `Initialize-LocalConfig.ps1` writes `core.sshCommand` for Windows OpenSSH when the 1Password SSH agent's pipe is present (Git for Windows' bundled ssh can't reach it, which broke `bd dolt push`/`pull` over `git+ssh://` on a new work PC) and keeps an existing `core.sshCommand` across `-Force`.
 
 Earlier: A repo-wide bug review filed [#250](https://github.com/J-MaFf/gitconfig/issues/250)–[#263](https://github.com/J-MaFf/gitconfig/issues/263); all fourteen are fixed and merged (PRs [#264](https://github.com/J-MaFf/gitconfig/pull/264)–[#278](https://github.com/J-MaFf/gitconfig/pull/278) and [#280](https://github.com/J-MaFf/gitconfig/pull/280); see Resolved Issues below and `CHANGELOG.md`). The ones that change how the scripts behave:
 
@@ -97,7 +97,7 @@ From an earlier review; none are being worked on.
 |-------|-------------|
 | [#231](https://github.com/J-MaFf/gitconfig/issues/231) | Template: dedupe the Python-finder alias loop (quote the repo path) and move machine-specific settings out |
 | [#235](https://github.com/J-MaFf/gitconfig/issues/235) | Stop hardcoding machine-specific values in .gitconfig.local generation |
-| [#317](https://github.com/J-MaFf/gitconfig/issues/317) | Windows: write `core.sshCommand` for Windows OpenSSH when the 1Password agent pipe exists (PR open) |
+| [#317](https://github.com/J-MaFf/gitconfig/issues/317) | Windows: write `core.sshCommand` for Windows OpenSSH when the 1Password agent pipe exists (PR [#318](https://github.com/J-MaFf/gitconfig/pull/318)) |
 | [#294](https://github.com/J-MaFf/gitconfig/issues/294) | Replace the remaining source-regex checks in `gitconfig_helper.Tests.ps1` (browser, TTY, Ctrl-G, categorization, `start`) with behavioural tests |
 
 ## Natural Next Steps

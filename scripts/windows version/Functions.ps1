@@ -626,7 +626,9 @@ function Get-OpSshSignPath {
 # 1Password SSH agent, which listens on Windows OpenSSH's named pipe, so git
 # over SSH (and bd dolt push/pull over git+ssh://) fails with "Permission
 # denied (publickey)". Returned only when both Windows OpenSSH's ssh.exe and
-# the agent pipe exist; otherwise git's bundled ssh is left alone. In git's
+# the agent pipe exist (Windows' own ssh-agent service uses the same pipe, and
+# needs Windows OpenSSH just the same); otherwise git's bundled ssh is left
+# alone. In git's
 # forward-slash form, single-quoted for git's shell when it holds whitespace.
 # SshPath and AgentPipe default to the real locations; GITCONFIG_WINDOWS_SSH
 # and GITCONFIG_SSH_AGENT_PIPE override them (tests) as paths to probe, so a
