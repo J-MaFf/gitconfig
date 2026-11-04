@@ -685,4 +685,60 @@ Describe "Machine-specific value helpers (Functions.ps1, #235)" -Tag 'Unit' {
             Get-OpSshSignPath -HomeDir $script:probeHome | Should -BeNullOrEmpty
         }
     }
+
+    Context "Get-WindowsOpenSshCommand (#317)" {
+        BeforeEach {
+            $script:savedWinSsh = $env:GITCONFIG_WINDOWS_SSH
+            $script:savedPipe = $env:GITCONFIG_SSH_AGENT_PIPE
+            Remove-Item Env:GITCONFIG_WINDOWS_SSH, Env:GITCONFIG_SSH_AGENT_PIPE -ErrorAction SilentlyContinue
+            $script:probeDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $script:probeDir | Out-Null
+            $script:sshStub = Join-Path $script:probeDir 'ssh.exe'
+            Set-Content -LiteralPath $script:sshStub -Value 'stub'
+            # A file stands in for the agent's named pipe: both are probed with Test-Path.
+            $script:pipeStub = Join-Path $script:probeDir 'openssh-ssh-agent'
+            Set-Content -LiteralPath $script:pipeStub -Value 'stub'
+            $script:missing = Join-Path $script:probeDir 'missing'
+        }
+        AfterEach {
+            $env:GITCONFIG_WINDOWS_SSH = $script:savedWinSsh
+            $env:GITCONFIG_SSH_AGENT_PIPE = $script:savedPipe
+        }
+
+        It "returns ssh.exe in git's forward-slash form when ssh.exe and the agent pipe exist" {
+            Get-WindowsOpenSshCommand -SshPath $script:sshStub -AgentPipe $script:pipeStub |
+                Should -BeExactly ($script:sshStub -replace '\\', '/')
+        }
+
+        It "returns null when the agent pipe is absent" {
+            Get-WindowsOpenSshCommand -SshPath $script:sshStub -AgentPipe $script:missing | Should -BeNullOrEmpty
+        }
+
+        It "returns null when Windows OpenSSH isn't installed" {
+            Get-WindowsOpenSshCommand -SshPath $script:missing -AgentPipe $script:pipeStub | Should -BeNullOrEmpty
+        }
+
+        It "single-quotes a path that holds whitespace for git's shell" {
+            $spaced = Join-Path $script:probeDir 'Open SSH'
+            New-Item -ItemType Directory -Path $spaced | Out-Null
+            $ssh = Join-Path $spaced 'ssh.exe'
+            Set-Content -LiteralPath $ssh -Value 'stub'
+            Get-WindowsOpenSshCommand -SshPath $ssh -AgentPipe $script:pipeStub |
+                Should -BeExactly ("'" + ($ssh -replace '\\', '/') + "'")
+        }
+
+        It "GITCONFIG_WINDOWS_SSH and GITCONFIG_SSH_AGENT_PIPE override the probed paths" {
+            $env:GITCONFIG_WINDOWS_SSH = $script:sshStub
+            $env:GITCONFIG_SSH_AGENT_PIPE = $script:pipeStub
+            Get-WindowsOpenSshCommand | Should -BeExactly ($script:sshStub -replace '\\', '/')
+            $env:GITCONFIG_SSH_AGENT_PIPE = $script:missing
+            Get-WindowsOpenSshCommand | Should -BeNullOrEmpty
+        }
+
+        It "probes %SystemRoot%\System32\OpenSSH\ssh.exe and the openssh-ssh-agent pipe by default" {
+            $body = (Get-Command Get-WindowsOpenSshCommand).ScriptBlock.ToString()
+            $body | Should -Match ([regex]::Escape("'System32', 'OpenSSH', 'ssh.exe'"))
+            $body | Should -Match ([regex]::Escape('\\.\pipe\openssh-ssh-agent'))
+        }
+    }
 }

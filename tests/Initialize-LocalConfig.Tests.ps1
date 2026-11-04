@@ -320,7 +320,12 @@ Describe "Initialize-LocalConfig.ps1 machine-specific values (#235)" -Tag 'Unit'
             USERPROFILE = $env:USERPROFILE; HOME = $env:HOME; PATH = $env:PATH
             G = $env:GIT_CONFIG_GLOBAL; S = $env:GIT_CONFIG_SYSTEM
             Op = $env:GITCONFIG_OP_SSH_SIGN; Sock = $env:SSH_AUTH_SOCK; Code = $env:GITCONFIG_CODE_BIN
+            WinSsh = $env:GITCONFIG_WINDOWS_SSH; Pipe = $env:GITCONFIG_SSH_AGENT_PIPE
         }
+        # Probe the sandbox for Windows OpenSSH and the agent pipe, not the real
+        # machine: both absent unless a test creates them.
+        $env:GITCONFIG_WINDOWS_SSH = Join-Path $script:sandbox "no-openssh\ssh.exe"
+        $env:GITCONFIG_SSH_AGENT_PIPE = Join-Path $script:sandbox "no-agent-pipe"
         $env:USERPROFILE = $script:sandbox
         $env:HOME = $script:sandbox
         $env:GIT_CONFIG_GLOBAL = Join-Path $script:sandbox ".gitconfig"
@@ -343,6 +348,90 @@ Describe "Initialize-LocalConfig.ps1 machine-specific values (#235)" -Tag 'Unit'
         $env:GITCONFIG_OP_SSH_SIGN = $script:saved.Op
         $env:SSH_AUTH_SOCK = $script:saved.Sock
         $env:GITCONFIG_CODE_BIN = $script:saved.Code
+        $env:GITCONFIG_WINDOWS_SSH = $script:saved.WinSsh
+        $env:GITCONFIG_SSH_AGENT_PIPE = $script:saved.Pipe
+    }
+
+    Context "core.sshCommand (#317)" {
+        BeforeAll {
+            # Stubs for Windows OpenSSH's ssh.exe and the 1Password agent's pipe
+            # (a file: the script probes both with Test-Path).
+            function New-OpenSshStub {
+                $ssh = Join-Path $script:sandbox "OpenSSH\ssh.exe"
+                New-Item -ItemType Directory -Path (Split-Path -Parent $ssh) -Force | Out-Null
+                Set-Content -LiteralPath $ssh -Value "stub"
+                $pipe = Join-Path $script:sandbox "openssh-ssh-agent"
+                Set-Content -LiteralPath $pipe -Value "stub"
+                $env:GITCONFIG_WINDOWS_SSH = $ssh
+                $env:GITCONFIG_SSH_AGENT_PIPE = $pipe
+                return ($ssh -replace '\\', '/')
+            }
+
+            function Get-SshCommand {
+                $value = & git config --file $script:localPath --get core.sshCommand 2>$null
+                if ($LASTEXITCODE -ne 0) { return $null }
+                return $value
+            }
+        }
+
+        It "points core.sshCommand at Windows OpenSSH when it and the agent pipe exist" {
+            $ssh = New-OpenSshStub
+            $out = Invoke-InitLocal
+            Get-SshCommand | Should -BeExactly $ssh
+            $out | Should -Match 'git will use Windows OpenSSH'
+        }
+
+        It "leaves core.sshCommand unset when the agent pipe is absent" {
+            $null = New-OpenSshStub
+            $env:GITCONFIG_SSH_AGENT_PIPE = Join-Path $script:sandbox "no-agent-pipe"
+            Invoke-InitLocal | Out-Null
+            Get-SshCommand | Should -BeNullOrEmpty
+            (Get-Content -LiteralPath $script:localPath -Raw) | Should -Match '# sshCommand = C:/Windows/System32/OpenSSH/ssh.exe'
+        }
+
+        It "leaves core.sshCommand unset when Windows OpenSSH isn't installed" {
+            $null = New-OpenSshStub
+            $env:GITCONFIG_WINDOWS_SSH = Join-Path $script:sandbox "no-openssh\ssh.exe"
+            Invoke-InitLocal | Out-Null
+            Get-SshCommand | Should -BeNullOrEmpty
+        }
+
+        It "-Force keeps an existing core.sshCommand, even with no agent" {
+            [IO.File]::WriteAllText($script:localPath, "[core]`n`tsshCommand = `"\`"C:/Program Files/OpenSSH/ssh.exe\`" -v`"`n")
+            $out = Invoke-InitLocal
+            Get-SshCommand | Should -BeExactly '"C:/Program Files/OpenSSH/ssh.exe" -v'
+            $out | Should -Match 'Keeping core.sshCommand'
+
+            Invoke-InitLocal | Out-Null
+            Get-SshCommand | Should -BeExactly '"C:/Program Files/OpenSSH/ssh.exe" -v'
+        }
+
+        It "-Force keeps an existing core.sshCommand over the detected one" {
+            $null = New-OpenSshStub
+            [IO.File]::WriteAllText($script:localPath, "[core]`n`tsshCommand = ssh -F /dev/null`n")
+            Invoke-InitLocal | Out-Null
+            Get-SshCommand | Should -BeExactly 'ssh -F /dev/null'
+        }
+
+        It "without -Force, leaves an existing file alone but points out the missing setting" {
+            $ssh = New-OpenSshStub
+            [IO.File]::WriteAllText($script:localPath, "# USER-EDIT-MARKER`n")
+            Push-Location $script:sandbox
+            # Stringify each record first: Out-String on the records wraps long
+            # lines at the console width under Windows PowerShell 5.1.
+            try { $out = (& $script:scriptPath 6>&1 | ForEach-Object { "$_" }) -join "`n" } finally { Pop-Location }
+            [IO.File]::ReadAllText($script:localPath) | Should -BeExactly "# USER-EDIT-MARKER`n"
+            $out | Should -Match 'has no core.sshCommand'
+            $out | Should -Match ([regex]::Escape("core.sshCommand $ssh"))
+        }
+
+        It "without -Force, says nothing about core.sshCommand when the file already sets it" {
+            $null = New-OpenSshStub
+            [IO.File]::WriteAllText($script:localPath, "[core]`n`tsshCommand = ssh`n")
+            Push-Location $script:sandbox
+            try { $out = (& $script:scriptPath 6>&1 | ForEach-Object { "$_" }) -join "`n" } finally { Pop-Location }
+            $out | Should -Not -Match 'has no core.sshCommand'
+        }
     }
 
     Context "safe.directory" {
