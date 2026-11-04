@@ -621,6 +621,36 @@ function Get-OpSshSignPath {
     return $null
 }
 
+# The core.sshCommand value that points git at Windows OpenSSH, or $null when
+# it shouldn't (#317). Git for Windows' bundled ssh.exe can't reach the
+# 1Password SSH agent, which listens on Windows OpenSSH's named pipe, so git
+# over SSH (and bd dolt push/pull over git+ssh://) fails with "Permission
+# denied (publickey)". Returned only when both Windows OpenSSH's ssh.exe and
+# the agent pipe exist; otherwise git's bundled ssh is left alone. In git's
+# forward-slash form, single-quoted for git's shell when it holds whitespace.
+# SshPath and AgentPipe default to the real locations; GITCONFIG_WINDOWS_SSH
+# and GITCONFIG_SSH_AGENT_PIPE override them (tests) as paths to probe, so a
+# nonexistent path means "absent" on every PowerShell edition.
+function Get-WindowsOpenSshCommand {
+    param(
+        [string]$SshPath,
+        [string]$AgentPipe
+    )
+    if (-not $SshPath) {
+        if ($env:GITCONFIG_WINDOWS_SSH) { $SshPath = $env:GITCONFIG_WINDOWS_SSH }
+        elseif ($env:SystemRoot) { $SshPath = [System.IO.Path]::Combine($env:SystemRoot, 'System32', 'OpenSSH', 'ssh.exe') }
+        else { return $null }
+    }
+    if (-not $AgentPipe) {
+        $AgentPipe = if ($env:GITCONFIG_SSH_AGENT_PIPE) { $env:GITCONFIG_SSH_AGENT_PIPE } else { '\\.\pipe\openssh-ssh-agent' }
+    }
+    if (-not (Test-Path -LiteralPath $SshPath -PathType Leaf)) { return $null }
+    if (-not (Test-Path -LiteralPath $AgentPipe)) { return $null }
+    $value = $SshPath -replace '\\', '/'
+    if ($value -match '\s') { $value = "'$value'" }
+    return $value
+}
+
 function Resolve-FullPath {
     param([Parameter(Mandatory)][string]$Path)
     $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)

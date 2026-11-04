@@ -25,7 +25,10 @@ DESCRIPTION:
     Creates ~/.gitconfig.local with machine-specific safe directories, paths,
     commit signing (user.signingkey and commit.gpgsign, when a key is
     configured) and the editor (core.editor: code --wait when VS Code is
-    installed and this isn't an SSH session; an existing value is kept). This
+    installed and this isn't an SSH session; an existing value is kept) and
+    the ssh program (core.sshCommand: Windows OpenSSH when it's installed and
+    the 1Password SSH agent's pipe is present, since Git for Windows' bundled
+    ssh can't reach that agent; an existing value is kept). This
     file is included last by the main .gitconfig, so its values win, and it
     should NOT be version controlled.
 
@@ -297,14 +300,49 @@ function Get-LocalEditorSection {
     return "`t# No editor set: $why. git uses GIT_EDITOR, VISUAL or EDITOR, then its default.`n`t# editor = code --wait"
 }
 
+# The ssh program git uses (#317): an existing .gitconfig.local's
+# core.sshCommand is kept; otherwise Windows OpenSSH when it's installed and
+# the 1Password SSH agent's pipe is present, since Git for Windows' bundled
+# ssh.exe can't reach that agent. Left unset otherwise, so git keeps its
+# bundled ssh.
+function Get-LocalSshCommandSection {
+    if (Test-Path -LiteralPath $localConfigPath) {
+        $kept = (& git config --file $localConfigPath --get core.sshCommand 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $kept) {
+            Write-Host "[INFO] Keeping core.sshCommand from the previous .gitconfig.local" -ForegroundColor Yellow
+            return "`tsshCommand = $(ConvertTo-GitConfigValue $kept)"
+        }
+    }
+    $note = "`t# Git for Windows' bundled ssh can't reach the 1Password SSH agent; this"
+    $note += "`n`t# uses Windows OpenSSH, which can, so git over SSH (and bd dolt push/pull"
+    $note += "`n`t# over git+ssh://) authenticates with the agent's keys (issue #317)."
+    $command = Get-WindowsOpenSshCommand
+    if ($command) {
+        Write-Host "[INFO] The 1Password SSH agent is running; git will use Windows OpenSSH ($command)" -ForegroundColor Yellow
+        return "$note`n`tsshCommand = $(ConvertTo-GitConfigValue $command)"
+    }
+    return "$note`n`t# Not set: Windows OpenSSH or the agent's pipe (\\.\pipe\openssh-ssh-agent)`n`t# wasn't found, so git uses its bundled ssh. Re-run with -Force once it is.`n`t# sshCommand = C:/Windows/System32/OpenSSH/ssh.exe"
+}
+
 try {
     if ($preserved) {
         Write-Host "[SKIP] .gitconfig.local already exists; preserving machine-specific config" -ForegroundColor Yellow
         Write-Host "       (regenerate from template with: Initialize-LocalConfig.ps1 -Force)" -ForegroundColor DarkGray
+        # The preserved file isn't touched, so only point out a missing
+        # core.sshCommand the generated file would have set (#317).
+        & git config --file $localConfigPath --get core.sshCommand 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            $command = Get-WindowsOpenSshCommand
+            if ($command) {
+                Write-Host "[INFO] The 1Password SSH agent is running but .gitconfig.local has no core.sshCommand, so git's" -ForegroundColor Yellow
+                Write-Host "       bundled ssh can't use it. Re-run with -Force, or: git config --file ~/.gitconfig.local core.sshCommand $command" -ForegroundColor Yellow
+            }
+        }
     }
     else {
         $signingSection = Get-LocalSigningSection
         $editorLine = Get-LocalEditorSection
+        $sshCommandLine = Get-LocalSshCommandSection
         $safeSection = Get-LocalSafeSection
         $configContent = @"
 # Machine-Specific Git Configuration
@@ -322,6 +360,7 @@ $signingSection
 	# is never clobbered by template regeneration (see issue #186).
 	longpaths = true
 $editorLine
+$sshCommandLine
 
 [credential]
 	# HTTPS auth for unattended pulls of private repos (e.g. the agent-skills
@@ -366,6 +405,7 @@ $safeSection
         Write-Host "Local configuration includes:" -ForegroundColor Cyan
         Write-Host "  - Commit signing (signing key and gpgsign, when a key is configured)" -ForegroundColor Gray
         Write-Host "  - Editor (core.editor) when VS Code is available" -ForegroundColor Gray
+        Write-Host "  - Windows OpenSSH (core.sshCommand) when the 1Password SSH agent is running" -ForegroundColor Gray
         Write-Host "  - Allowed signers file for local signature verification" -ForegroundColor Gray
         Write-Host "  - Long path support (core.longpaths) for deeply nested repos" -ForegroundColor Gray
         Write-Host "  - Safe directories: this repo, plus any listed in ~/.config/gitconfig/safe-directories" -ForegroundColor Gray
