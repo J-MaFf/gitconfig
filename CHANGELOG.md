@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Added `bd prime` SessionStart and PreCompact hooks in `.claude/settings.json` so sessions reload beads context ([#321](https://github.com/J-MaFf/gitconfig/issues/321))
+
 ### Changed
 - **References follow the `claude-skills` → `agent-skills` repo rename** ([#301](https://github.com/J-MaFf/gitconfig/issues/301)):
   the `git skill` not-found message now gives `git clone https://github.com/J-MaFf/agent-skills.git ~/.claude/skills`, and comments and docstrings name the `agent-skills` repo (J-MaFf/agent-skills#316). The old URL still redirects, and the `~/.claude/skills` path is unchanged.

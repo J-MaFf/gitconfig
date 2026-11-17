@@ -14,7 +14,8 @@ coverage.xml
 testResults.xml
 
 # Claude Code local session data
-.claude/
+.claude/*
+!.claude/settings.json
 
 # Python cache
 __pycache__/
